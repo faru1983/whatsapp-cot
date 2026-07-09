@@ -249,7 +249,7 @@ export const eventosStates = {
         return {
           success: true,
           nextState: 'CERRADO',
-          customReply: `¡Buenísimo! Te recuerdo el link: https://cocktailsontap.cl/eventos\nSi tienes alguna pregunta mientras cotizas, me escribes por aquí y te ayudo con gusto. 🥂`,
+          customReply: `¡Buenísimo! Si tienes alguna pregunta mientras cotizas, me escribes por aquí y te ayudo con gusto. 🥂`,
           mute: true
         };
       }
