@@ -75,8 +75,16 @@ async function startEcho() {
 
   sock.ev.on('connection.update', ({ connection, lastDisconnect, qr: qrCode }) => {
     if (qrCode) {
-      console.log('Escanea este QR (solo para esta prueba):');
-      qr.generate(qrCode, { small: true });
+      // En SSH el QR "small" casi nunca se escanea. Mostramos uno grande + link de imagen.
+      console.log('');
+      console.log('========== VINCULAR WHATSAPP ==========');
+      console.log('Opción A — Abre este link en el navegador del PC y escanea la imagen:');
+      console.log(`https://api.qrserver.com/v1/create-qr-code/?size=400x400&data=${encodeURIComponent(qrCode)}`);
+      console.log('');
+      console.log('Opción B — QR en terminal (amplía la ventana / zoom del cliente SSH):');
+      qr.generate(qrCode, { small: false });
+      console.log('======================================');
+      console.log('');
     }
 
     if (connection === 'open') {
