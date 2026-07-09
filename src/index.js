@@ -1,6 +1,7 @@
 import makeWASocket, {
   DisconnectReason,
   fetchLatestBaileysVersion,
+  makeCacheableSignalKeyStore,
   useMultiFileAuthState
 } from '@whiskeysockets/baileys';
 import pino from 'pino';
@@ -21,21 +22,57 @@ import process from 'node:process';
 // Guarda IDs de mensajes enviados por el bot para evitar procesarlos como si fueran del cliente.
 const botSentMessageIds = new Set();
 
+// Caché en memoria de mensajes recientes (id → contenido).
+// Baileys la usa en getMessage cuando el celular pide reintento de descifrado.
+// Sin esto, el destinatario ve "Esperando mensaje..." con el reloj verde.
+const recentMessages = new Map();
+const RECENT_MESSAGES_MAX = 200;
+
+/**
+ * rememberMessage: Guarda un mensaje enviado/recibido para reintentos de WhatsApp.
+ * Si el celular no pudo descifrar, Baileys llama getMessage y reenvía este contenido.
+ *
+ * @param {string|undefined} id - ID del mensaje (message.key.id)
+ * @param {object|undefined} content - Contenido proto del mensaje (message.message)
+ */
+function rememberMessage(id, content) {
+  if (!id || !content) return;
+  recentMessages.set(id, content);
+  // Evitamos que la Map crezca sin límite en un servidor 24/7
+  if (recentMessages.size > RECENT_MESSAGES_MAX) {
+    const oldestKey = recentMessages.keys().next().value;
+    recentMessages.delete(oldestKey);
+  }
+}
+
 // Inicializa conexión con WhatsApp y registra todos los listeners de eventos.
 async function startBot() {
   const config = loadBotConfig();
+  const logger = pino({ level: 'silent' });
 
   const { state, saveCreds } = await useMultiFileAuthState('auth');
   const { version } = await fetchLatestBaileysVersion();
 
+  // makeCacheableSignalKeyStore: cachea claves Signal en RAM (más estable y menos I/O a disco).
+  // getMessage: obligatorio para que WhatsApp pueda pedir reenvío si falla el descifrado.
   const sock = makeWASocket({
     version,
-    auth: state,
-    logger: pino({ level: 'silent' }),
+    auth: {
+      creds: state.creds,
+      keys: makeCacheableSignalKeyStore(state.keys, logger)
+    },
+    logger,
     printQRInTerminal: false,
     markOnlineOnConnect: false,
     syncFullHistory: false,
-    defaultQueryTimeoutMs: 60000
+    defaultQueryTimeoutMs: 60000,
+    getMessage: async (key) => {
+      // 1) Buscamos en nuestra caché de mensajes recientes
+      const cached = key?.id ? recentMessages.get(key.id) : undefined;
+      if (cached) return cached;
+      // 2) Fallback vacío: evita crash; WhatsApp puede pedir otro reintento
+      return undefined;
+    }
   });
 
   sock.ev.on('creds.update', saveCreds);
@@ -69,6 +106,11 @@ async function startBot() {
 
     if (!message || message.key.remoteJid === 'status@broadcast') {
       return;
+    }
+
+    // Guardamos el contenido por si WhatsApp pide reintento de descifrado (getMessage)
+    if (message.message && message.key?.id) {
+      rememberMessage(message.key.id, message.message);
     }
 
     const text = message.message?.conversation || message.message?.extendedTextMessage?.text || '';
@@ -118,15 +160,24 @@ async function startBot() {
         if (command === '/detenerbot') {
           tgtSession.isMuted = true;
           console.log(`🔇 Bot DETENIDO manualmente para: ${commandTargetJid}`);
-          if (usingRemoteConsole) await sock.sendMessage(targetJid, { text: `🔇 Cliente ${parts[1] || 'actual'} silenciado.` });
+          if (usingRemoteConsole) {
+            const sent = await sock.sendMessage(targetJid, { text: `🔇 Cliente ${parts[1] || 'actual'} silenciado.` });
+            rememberMessage(sent?.key?.id, sent?.message || { conversation: `🔇 Cliente ${parts[1] || 'actual'} silenciado.` });
+          }
         } else if (command === '/iniciarbot') {
           tgtSession.isMuted = false;
           console.log(`🤖 Bot INICIADO manualmente para: ${commandTargetJid}`);
-          if (usingRemoteConsole) await sock.sendMessage(targetJid, { text: `🤖 Cliente ${parts[1] || 'actual'} iniciado.` });
+          if (usingRemoteConsole) {
+            const sent = await sock.sendMessage(targetJid, { text: `🤖 Cliente ${parts[1] || 'actual'} iniciado.` });
+            rememberMessage(sent?.key?.id, sent?.message || { conversation: `🤖 Cliente ${parts[1] || 'actual'} iniciado.` });
+          }
         } else if (command === '/reiniciarbot') {
           resetSession(commandTargetJid);
           console.log(`🔄 Sesión REINICIADA para: ${commandTargetJid}`);
-          if (usingRemoteConsole) await sock.sendMessage(targetJid, { text: `✅ Sesión de ${parts[1] || 'actual'} reiniciada.` });
+          if (usingRemoteConsole) {
+            const sent = await sock.sendMessage(targetJid, { text: `✅ Sesión de ${parts[1] || 'actual'} reiniciada.` });
+            rememberMessage(sent?.key?.id, sent?.message || { conversation: `✅ Sesión de ${parts[1] || 'actual'} reiniciada.` });
+          }
           return;
         }
         saveSession(commandTargetJid, tgtSession);
@@ -201,7 +252,8 @@ async function startBot() {
         // Una copia idéntica a cada administrador de ADMIN_NUMBERS
         for (const adminNum of adminList) {
           try {
-            await sock.sendMessage(adminNum, { text: mensajeFinal });
+            const sent = await sock.sendMessage(adminNum, { text: mensajeFinal });
+            rememberMessage(sent?.key?.id, sent?.message || { conversation: mensajeFinal });
           } catch (e) {
             console.error(`Error enviando alerta a ${adminNum}:`, e.message);
           }
@@ -220,9 +272,12 @@ async function startBot() {
       const replies = Array.isArray(reply) ? reply : [reply];
       for (const textPart of replies) {
         if (!textPart) continue;
-        const sentMsg = await sock.sendMessage(message.key.remoteJid, { text: textPart }, { quoted: message });
+        // Sin quoted: en algunos celulares el quote rompe el descifrado ("Esperando mensaje")
+        const sentMsg = await sock.sendMessage(message.key.remoteJid, { text: textPart });
         if (sentMsg?.key?.id) {
           botSentMessageIds.add(sentMsg.key.id);
+          // Guardamos el mensaje saliente para getMessage (reintentos de WhatsApp)
+          rememberMessage(sentMsg.key.id, sentMsg.message || { conversation: textPart });
         }
       }
 
