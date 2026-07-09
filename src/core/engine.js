@@ -15,6 +15,7 @@ import { getSession, saveSession, resetSession } from './db.js';
 
 import { statesMap } from '../flows/index.js';
 import { readPrompt } from '../views/prompts.js';
+import { buildFaqCatalogContext } from '../logic/utils.js';
 
 const isMainModule = process.argv[1] === fileURLToPath(import.meta.url);
 
@@ -146,9 +147,9 @@ export async function processMessage(sessionId, messageText) {
   if (!currentState) {
     const fallbackState =
       session.userIntent === 'BARRILES'
-        ? 'A1_FILTRO_CANAL'
+        ? 'BARRILES_FILTRO_CANAL'
         : session.userIntent === 'EVENTOS'
-          ? 'B1_FILTRO_CANAL_EVENTOS'
+          ? 'EVENTOS_FILTRO_CANAL'
           : 'ESPERANDO_INTENCION';
 
     cliLog(`WARN: estado desconocido "${currentStateId}" → redirigiendo a ${fallbackState}`);
@@ -166,11 +167,18 @@ export async function processMessage(sessionId, messageText) {
   // 2. CAPA DE SEGURIDAD BÁSICA (Cambios de intención)
   // ==============================================================================
   if (currentStateId !== 'ESPERANDO_INTENCION' && currentStateId !== 'CERRADO') {
-    const earlyStates = ['A1_FILTRO_CANAL', 'A2_OFRECER_CATALOGO', 'A2_1_OFRECER_COTIZACION', 'A3_RECOGIDA_PRODUCTOS', 'B1_FILTRO_CANAL_EVENTOS', 'B2_RECOGIDA_DATOS_EVENTOS'];
+    const earlyStates = [
+      'BARRILES_FILTRO_CANAL',
+      'BARRILES_OFRECER_CATALOGO',
+      'BARRILES_OFRECER_COTIZACION',
+      'BARRILES_RECOGIDA_PRODUCTOS',
+      'EVENTOS_FILTRO_CANAL',
+      'EVENTOS_RECOGIDA_DATOS'
+    ];
     
     if (earlyStates.includes(currentStateId)) {
-      const isCurrentlyEventos = currentStateId.startsWith('B');
-      const isCurrentlyBarriles = currentStateId.startsWith('A');
+      const isCurrentlyEventos = currentStateId.startsWith('EVENTOS_');
+      const isCurrentlyBarriles = currentStateId.startsWith('BARRILES_');
       
       const wantsBarriles = /(desechable|barril desechable|para la casa|para el hogar|llevarse)/i.test(messageText);
       const wantsEventos = /(servicio para eventos|para un evento|evento|para mi matrimonio|dispensador port[aá]til|muro de cocteler[ií]a)/i.test(messageText) && !/sin evento/i.test(messageText);
@@ -197,7 +205,7 @@ export async function processMessage(sessionId, messageText) {
 
         cliLog(`SWITCH: cliente cambia intención → ${switchIntent}`);
         session.userIntent = switchIntent;
-        session.currentState = switchIntent === 'BARRILES' ? 'A1_FILTRO_CANAL' : 'B1_FILTRO_CANAL_EVENTOS';
+        session.currentState = switchIntent === 'BARRILES' ? 'BARRILES_FILTRO_CANAL' : 'EVENTOS_FILTRO_CANAL';
         session.consecutiveErrors = 0;
         
         const newState = statesMap[session.currentState];
@@ -313,7 +321,7 @@ export async function processMessage(sessionId, messageText) {
       `Disculpa, por ahora no tengo esa información. 😔\n\nPor favor indícame: _${finalQuestion}_\no escribe *NO* para que alguien de nuestro equipo te contacte.`;
 
     // 4.0 SOS explícito: el cliente pide hablar con un humano
-    const SOS_EXCLUDED_STATES = ['A3_RECOGIDA_DATOS'];
+    const SOS_EXCLUDED_STATES = ['BARRILES_RECOGIDA_DATOS'];
     const trimmedMessage = messageText.trim();
     const wantsExplicitSOS = /^(no|sos)$/i.test(trimmedMessage) && !SOS_EXCLUDED_STATES.includes(currentStateId);
     const wantsHumanHelp = /hablar con|necesito (un )?(asesor|humano)|persona real|equipo comercial|contactar.*equipo/i.test(messageText);
@@ -352,21 +360,35 @@ export async function processMessage(sessionId, messageText) {
     }
 
     // 4.2 Buscar en faq.json (también usa IA para decidir si aplica y redactar)
-    cliLog('FAQ: consultando faq.json con IA...');
-    const faqData = JSON.parse(fs.readFileSync(path.join(process.cwd(), 'db', 'faq.json'), 'utf8'));
-    const faqResponse = await responderFAQ(messageText, faqData);
+    // Saludos / ruido corto no son FAQ: vamos directo al LLM del estado (más natural)
+    const isGreetingOrNoise = /^(hola|holi|buenas|buen\s*d[ií]a|buenas\s*tardes|buenas\s*noches|hey|hi|hello|ok|okay|dale|gracias|thank(s)?|ya|listo)[\s!.?]*$/i.test(trimmedMessage);
+
+    let faqResponse = "NO_FAQ";
+    if (isGreetingOrNoise) {
+      cliLog('FAQ: omitido (saludo/ruido) → fallback IA generativa');
+    } else {
+      cliLog('FAQ: consultando faq.json + catálogo/despachos (datos.json) con IA...');
+      const faqData = JSON.parse(fs.readFileSync(path.join(process.cwd(), 'db', 'faq.json'), 'utf8'));
+      faqResponse = await responderFAQ(messageText, faqData);
+    }
 
     if (faqResponse !== "NO_FAQ") {
       // FAQ respondió: re-preguntamos el paso solo si la FAQ no lo hizo ya
-      cliLog('FAQ: match encontrado → respondiendo desde faq.json');
+      cliLog('FAQ: match encontrado → respondiendo desde FAQ/datos oficiales');
       reply = appendStepQuestionIfNeeded(faqResponse, finalQuestion);
     } else {
       // 4.3 Delegar a la Inteligencia Artificial (LLM Generativo)
-      cliLog('FAQ: sin match (NO_FAQ) → fallback IA generativa');
+      if (!isGreetingOrNoise) {
+        cliLog('FAQ: sin match (NO_FAQ) → fallback IA generativa');
+      }
       let systemInstruction = readPrompt();
       if (currentState.aiContextPrompt) {
         systemInstruction = `${systemInstruction}\n\n${currentState.aiContextPrompt}`;
       }
+
+      // Misma fuente oficial que el FAQ: evita inventar ingredientes/precios en el fallback
+      systemInstruction = `${systemInstruction}\n\n${buildFaqCatalogContext()}
+REGLA FALLBACK: Si hablas de ingredientes, precios o despacho RM, usa SOLO DATOS OFICIALES de arriba. No inventes ni completes fichas.`;
 
       systemInstruction = `${systemInstruction}\n\n[DATOS CONOCIDOS DE LA SESIÓN DE WHATSAPP]:
 - Tipo de compra actual: ${session.userIntent || 'No definido'}

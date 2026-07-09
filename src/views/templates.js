@@ -71,16 +71,14 @@ export const SHORT_INTENT_QUESTION = `¿Buscas *Barriles Desechables* o *Servici
 
 /**
  * getOfferQuoteAfterCatalog: Pregunta tras mostrar la carta de barriles.
- * Mensaje separado de la lista. Keywords en *negrita* para guiar la respuesta del cliente.
+ * Tono conversacional; keywords en *negrita* para que el cliente elija con naturalidad.
  *
  * @returns {string}
  */
 export function getOfferQuoteAfterCatalog() {
-  return `¿Te gustaría armar una *cotización* por aquí?
+  return `¿Te armo una *cotización* por aquí? Es fácil: me dices qué cócteles de la lista te gustaron y partimos 🍸
 
-Si quieres cotizar, responde *sí* o *cotizar* y en unos pasos simples nos indiques qué cócteles de la lista te gustaron.
-
-Si por ahora solo estabas *mirando*, escribe *solo mirando* o *Instagram* y te dejo el link.`;
+Si por ahora solo estabas *mirando*, sin problema.`;
 }
 
 /**

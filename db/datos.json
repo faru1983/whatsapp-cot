@@ -28,11 +28,11 @@
       "desechable": 12000
     },
     "Cerrillos": {
-      "evento": 5000,
+      "evento": 0,
       "desechable": 5000
     },
     "Cerro Navia": {
-      "evento": 5000,
+      "evento": 0,
       "desechable": 5000
     },
     "Colina": {
@@ -40,7 +40,7 @@
       "desechable": 8000
     },
     "Conchalí": {
-      "evento": 5000,
+      "evento": 0,
       "desechable": 5000
     },
     "Curacaví": {
@@ -48,7 +48,7 @@
       "desechable": 15000
     },
     "El Bosque": {
-      "evento": 5000,
+      "evento": 0,
       "desechable": 5000
     },
     "El Monte": {
@@ -56,15 +56,15 @@
       "desechable": 10000
     },
     "Estación Central": {
-      "evento": 5000,
+      "evento": 0,
       "desechable": 5000
     },
     "Huechuraba": {
-      "evento": 5000,
+      "evento": 0,
       "desechable": 5000
     },
     "Independencia": {
-      "evento": 5000,
+      "evento": 0,
       "desechable": 5000
     },
     "Isla de Maipo": {
@@ -72,15 +72,15 @@
       "desechable": 10000
     },
     "La Cisterna": {
-      "evento": 5000,
+      "evento": 0,
       "desechable": 5000
     },
     "La Florida": {
-      "evento": 5000,
+      "evento": 0,
       "desechable": 5000
     },
     "La Granja": {
-      "evento": 5000,
+      "evento": 0,
       "desechable": 5000
     },
     "La Pintana": {
@@ -88,7 +88,7 @@
       "desechable": 8000
     },
     "La Reina": {
-      "evento": 5000,
+      "evento": 0,
       "desechable": 5000
     },
     "Lampa": {
@@ -96,27 +96,27 @@
       "desechable": 8000
     },
     "Las Condes": {
-      "evento": 5000,
+      "evento": 0,
       "desechable": 5000
     },
     "Lo Barnechea": {
-      "evento": 5000,
+      "evento": 0,
       "desechable": 5000
     },
     "Lo Espejo": {
-      "evento": 5000,
+      "evento": 0,
       "desechable": 5000
     },
     "Lo Prado": {
-      "evento": 5000,
+      "evento": 0,
       "desechable": 5000
     },
     "Macul": {
-      "evento": 5000,
+      "evento": 0,
       "desechable": 5000
     },
     "Maipú": {
-      "evento": 5000,
+      "evento": 0,
       "desechable": 5000
     },
     "María Pinto": {
@@ -128,7 +128,7 @@
       "desechable": 15000
     },
     "Ñuñoa": {
-      "evento": 5000,
+      "evento": 0,
       "desechable": 5000
     },
     "Padre Hurtado": {
@@ -140,7 +140,7 @@
       "desechable": 12000
     },
     "Pedro Aguirre Cerda": {
-      "evento": 5000,
+      "evento": 0,
       "desechable": 5000
     },
     "Peñaflor": {
@@ -148,7 +148,7 @@
       "desechable": 10000
     },
     "Peñalolén": {
-      "evento": 5000,
+      "evento": 0,
       "desechable": 5000
     },
     "Pirque": {
@@ -156,7 +156,7 @@
       "desechable": 10000
     },
     "Providencia": {
-      "evento": 5000,
+      "evento": 0,
       "desechable": 5000
     },
     "Pudahuel": {
@@ -168,19 +168,19 @@
       "desechable": 10000
     },
     "Quilicura": {
-      "evento": 5000,
+      "evento": 0,
       "desechable": 5000
     },
     "Quinta Normal": {
-      "evento": 5000,
+      "evento": 0,
       "desechable": 5000
     },
     "Recoleta": {
-      "evento": 5000,
+      "evento": 0,
       "desechable": 5000
     },
     "Renca": {
-      "evento": 5000,
+      "evento": 0,
       "desechable": 5000
     },
     "San Bernardo": {
@@ -188,7 +188,7 @@
       "desechable": 10000
     },
     "San Joaquín": {
-      "evento": 5000,
+      "evento": 0,
       "desechable": 5000
     },
     "San José de Maipo": {
@@ -196,7 +196,7 @@
       "desechable": 10000
     },
     "San Miguel": {
-      "evento": 5000,
+      "evento": 0,
       "desechable": 5000
     },
     "San Pedro": {
@@ -204,11 +204,11 @@
       "desechable": 15000
     },
     "San Ramón": {
-      "evento": 5000,
+      "evento": 0,
       "desechable": 5000
     },
     "Santiago": {
-      "evento": 5000,
+      "evento": 0,
       "desechable": 5000
     },
     "Talagante": {
@@ -220,7 +220,7 @@
       "desechable": 8000
     },
     "Vitacura": {
-      "evento": 5000,
+      "evento": 0,
       "desechable": 5000
     }
   },

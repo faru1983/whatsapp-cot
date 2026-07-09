@@ -38,6 +38,116 @@ export function formatPrice(val) {
 }
 
 /**
+ * formatPriceTable: Convierte un objeto { "5L": 47990, "10L": 119990 } en texto corto.
+ * Ej: "5L $47.990 / 10L $119.990"
+ *
+ * @param {Record<string, number>|null|undefined} priceTable - Litraje → precio
+ * @returns {string} Texto legible o "(sin precio)" si viene vacío
+ */
+function formatPriceTable(priceTable) {
+	if (!priceTable || Object.keys(priceTable).length === 0) return '(sin precio)';
+	return Object.entries(priceTable)
+		.map(([litraje, price]) => `${litraje} ${formatPrice(price)}`)
+		.join(' / ');
+}
+
+/**
+ * buildFaqCatalogContext: Arma un resumen compacto de datos.json para el FAQ con IA.
+ * Incluye catálogo (barriles / dispensador / muro), extras, rendimientos e instalación,
+ * y la tabla de despachos de la Región Metropolitana.
+ * Así la IA puede responder precios y despachos sin inventar números.
+ *
+ * @param {object} [data=preciosData] - Contenido de datos.json (por defecto el ya cargado)
+ * @returns {string} Texto listo para pegar en el system prompt del FAQ
+ */
+export function buildFaqCatalogContext(data = preciosData) {
+	if (!data || typeof data !== 'object') {
+		return '(Sin datos de catálogo disponibles)';
+	}
+
+	const lines = [];
+
+	// --- Cabecera: reglas de lectura para la IA ---
+	lines.push('DATOS OFICIALES (datos.json) — ÚNICA fuente de precios y despachos RM:');
+	lines.push('');
+	lines.push('IMPORTANTE — Todo es BARRIL, pero hay 3 categorías de servicio (precios distintos):');
+	lines.push('1) "desechable" = Barril desechable 5L (venta para llevar / web, sin servicio de bar).');
+	lines.push('2) "dispensador" = Barril para servicio de eventos con Dispensador Portátil.');
+	lines.push('3) "muro" = Barril para servicio de eventos con Muro de Coctelería.');
+	lines.push('Nunca digas solo "el precio del Pisco Sour": siempre aclara o pregunta la categoría.');
+	lines.push('');
+	lines.push('- Despacho RM: "desechable" = envío barriles desechables; "evento" = envío dispensador/muro.');
+	lines.push('- Fuera de RM: NO inventar tarifa; usar la FAQ de envíos a regiones.');
+	lines.push('- Si el dato no está aquí ni en las FAQ → NO_FAQ (no adivinar).');
+	lines.push('');
+
+	// --- Rendimientos e instalación muro ---
+	const rendimientos = data.rendimientos_barriles || {};
+	if (Object.keys(rendimientos).length > 0) {
+		lines.push('Rendimiento aprox. (válido para todos los formatos):');
+		for (const [litraje, tragos] of Object.entries(rendimientos)) {
+			lines.push(`- ${litraje} → ~${tragos} cócteles`);
+		}
+		lines.push('');
+	}
+
+	const instalacionMuro = data.instalacion_muro;
+	if (instalacionMuro != null) {
+		lines.push(`Instalación Muro de Coctelería: ${formatPrice(instalacionMuro)} (Dispensador: instalación gratuita).`);
+		lines.push('');
+	}
+
+	// --- Catálogo: mismas claves de datos.json, etiquetadas como categorías de barril ---
+	const cocteles = data.cocteles || {};
+	const nombres = Object.keys(cocteles);
+	if (nombres.length > 0) {
+		lines.push('CATÁLOGO (claves JSON → categoría de barril):');
+		lines.push('  desechable = Barril desechable | dispensador = Barril eventos Dispensador | muro = Barril eventos Muro');
+		for (const nombre of nombres) {
+			const c = cocteles[nombre];
+			const categoria = c.categoria || 'SIN CATEGORÍA';
+			const desechable = formatPriceTable(c.desechable);
+			const dispensador = formatPriceTable(c.dispensador);
+			const muro = formatPriceTable(c.muro);
+			// Ingredientes oficiales de datos.json (la IA no debe inventar otros)
+			const ingredientes = (c.ingredientes || '').trim() || '(sin ficha de ingredientes)';
+			lines.push(`- ${nombre} [${categoria}]`);
+			lines.push(`    Ingredientes: ${ingredientes}`);
+			lines.push(`    Barril desechable (desechable): ${desechable}`);
+			lines.push(`    Barril eventos Dispensador Portátil (dispensador): ${dispensador}`);
+			lines.push(`    Barril eventos Muro de Coctelería (muro): ${muro}`);
+		}
+		lines.push('');
+	}
+
+	// --- Extras (hielo, bombillas, etc.) ---
+	const extras = data.extras || {};
+	if (Object.keys(extras).length > 0) {
+		lines.push('EXTRAS:');
+		for (const [nombre, precio] of Object.entries(extras)) {
+			lines.push(`- ${nombre}: ${formatPrice(precio)}`);
+		}
+		lines.push('');
+	}
+
+	// --- Despachos Región Metropolitana ---
+	const comunas = data.comunas_rm || {};
+	if (Object.keys(comunas).length > 0) {
+		lines.push('DESPACHOS RM (comuna → envío barril desechable | envío servicio eventos):');
+		lines.push('  "desechable" = envío de barriles desechables | "evento" = envío Dispensador/Muro (0 = sin costo)');
+		for (const [comuna, tarifas] of Object.entries(comunas)) {
+			const desechable = formatPrice(tarifas.desechable ?? 0);
+			const evento = formatPrice(tarifas.evento ?? 0);
+			lines.push(
+				`- ${comuna}: barril desechable ${desechable} | eventos (Dispensador/Muro) ${evento}`
+			);
+		}
+	}
+
+	return lines.join('\n');
+}
+
+/**
  * getCoctelesByCategoria: Agrupa el catálogo de datos.json por categoría de negocio.
  *
  * @returns {{ 'CLÁSICOS': object[], COMBINADOS: object[], MOCKTAILS: object[] }}
@@ -229,7 +339,7 @@ export function getCartaCocteles(format = 'desechable', options = {}) {
 	text += `\n\n🥃 *COMBINADOS*\n${combinadosStr}`;
 	text += `\n\n🍹 *MOCKTAILS (Sin Alcohol)*\n${mocktailsStr}`;
 
-	// En barriles la pregunta de cotizar va en el estado A2_1 (no aquí).
+	// En barriles la pregunta de cotizar va en BARRILES_OFRECER_COTIZACION (no aquí).
 	// En eventos sí cerramos pidiendo cócteles + litraje.
 	if (includeClosingQuestion && format !== 'desechable') {
 		text += '\n\n¿Ahora índicame cuáles te gustarían, por ej. 5L Mojito, 10L Aperol Spritz?';

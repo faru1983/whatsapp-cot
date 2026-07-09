@@ -6,6 +6,7 @@
 import OpenAI from 'openai'; // Importamos la librería OpenAI. Aunque usemos Nvidia, sus servidores son compatibles con el formato de OpenAI.
 import { GoogleGenerativeAI } from '@google/generative-ai'; // Importamos la librería oficial de Google para usar Gemini.
 import { getEnv } from './config.js'; // Función para cargar las claves API Keys y configuraciones de proveedor.
+import { buildFaqCatalogContext } from '../logic/utils.js'; // Resumen de catálogo + despachos RM para el FAQ.
 
 /**
  * generateResponse: Función que se conecta con la IA (Gemini o Nvidia)
@@ -199,7 +200,7 @@ export async function extractEventProductsWithAI(userMessage, catalogNames, form
   const { provider, apiKey, model } = env;
   const config = { temperature: 0.1, maxOutputTokens: 800 };
 
-  // Litrajes permitidos según el formato elegido en B3
+  // Litrajes permitidos según el formato elegido (dispensador o muro)
   const allowedLitrages = formatType === 'muro'
     ? ['10L', '20L', '30L']
     : ['5L', '10L'];
@@ -305,10 +306,32 @@ ${catalogNames.join('\n')}`;
 }
 
 /**
+ * normalizeFaqResult: Si el modelo no devolvió exactamente NO_FAQ pero claramente
+ * no respondió una FAQ (saludos, "no tengo respuesta", etc.), forzamos NO_FAQ.
+ *
+ * @param {string} textResult - Salida cruda del LLM
+ * @returns {string} Respuesta FAQ válida o "NO_FAQ"
+ */
+function normalizeFaqResult(textResult) {
+  const raw = (textResult || '').trim();
+  if (!raw) return 'NO_FAQ';
+
+  // Match estricto o con puntuación/espacios alrededor
+  if (/^NO_FAQ[.!]?\s*$/i.test(raw)) return 'NO_FAQ';
+  if (raw.toUpperCase().includes('NO_FAQ')) return 'NO_FAQ';
+
+  // El modelo a veces inventa "no tengo esa info" en vez de NO_FAQ (ej. ante "Hola")
+  const looksLikeRefusal = /no tengo (una )?respuesta|no (est[aá]|se encuentra) en (nuestra |la )?base|no (puedo|s[eé]) (responder|ayudar)|fuera de (mi|la) (conocimiento|base)|no aplica|no corresponde/i.test(raw);
+  if (looksLikeRefusal) return 'NO_FAQ';
+
+  return raw;
+}
+
+/**
  * responderFAQ: Evalúa si el mensaje del cliente es una pregunta frecuente y responde
- * utilizando estrictamente la información del faqData.
- * Si no corresponde a ninguna FAQ, devuelve "NO_FAQ".
- * 
+ * usando faq.json + un resumen oficial de datos.json (catálogo y despachos RM).
+ * Si no corresponde a ninguna FAQ ni a esos datos, devuelve "NO_FAQ".
+ *
  * @param {string} userMessage - El mensaje que escribió el cliente.
  * @param {Array} faqData - Arreglo de objetos {pregunta, respuesta}
  * @returns {Promise<string>} Devuelve la respuesta redactada o "NO_FAQ".
@@ -316,16 +339,42 @@ ${catalogNames.join('\n')}`;
 export async function responderFAQ(userMessage, faqData) {
   const env = getEnv();
   const { provider, apiKey, model } = env;
-  const config = { temperature: 0.1, maxOutputTokens: 200 };
+  // Un poco más de tokens: respuestas de precio/despacho pueden listar 1–3 ítems
+  const config = { temperature: 0.1, maxOutputTokens: 350 };
 
-  const systemInstruction = `Eres un asistente de atención al cliente.
-El usuario ha enviado el siguiente mensaje: "${userMessage}"
+  // Catálogo + despachos RM compactos (misma fuente que usa OrderBuilder / carta)
+  const catalogContext = buildFaqCatalogContext();
 
-Tu tarea es revisar si puedes responder a esa pregunta basándote ÚNICAMENTE en esta base de conocimientos de Preguntas Frecuentes (FAQ):
+  const systemInstruction = `Eres un clasificador + redactor de FAQ estricto.
+El usuario escribió: "${userMessage}"
+
+=== BASE FAQ (faq.json) ===
 ${JSON.stringify(faqData, null, 2)}
 
-Si la pregunta se responde directa o indirectamente con esos datos, redacta una respuesta amable y breve entregando la información. NO inventes información extra que no esté en el JSON.
-REGLA CRÍTICA INQUEBRANTABLE: Si la pregunta del usuario NO tiene relación con ninguna FAQ o NO tienes la respuesta en el JSON proporcionado, TIENES ESTRICTAMENTE PROHIBIDO disculparte, dar explicaciones o pedir perdón. Tu ÚNICA salida permitida en ese caso es devolver EXACTAMENTE la palabra: NO_FAQ`;
+=== ${catalogContext} ===
+
+REGLAS:
+1. Responde SOLO si el mensaje es claramente una pregunta sobre:
+   - Una FAQ de la lista (horarios, envíos/regiones, pago, web, Instagram, correo, teléfono, rendimiento), O
+   - Precios / catálogo / carta / valor de un cóctel o extra (usar DATOS OFICIALES), O
+   - Ingredientes / de qué está hecho un cóctel del catálogo (usar SOLO el campo "Ingredientes" de DATOS OFICIALES), O
+   - Costo de despacho a una comuna de la RM (usar tabla DESPACHOS; distinguir desechable vs evento).
+2. Saludos ("hola", "buenas"), "ok", "gracias", ruido o mensajes sin pregunta → responde EXACTAMENTE: NO_FAQ
+3. Si no hay match claro → responde EXACTAMENTE: NO_FAQ
+4. PROHIBIDO inventar precios, comunas, tarifas o ingredientes. Si el dato no está en FAQ ni en DATOS OFICIALES → NO_FAQ
+5. INGREDIENTES (muy importante):
+   - Si preguntan de qué está hecho un cóctel (ej. "¿qué ingredientes tiene la Sangría?"): responde SOLO con la lista "Ingredientes:" de ese producto en DATOS OFICIALES. Amable y breve.
+   - PROHIBIDO agregar frutas, licores u otros ingredientes que no aparezcan en esa ficha (nada de "frutas frescas" genéricas si no están escritas ahí).
+   - Si el cóctel no está en el catálogo → NO_FAQ
+6. PRECIOS DE CÓCTELES (muy importante):
+   - Todos los productos son BARRILES, en 3 categorías: (1) barril desechable 5L, (2) barril para eventos con Dispensador Portátil, (3) barril para eventos con Muro de Coctelería.
+   - Si preguntan el precio de un cóctel SIN indicar categoría (ej. "¿cuánto vale el Pisco Sour?"): NO listes los 3 precios. Aclara brevemente que hay 3 formatos de barril y PREGUNTA cuál quiere cotizar (desechable 5L / Dispensador / Muro).
+   - Solo da el precio numérico cuando el cliente ya eligió la categoría (o la dejó inequívoca). Entonces responde SOLO ese canal, con litraje si aplica.
+   - PROHIBIDO pegar la tabla completa desechable+dispensador+muro en una sola respuesta.
+7. Despacho fuera de RM: no inventes monto; usa la FAQ de envíos a regiones. En RM: si no dicen si es barril desechable o evento, pregunta antes de cotizar el envío.
+8. Si preguntan "precios" o "carta" de forma general: explica las 3 categorías de barril en 1–2 líneas, menciona la web https://cocktailsontap.cl/cotizar y ofrece cotizar un cóctel concreto cuando digan formato. No pegues el catálogo completo.
+9. Extras o comuna concreta (con categoría clara): responde solo ese dato, amable y breve, en pesos chilenos.
+10. PROHIBIDO decir "no tengo respuesta" o disculparte cuando no hay match. En ese caso SOLO: NO_FAQ`;
 
   try {
     let textResult = "NO_FAQ";
@@ -354,10 +403,10 @@ REGLA CRÍTICA INQUEBRANTABLE: Si la pregunta del usuario NO tiene relación con
       textResult = completion.choices?.[0]?.message?.content?.trim() || "NO_FAQ";
     }
 
-    return textResult;
+    return normalizeFaqResult(textResult);
   } catch (err) {
     console.error(`[bot] Error en responderFAQ:`, err.message);
-    return "NO_FAQ"; 
+    return "NO_FAQ";
   }
 }
 

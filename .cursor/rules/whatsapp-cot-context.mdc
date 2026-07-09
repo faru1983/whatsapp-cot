@@ -27,8 +27,8 @@ index.js → engine.js → statesMap (flows/) → utils.js + order-builder.js
 | `src/core/db.js` | Sesiones en `conversation-memory.sqlite` |
 | `src/core/config.js` | `.env`: LLM provider, API keys, `ADMIN_NUMBERS` |
 | `src/flows/router.js` | Estado inicial `ESPERANDO_INTENCION` |
-| `src/flows/barriles.js` | Flujo A (barriles desechables) |
-| `src/flows/eventos.js` | Flujo B (eventos) |
+| `src/flows/barriles.js` | Flujo barriles (`BARRILES_*`) |
+| `src/flows/eventos.js` | Flujo eventos (`EVENTOS_*`) |
 | `src/flows/index.js` | `statesMap` unificado |
 | `src/logic/utils.js` | Precios, parsing, carta, fuzzy match ubicaciones |
 | `src/logic/order-builder.js` | Cotización programática (barriles + eventos) |
@@ -51,9 +51,11 @@ Cada estado exporta:
 
 **Router:** `ESPERANDO_INTENCION` → detecta BARRILES / EVENTOS / ambos.
 
-**Flujo A (barriles):** `A1_FILTRO_CANAL` → `A2_OFRECER_CATALOGO` → `A2_1_OFRECER_COTIZACION` (cotizar o solo mirar) → `A3_RECOGIDA_PRODUCTOS` (NLU con `extractProductsWithAI`) → `A3_RECOGIDA_DATOS` → `A4_REVISION_COTIZACION` (`OrderBuilder`) → `A4_1_ROUTER_MODIFICACION`.
+Los IDs de estado son **semánticos** (`BARRILES_*` / `EVENTOS_*`); no llevan numeración. El orden típico es documentación; las transiciones reales van en cada `nextState`.
 
-**Flujo B (eventos):** `B1_FILTRO_CANAL_EVENTOS` → `B2_RECOGIDA_DATOS_EVENTOS` → `B3_ELECCION_FORMATO` → `B4_ELECCION_MENU` (NLU con `extractEventProductsWithAI` + carrito) → `B5_COTIZACION` (`OrderBuilder` + `getEventQuotationTemplate`).
+**Barriles:** `BARRILES_FILTRO_CANAL` → `BARRILES_OFRECER_CATALOGO` → `BARRILES_OFRECER_COTIZACION` (cotizar o solo mirar) → `BARRILES_RECOGIDA_PRODUCTOS` (NLU) → `BARRILES_RECOGIDA_DATOS` → `BARRILES_REVISION_COTIZACION` (`OrderBuilder`) → `BARRILES_ROUTER_MODIFICACION`.
+
+**Eventos:** `EVENTOS_FILTRO_CANAL` → `EVENTOS_RECOGIDA_DATOS` → `EVENTOS_ELECCION_FORMATO` → `EVENTOS_ELECCION_MENU` (NLU + carrito) → `EVENTOS_COTIZACION` (`OrderBuilder` + `getEventQuotationTemplate`).
 
 ## Red de seguridad (engine.js)
 

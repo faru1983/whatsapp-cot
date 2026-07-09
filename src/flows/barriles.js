@@ -1,4 +1,4 @@
-import { 
+﻿import { 
   getWelcomeBarriles, 
   getCatalogDesechables,
   getDoubtClarificationTemplate,
@@ -24,19 +24,19 @@ import { extractProductsWithAI } from '../core/llm.js';
 import { OrderBuilder } from '../logic/order-builder.js';
 
 // ============================================================================
-// OBJETIVO: Flujo A (Barriles Desechables).
-// Aquí están todos los pasos para vender barriles por WhatsApp:
-// 1) Elegir canal, 2) ver catálogo, 2.1) ofrecer cotización,
-// 3) armar pedido, 4) pedir datos, 5) revisar cotización y 6) confirmar.
+// OBJETIVO: Flujo Barriles Desechables.
+// Pasos (orden típico; las transiciones reales van en nextState):
+// filtro canal -> ofrecer catálogo -> ofrecer cotización ->
+// recogida productos -> recogida datos -> revisión -> router modificación.
 // ============================================================================
-export const flowAStates = {
+export const barrilesStates = {
   
-  // Paso A1: definir si la persona quiere continuar por chat o ir a la web.
-  A1_FILTRO_CANAL: {
-    id: 'A1_FILTRO_CANAL',
+  // Paso: filtro de canal (web vs WhatsApp).
+  BARRILES_FILTRO_CANAL: {
+    id: 'BARRILES_FILTRO_CANAL',
     promptQuestion: () => getWelcomeBarriles(),
     shortQuestion: `¿Prefieres comprar tus barriles ahora mismo por la web o los cotizamos juntos por este chat?`,
-    aiContextPrompt: STATE_PROMPTS.A1_FILTRO_CANAL,
+    aiContextPrompt: STATE_PROMPTS.BARRILES_FILTRO_CANAL,
     async validateAndProcess(messageText, session) {
       const normalizedMessage = normalizeString(messageText);
 
@@ -49,18 +49,18 @@ export const flowAStates = {
       if (wantsWeb) {
         return { success: true, nextState: 'CERRADO', customReply: `¡Buenísimo! Te dejo el link: https://cocktailsontap.cl/barriles. Si te surge cualquier duda durante tu compra, me escribes por aquí y te ayudo 🍹`, mute: true };
       } else if (wantsWhatsapp) {
-        return { success: true, nextState: 'A2_OFRECER_CATALOGO' };
+        return { success: true, nextState: 'BARRILES_OFRECER_CATALOGO' };
       }
       return { success: false };
     }
   },
 
-  // Paso A2: confirmar si mostramos catálogo completo o si ya sabe qué pedir.
-  A2_OFRECER_CATALOGO: {
-    id: 'A2_OFRECER_CATALOGO',
+  // Paso: ofrecer catálogo / lista de precios.
+  BARRILES_OFRECER_CATALOGO: {
+    id: 'BARRILES_OFRECER_CATALOGO',
     promptQuestion: () => getCatalogDesechables(),
     shortQuestion: () => `¿Te muestro los barriles disponibles y sus precios o ya sabes qué pedir?`,
-    aiContextPrompt: STATE_PROMPTS.A2_OFRECER_CATALOGO,
+    aiContextPrompt: STATE_PROMPTS.BARRILES_OFRECER_CATALOGO,
     async validateAndProcess(messageText, session) {
       // El cliente pide ver precios / catálogo completo
       const wantsFullCatalog = /\b(si|sí|claro|ok|okay|dale|mu[eé]strame|precio|precios|valor|por favor|porfa|todos|todas|todo|lista|cat[áa]logo|menu|opciones|cuales|cu[aá]les|ver)\b/i.test(messageText);
@@ -79,7 +79,7 @@ export const flowAStates = {
       if (wantsFullCatalog) {
         return {
           success: true,
-          nextState: 'A2_1_OFRECER_COTIZACION',
+          nextState: 'BARRILES_OFRECER_COTIZACION',
           customReplies: [
             getCartaCocteles('desechable'),
             getOfferQuoteAfterCatalog()
@@ -89,13 +89,14 @@ export const flowAStates = {
 
       // Cliente no quiere catálogo ni comprar ahora → despedida y reset de sesión
       const refusesCatalog = /\b(no|no\s+gracias|despu[eé]s|luego|en\s+otro\s+momento|nada|cancelar)\b/i.test(messageText.trim());
+      // Despedida + silencio. NO usamos shouldReset: borraría el mute y el siguiente mensaje reabriría el bot.
       if (refusesCatalog) {
-         return { success: true, nextState: 'CERRADO', customReply: getBrowseOnlyGoodbye(), mute: true, shouldReset: true };
+         return { success: true, nextState: 'CERRADO', customReply: getBrowseOnlyGoodbye(), mute: true };
       }
 
       // Si ya nombra cócteles sin ver catálogo, salta a armar pedido (quiere cotizar)
       if (hasDrinkSelection(messageText)) {
-        return flowAStates.A3_RECOGIDA_PRODUCTOS.validateAndProcess(messageText, session);
+        return barrilesStates.BARRILES_RECOGIDA_PRODUCTOS.validateAndProcess(messageText, session);
       }
 
       return { success: false };
@@ -106,14 +107,14 @@ export const flowAStates = {
   // A2.1 — OFRECER COTIZACIÓN (después de ver precios)
   // No asumimos que quiere pedir: pregunta si cotiza o solo estaba mirando.
   // ==============================================================================
-  A2_1_OFRECER_COTIZACION: {
-    id: 'A2_1_OFRECER_COTIZACION',
+  BARRILES_OFRECER_COTIZACION: {
+    id: 'BARRILES_OFRECER_COTIZACION',
     promptQuestion: () => getOfferQuoteAfterCatalog(),
-    shortQuestion: `¿Respondes *sí* / *cotizar*, o *solo mirando* / *Instagram*?`,
-    aiContextPrompt: STATE_PROMPTS.A2_1_OFRECER_COTIZACION,
+    shortQuestion: `¿Te armo una *cotización*, o solo estabas *mirando*?`,
+    aiContextPrompt: STATE_PROMPTS.BARRILES_OFRECER_COTIZACION,
 
     async validateAndProcess(messageText, session) {
-      // Asegurar carrito vacío listo por si avanza a A3
+      // Asegurar carrito vacío listo por si avanza a recogida de productos
       if (!session.orderBuilder || session.orderBuilder.type !== 'desechable') {
         session.orderBuilder = {
           type: 'desechable',
@@ -142,7 +143,7 @@ export const flowAStates = {
 
       // 2) Ya nombra cócteles → entra a armar pedido
       if (hasDrinkSelection(messageText)) {
-        return flowAStates.A3_RECOGIDA_PRODUCTOS.validateAndProcess(messageText, session);
+        return barrilesStates.BARRILES_RECOGIDA_PRODUCTOS.validateAndProcess(messageText, session);
       }
 
       // 3) Quiere cotizar (keywords sugeridas en la pregunta: sí / cotizar)
@@ -151,7 +152,7 @@ export const flowAStates = {
 
       if (wantsQuote) {
         const reply = `¡Perfecto! 🍸 En unos pasos simples armamos tu cotización.\n\nDime qué cócteles de la lista te gustaron o te interesan (ej: "2 mojitos y 1 aperol").`;
-        return { success: true, nextState: 'A3_RECOGIDA_PRODUCTOS', customReply: reply };
+        return { success: true, nextState: 'BARRILES_RECOGIDA_PRODUCTOS', customReply: reply };
       }
 
       // 4) No entendimos → engine: FAQ → IA → re-pregunta con keywords
@@ -159,12 +160,12 @@ export const flowAStates = {
     }
   },
 
-  // Paso A3: agregar/eliminar productos y resolver dudas de nombres ambiguos.
-  A3_RECOGIDA_PRODUCTOS: {
-    id: 'A3_RECOGIDA_PRODUCTOS',
+  // Paso: recogida de productos (NLU + carrito).
+  BARRILES_RECOGIDA_PRODUCTOS: {
+    id: 'BARRILES_RECOGIDA_PRODUCTOS',
     promptQuestion: () => `¿Qué cócteles te gustaría agregar a tu pedido?`,
     shortQuestion: `¿Qué cóctel agregarás, eliminarás o continuamos con estos?`,
-    aiContextPrompt: STATE_PROMPTS.A3_RECOGIDA_PRODUCTOS_DUDAS,
+    aiContextPrompt: STATE_PROMPTS.BARRILES_RECOGIDA_PRODUCTOS_DUDAS,
     async validateAndProcess(messageText, session) {
       // Asegurar que existe el "carrito" en la sesión del cliente
       if (!session.orderBuilder || session.orderBuilder.type !== 'desechable') {
@@ -181,7 +182,7 @@ export const flowAStates = {
       if (wantsFullCatalog && Object.keys(session.orderBuilder.products).length === 0) {
         return {
           success: true,
-          nextState: 'A3_RECOGIDA_PRODUCTOS',
+          nextState: 'BARRILES_RECOGIDA_PRODUCTOS',
           customReply: `${getCartaCocteles('desechable')}\n\n¿Cuál o cuáles de la lista quieres agregar? (ej: "2 mojitos y 1 aperol")`
         };
       }
@@ -204,7 +205,7 @@ export const flowAStates = {
           reply += `- ${qty}x ${pName}: ${formatPrice(price * qty)}\n`;
         }
         reply += `\n*Subtotal de cócteles:* ${formatPrice(quote.subtotal)}\n\n¿Quieres eliminar otro, agregar más cócteles o continuamos con estos? 🍸`;
-        return { success: true, nextState: 'A3_RECOGIDA_PRODUCTOS', customReply: reply };
+        return { success: true, nextState: 'BARRILES_RECOGIDA_PRODUCTOS', customReply: reply };
       }
 
       // --- Rama: agregar productos con IA (NLU híbrido) ---
@@ -224,7 +225,7 @@ export const flowAStates = {
         (quiere_avanzar || /^(nada|nada mas|solo esto|solo|eso es|listo|ya|fin|sin mas|no hay mas|no quiero mas|continuar|continuamos|avanzar|seguir|siguiente|no)/i.test(messageText.trim())) &&
         Object.keys(session.orderBuilder.products).length > 0
       ) {
-        return { success: true, nextState: 'A3_RECOGIDA_DATOS' };
+        return { success: true, nextState: 'BARRILES_RECOGIDA_DATOS' };
       }
 
       // Intentar resolver dudas sin preguntar (ej. "piscola alto" → una sola opción clara)
@@ -261,7 +262,7 @@ export const flowAStates = {
             session.orderBuilder.products[pName] = (session.orderBuilder.products[pName] || 0) + pQty;
           }
         }
-        return { success: true, nextState: 'A3_RECOGIDA_PRODUCTOS', customReply: getDoubtClarificationTemplate(duda.mencionado, duda.opciones) };
+        return { success: true, nextState: 'BARRILES_RECOGIDA_PRODUCTOS', customReply: getDoubtClarificationTemplate(duda.mencionado, duda.opciones) };
       }
 
       if (Object.keys(parsedProducts).length > 0) {
@@ -280,12 +281,12 @@ export const flowAStates = {
           reply += `- ${qty}x ${name}: ${formatPrice(price * qty)}\n`;
         }
         reply += `\n*Subtotal de cócteles:* ${formatPrice(quote.subtotal)}\n\n¿Quieres agregar otro sabor o *solo estos*? 🍸`;
-        return { success: true, nextState: 'A3_RECOGIDA_PRODUCTOS', customReply: reply };
+        return { success: true, nextState: 'BARRILES_RECOGIDA_PRODUCTOS', customReply: reply };
       }
 
       const refusesCatalog = /\b(no|no\s+gracias|despu[eé]s|luego|en\s+otro\s+momento|nada|cancelar)\b/i.test(messageText.trim());
       if (refusesCatalog && Object.keys(session.orderBuilder.products).length === 0) {
-          return { success: true, nextState: 'CERRADO', customReply: "¡No hay problema! Si cambias de idea en el futuro, no dudes en escribirnos. ¡Hasta pronto! 🍹", shouldReset: true };
+          return { success: true, nextState: 'CERRADO', customReply: getBrowseOnlyGoodbye(), mute: true };
       }
 
       return { success: false };
@@ -294,12 +295,12 @@ export const flowAStates = {
 
 
 
-  // Paso A3 (datos): pedir fecha y ubicación para calcular despacho.
-  A3_RECOGIDA_DATOS: {
-    id: 'A3_RECOGIDA_DATOS',
+  // Paso: recogida de datos de despacho (fecha y comuna).
+  BARRILES_RECOGIDA_DATOS: {
+    id: 'BARRILES_RECOGIDA_DATOS',
     promptQuestion: () => `¡Excelente elección! 🤩 Ya casi terminamos, solo necesito dos datos finales para calcular tu cotización:\n\n📝 Por favor indícame:\n- Fecha que los necesitas:\n- Comuna o Ciudad de entrega:\n\n_(Ej: "Para este sábado en Providencia")_`,
     shortQuestion: `¿Me pasas la fecha y comuna o revisamos la cotización?`,
-    aiContextPrompt: STATE_PROMPTS.A3_RECOGIDA_DATOS_DUDAS,
+    aiContextPrompt: STATE_PROMPTS.BARRILES_RECOGIDA_DATOS_DUDAS,
     async validateAndProcess(messageText, session) {
       // Extraer nombre, fecha y comuna del mensaje (pueden venir en un solo texto)
       let hasNewInfo = false;
@@ -329,19 +330,19 @@ export const flowAStates = {
           if (!session.orderBuilder.clientData.location) missing.push('✓ Comuna/Ciudad');
 
           let reply = `Perfecto, recibí parte de tu información. Me falta:\n\n${missing.join('\n')}\n\n¿Puedes compartirlo?`;
-          return { success: true, nextState: 'A3_RECOGIDA_DATOS', customReply: reply };
+          return { success: true, nextState: 'BARRILES_RECOGIDA_DATOS', customReply: reply };
         }
       }
       
-      return { success: true, nextState: 'A4_REVISION_COTIZACION' };
+      return { success: true, nextState: 'BARRILES_REVISION_COTIZACION' };
     }
   },
 
-  // Paso A4: mostrar cotización final y preguntar confirmación.
-  A4_REVISION_COTIZACION: {
-    id: 'A4_REVISION_COTIZACION',
+  // Paso: revisión de cotización final.
+  BARRILES_REVISION_COTIZACION: {
+    id: 'BARRILES_REVISION_COTIZACION',
     promptQuestion: (session) => {
-      // Al entrar en A4, calculamos la cotización y la guardamos en sesión
+      // Al entrar, calculamos la cotización y la guardamos en sesión
       const orderBuilder = new OrderBuilder('desechable', preciosData);
       orderBuilder.products = session.orderBuilder.products;
       orderBuilder.extras = session.orderBuilder.extras;
@@ -355,7 +356,7 @@ export const flowAStates = {
       return getQuotationTemplate(session.orderBuilder.clientData, quote, deliveryCost, locationData);
     },
     shortQuestion: `¿Todo bien con la cotización o cambiamos algo?`,
-    aiContextPrompt: STATE_PROMPTS.A4_REVISION_COTIZACION,
+    aiContextPrompt: STATE_PROMPTS.BARRILES_REVISION_COTIZACION,
     async validateAndProcess(messageText, session) {
       const isConfirming = /(si|sí|ok|perfecto|listo|dale|confirm|esta bien|está bien|todo bien|vamos|súper|super|correcto|excelente|genial|aprob|bueno)/i.test(messageText);
       const isModifying = /cambiar|sacar|agregar|quitar|modif|ajust|cantidad|litro|cóctel|coctel|producto|extra|otro/i.test(messageText);
@@ -398,18 +399,18 @@ export const flowAStates = {
       } else if (isModifying) {
         // Si quiere cambios, lo llevamos a un mini-router de modificaciones.
         session.quotationGenerated = false;
-        return { success: true, nextState: 'A4_1_ROUTER_MODIFICACION' };
+        return { success: true, nextState: 'BARRILES_ROUTER_MODIFICACION' };
       }
       return { success: false };
     }
   },
 
-  // Paso A4.1: decide qué quiere modificar (productos o datos).
-  A4_1_ROUTER_MODIFICACION: {
-    id: 'A4_1_ROUTER_MODIFICACION',
+  // Paso: router de modificación (productos o datos).
+  BARRILES_ROUTER_MODIFICACION: {
+    id: 'BARRILES_ROUTER_MODIFICACION',
     promptQuestion: () => `Claro, ¿qué deseas cambiar?\n\n1. *Cambiar cócteles* - ¿cuáles deseas en lugar de los actuales?\n2. *Actualizar datos* - ¿Fecha o ubicación?\n\nResponde con 1 o 2 para saber qué necesitas ajustar 🔧`,
     shortQuestion: `¿Responde 1 para cócteles o 2 para datos?`,
-    aiContextPrompt: STATE_PROMPTS.A4_1_ROUTER_MODIFICACION,
+    aiContextPrompt: STATE_PROMPTS.BARRILES_ROUTER_MODIFICACION,
     async validateAndProcess(messageText, session) {
       const isProductos = /1|coctel|cóctel|bebida|trago/i.test(messageText);
       const isDatos = /2|3|dato|fecha|ubicacion|ubicación/i.test(messageText); // Acepta 3 por compatibilidad
@@ -417,13 +418,13 @@ export const flowAStates = {
       // Opción 1: volver a editar el carrito de cócteles
       if (isProductos) {
         let reply = `Perfecto, volvamos a los cócteles. Actualmente tienes:\n${Object.entries(session.orderBuilder.products).map(([n,q])=>`- ${q}x ${n}`).join('\n')}\n\n¿Qué deseas agregar o eliminar? (ej: "agrega 1 mojito" o "elimina 1 aperol")`;
-        return { success: true, nextState: 'A3_RECOGIDA_PRODUCTOS', customReply: reply };
+        return { success: true, nextState: 'BARRILES_RECOGIDA_PRODUCTOS', customReply: reply };
       }
 
       // Opción 2: volver a pedir fecha y ubicación (reseteamos esos campos)
       if (isDatos) {
         session.orderBuilder.clientData = { name: null, date: null, location: null };
-        return { success: true, nextState: 'A3_RECOGIDA_DATOS' };
+        return { success: true, nextState: 'BARRILES_RECOGIDA_DATOS' };
       }
       
       return { success: false };

@@ -61,13 +61,13 @@ export const ESPERANDO_INTENCION = {
     // --- Rama 1: el cliente quiere barriles desechables ---
     if (choosesBarriles) {
       session.userIntent = 'BARRILES'; // Guardamos la intención para fallbacks futuros
-      return { success: true, nextState: 'A1_FILTRO_CANAL' }; // Saltamos al flujo A
+      return { success: true, nextState: 'BARRILES_FILTRO_CANAL' };
     }
 
     // --- Rama 2: el cliente quiere servicio para eventos ---
     if (choosesEventos) {
       session.userIntent = 'EVENTOS';
-      return { success: true, nextState: 'B1_FILTRO_CANAL_EVENTOS' }; // Saltamos al flujo B
+      return { success: true, nextState: 'EVENTOS_FILTRO_CANAL' };
     }
 
     // --- Rama 3: primera vez que dice "ambas" → mostramos resumen educativo ---
