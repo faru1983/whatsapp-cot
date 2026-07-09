@@ -11,6 +11,7 @@ import { shouldHandleMessage, stripTriggerPrefix } from './logic/utils.js';
 import { getSession, saveSession, resetSession } from './core/db.js';
 import { loadBotConfig } from './core/config.js';
 import { composeAdminAlertMessage } from './views/templates.js';
+import { AUTH_DIR, PROJECT_ROOT, SQLITE_PATH } from './core/paths.js';
 import process from 'node:process';
 
 // ==============================================================================
@@ -27,6 +28,10 @@ const botSentMessageIds = new Set();
 // Sin esto, el destinatario ve "Esperando mensaje..." con el reloj verde.
 const recentMessages = new Map();
 const RECENT_MESSAGES_MAX = 200;
+
+// Evita abrir varios sockets a la vez (causa típica de "Esperando mensaje" y auth corrupta).
+let isConnecting = false;
+let reconnectTimer = null;
 
 /**
  * rememberMessage: Guarda un mensaje enviado/recibido para reintentos de WhatsApp.
@@ -45,63 +50,137 @@ function rememberMessage(id, content) {
   }
 }
 
+/**
+ * clearReconnectTimer: Cancela un reintento pendiente (ej. si WhatsApp hizo logout).
+ */
+function clearReconnectTimer() {
+  if (reconnectTimer) {
+    clearTimeout(reconnectTimer);
+    reconnectTimer = null;
+  }
+}
+
+/**
+ * scheduleReconnect: Reconecta una sola vez tras un breve delay.
+ * Así no se apilan varios startBot() si WhatsApp cierra/abre rápido.
+ *
+ * @param {number} delayMs - Espera antes de reconectar
+ */
+function scheduleReconnect(delayMs = 3000) {
+  if (reconnectTimer) return;
+  reconnectTimer = setTimeout(() => {
+    reconnectTimer = null;
+    startBot().catch((error) => {
+      console.error('Error fatal al intentar reconectar:', error.message);
+      isConnecting = false;
+      scheduleReconnect(5000);
+    });
+  }, delayMs);
+}
+
 // Inicializa conexión con WhatsApp y registra todos los listeners de eventos.
 async function startBot() {
-  const config = loadBotConfig();
-  const logger = pino({ level: 'silent' });
+  // Si ya hay un intento de conexión en curso, no abrimos otro socket
+  if (isConnecting) {
+    console.log('Ya hay una conexión en curso; se omite otro startBot().');
+    return;
+  }
+  isConnecting = true;
 
-  const { state, saveCreds } = await useMultiFileAuthState('auth');
-  const { version } = await fetchLatestBaileysVersion();
-
-  // makeCacheableSignalKeyStore: cachea claves Signal en RAM (más estable y menos I/O a disco).
-  // getMessage: obligatorio para que WhatsApp pueda pedir reenvío si falla el descifrado.
-  const sock = makeWASocket({
-    version,
-    auth: {
-      creds: state.creds,
-      keys: makeCacheableSignalKeyStore(state.keys, logger)
-    },
-    logger,
-    printQRInTerminal: false,
-    markOnlineOnConnect: false,
-    syncFullHistory: false,
-    defaultQueryTimeoutMs: 60000,
-    getMessage: async (key) => {
-      // 1) Buscamos en nuestra caché de mensajes recientes
-      const cached = key?.id ? recentMessages.get(key.id) : undefined;
-      if (cached) return cached;
-      // 2) Fallback vacío: evita crash; WhatsApp puede pedir otro reintento
-      return undefined;
+  // Si startBot falla antes de open/close, liberamos el flag para no quedar trabados
+  let connectionSettled = false;
+  const releaseConnecting = () => {
+    if (!connectionSettled) {
+      connectionSettled = true;
+      isConnecting = false;
     }
-  });
+  };
 
-  sock.ev.on('creds.update', saveCreds);
+  try {
+    const config = loadBotConfig();
+    const logger = pino({ level: 'silent' });
 
-  // Listener de estado de conexión (QR, conectado, desconectado, reconexión automática).
-  sock.ev.on('connection.update', ({ connection, lastDisconnect, qr: qrCode }) => {
-    if (qrCode) {
-      console.log('Escanea este QR con WhatsApp > Dispositivos vinculados:');
-      qr.generate(qrCode, { small: true });
-    }
+    console.log(`[BOOT] Proyecto: ${PROJECT_ROOT}`);
+    console.log(`[BOOT] Auth: ${AUTH_DIR}`);
+    console.log(`[BOOT] SQLite: ${SQLITE_PATH}`);
+    console.log(`[BOOT] cwd: ${process.cwd()}`);
 
-    if (connection === 'open') {
-      console.log('WhatsApp conectado. El bot está listo para trabajar.');
-    }
+    // AUTH_DIR es ruta absoluta → auth/ siempre en la raíz del repo
+    const { state, saveCreds } = await useMultiFileAuthState(AUTH_DIR);
+    const { version } = await fetchLatestBaileysVersion();
 
-    if (connection === 'close') {
-      const shouldReconnect = lastDisconnect?.error?.output?.statusCode !== DisconnectReason.loggedOut;
-      console.log('Conexión cerrada. ¿Intentar reconectar automáticamente?:', shouldReconnect);
-
-      if (shouldReconnect) {
-        startBot().catch((error) => {
-          console.error('Error fatal al intentar reconectar:', error.message);
-        });
+    // makeCacheableSignalKeyStore: cachea claves Signal en RAM (más estable y menos I/O a disco).
+    // getMessage: obligatorio para que WhatsApp pueda pedir reenvío si falla el descifrado.
+    const sock = makeWASocket({
+      version,
+      auth: {
+        creds: state.creds,
+        keys: makeCacheableSignalKeyStore(state.keys, logger)
+      },
+      logger,
+      printQRInTerminal: false,
+      markOnlineOnConnect: false,
+      syncFullHistory: false,
+      defaultQueryTimeoutMs: 60000,
+      getMessage: async (key) => {
+        // 1) Buscamos en nuestra caché de mensajes recientes
+        const cached = key?.id ? recentMessages.get(key.id) : undefined;
+        if (cached) return cached;
+        // 2) Fallback vacío: evita crash; WhatsApp puede pedir otro reintento
+        return undefined;
       }
-    }
-  });
+    });
 
-  // Listener principal de mensajes entrantes.
-  sock.ev.on('messages.upsert', async ({ messages }) => {
+    sock.ev.on('creds.update', saveCreds);
+
+    // Si nunca llega open/close (cuelga en "connecting"), liberamos el flag a los 60s
+    const connectingWatchdog = setTimeout(() => {
+      if (!connectionSettled) {
+        console.warn('[BOOT] Timeout esperando open/close; se libera isConnecting.');
+        releaseConnecting();
+      }
+    }, 60000);
+
+    // Listener de estado de conexión (QR, conectado, desconectado, reconexión automática).
+    sock.ev.on('connection.update', ({ connection, lastDisconnect, qr: qrCode }) => {
+      if (qrCode) {
+        console.log('Escanea este QR con WhatsApp > Dispositivos vinculados:');
+        qr.generate(qrCode, { small: true });
+      }
+
+      if (connection === 'open') {
+        clearTimeout(connectingWatchdog);
+        releaseConnecting();
+        console.log('WhatsApp conectado. El bot está listo para trabajar.');
+      }
+
+      if (connection === 'close') {
+        clearTimeout(connectingWatchdog);
+        releaseConnecting();
+        const statusCode = lastDisconnect?.error?.output?.statusCode;
+        const shouldReconnect = statusCode !== DisconnectReason.loggedOut;
+        console.log('Conexión cerrada. ¿Intentar reconectar automáticamente?:', shouldReconnect, `(code=${statusCode})`);
+
+        // Liberamos listeners del socket viejo para no acumular handlers
+        try {
+          sock.ev.removeAllListeners('connection.update');
+          sock.ev.removeAllListeners('messages.upsert');
+          sock.ev.removeAllListeners('creds.update');
+        } catch (_) { /* ignore */ }
+
+        if (shouldReconnect) {
+          // Un solo reintento programado (no startBot() inmediato en cascada)
+          scheduleReconnect(3000);
+        } else {
+          // Logout: cancelamos cualquier reintento ya programado
+          clearReconnectTimer();
+          console.log('Sesión cerrada (loggedOut). Borra auth/ y vuelve a escanear el QR.');
+        }
+      }
+    });
+
+    // Listener principal de mensajes entrantes.
+    sock.ev.on('messages.upsert', async ({ messages }) => {
     const message = messages[0];
 
     if (!message || message.key.remoteJid === 'status@broadcast') {
@@ -207,6 +286,7 @@ async function startBot() {
     // Desde aquí en adelante: flujo normal para clientes.
     const session = getSession(message.key.remoteJid);
     if (session.isMuted) {
+      console.log(`[MSG] Ignorado (mute): ${message.key.remoteJid}`);
       return;
     }
 
@@ -221,8 +301,11 @@ async function startBot() {
 
     const cleanText = stripTriggerPrefix(text, config);
     if (!cleanText) {
+      console.log(`[MSG] Sin texto usable de ${message.key.remoteJid} (¿solo media/sticker?)`);
       return;
     }
+
+    console.log(`[MSG] De ${message.key.remoteJid}: "${cleanText.slice(0, 80)}"`);
 
     try {
       // Función que engine usará para avisar eventos importantes (SOS / cierre de venta) a admins.
@@ -285,6 +368,12 @@ async function startBot() {
       console.error('Error procesando mensaje de WhatsApp:', error.message);
     }
   });
+  } catch (error) {
+    // Falló antes de conectar (auth, red, etc.): liberamos flag y reintentamos
+    console.error('Error iniciando socket WhatsApp:', error.message);
+    releaseConnecting();
+    scheduleReconnect(5000);
+  }
 }
 
 // Arranque de la app.

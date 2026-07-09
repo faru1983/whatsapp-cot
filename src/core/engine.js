@@ -17,6 +17,7 @@ import { statesMap } from '../flows/index.js';
 import { readPrompt } from '../views/prompts.js';
 import { buildFaqCatalogContext } from '../logic/utils.js';
 import { buildAdminSosBody } from '../views/templates.js';
+import { FAQ_JSON_PATH } from './paths.js';
 
 const isMainModule = process.argv[1] === fileURLToPath(import.meta.url);
 
@@ -386,7 +387,7 @@ export async function processMessage(sessionId, messageText) {
       cliLog('FAQ: omitido (saludo/ruido) → fallback IA generativa');
     } else {
       cliLog('FAQ: consultando faq.json + catálogo/despachos (datos.json) con IA...');
-      const faqData = JSON.parse(fs.readFileSync(path.join(process.cwd(), 'db', 'faq.json'), 'utf8'));
+      const faqData = JSON.parse(fs.readFileSync(FAQ_JSON_PATH, 'utf8'));
       faqResponse = await responderFAQ(messageText, faqData);
     }
 

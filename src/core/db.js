@@ -3,14 +3,12 @@
 // Aquí se guarda y recupera todo el historial de la conversación de cada cliente, 
 // asegurando que la IA siempre tenga el contexto del chat aunque el servidor se reinicie.
 // ==============================================================================
-import path from 'node:path'; // Módulo del sistema para manejar rutas de archivos de forma limpia.
-import process from 'node:process'; // Acceso al proceso del sistema (para saber la carpeta del proyecto).
 import Database from 'better-sqlite3'; // better-sqlite3 es la librería que maneja la base de datos local SQLite.
+import { SQLITE_PATH } from './paths.js';
 
-// Definimos dónde se guardará el archivo de la base de datos física.
-// En este caso, creará un archivo llamado "conversation-memory.sqlite" en la carpeta raíz del bot.
-const rootDir = process.cwd();
-const dbPath = path.join(rootDir, 'conversation-memory.sqlite');
+// Ruta fija a la raíz del repo (no depende de process.cwd() / PM2).
+const dbPath = SQLITE_PATH;
+console.log(`[DB] SQLite: ${dbPath}`);
 
 // Abrimos (o creamos, si no existe) el archivo de base de datos SQLite.
 const db = new Database(dbPath);

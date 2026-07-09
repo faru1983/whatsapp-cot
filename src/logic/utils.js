@@ -2,18 +2,21 @@
 // OBJETIVO: Caja de Herramientas y Seguridad (Helpers).
 // ==============================================================================
 import fs from 'node:fs';
-import path from 'node:path';
-import process from 'node:process';
+import { DATOS_JSON_PATH } from '../core/paths.js';
 
 // ==============================================================================
 // BASE DE DATOS GENERAL (datos.json)
 // ==============================================================================
-const preciosPath = path.join(process.cwd(), 'db', 'datos.json');
+// Ruta fija a la raíz del repo (no depende de process.cwd() / PM2).
+const preciosPath = DATOS_JSON_PATH;
 export let preciosData = {};
 
 try {
 	if (fs.existsSync(preciosPath)) {
 		preciosData = JSON.parse(fs.readFileSync(preciosPath, 'utf8'));
+		console.log(`[DATOS] Cargado: ${preciosPath}`);
+	} else {
+		console.error(`[DATOS] No existe: ${preciosPath}`);
 	}
 } catch (err) {
 	console.error('Error cargando datos.json en utils.js:', err.message);
