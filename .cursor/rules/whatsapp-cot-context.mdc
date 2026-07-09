@@ -62,7 +62,7 @@ Los IDs de estado son **semánticos** (`BARRILES_*` / `EVENTOS_*`); no llevan nu
 - **Mute:** intervención humana (`index.js`), SOS (`NO`/`SOS`/pedir humano), anti-loop (≥2 errores), cierre de venta.
 - **Cambio de intención:** máx. 2 switches barriles↔eventos en estados tempranos.
 - **Fallback en `success: false`:** FAQ → LLM con contexto del estado → re-pregunta del paso actual.
-- **Comandos admin WhatsApp:** `/detenerbot`, `/iniciarbot`, `/reiniciarbot` (+ número opcional).
+- **Comandos admin WhatsApp:** solo desde chat propio/admin, con número obligatorio: `/detenerbot 569...`, `/iniciarbot 569...`, `/reiniciarbot 569...` (no desde la ventana del cliente).
 - **Comandos CLI:** `/reset`, `/mute`, `/unmute`, `/exit`.
 
 ## Datos y config

@@ -80,7 +80,7 @@ export const barrilesStates = {
 
       // Si elige web, cerramos el flujo de chat para evitar mensajes duplicados.
       if (intent === 'WEB') {
-        return { success: true, nextState: 'CERRADO', customReply: `¡Buenísimo! Te dejo el link: https://cocktailsontap.cl/barriles. Si te surge cualquier duda durante tu compra, me escribes por aquí y te ayudo 🍹`, mute: true };
+        return { success: true, nextState: 'CERRADO', customReply: `¡Buenísimo! Si te surge cualquier duda durante tu compra, me escribes por aquí y te ayudo 🍹`, mute: true };
       }
       if (intent === 'CHAT') {
         return { success: true, nextState: 'BARRILES_OFRECER_CATALOGO' };
