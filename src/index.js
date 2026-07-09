@@ -1,4 +1,5 @@
 import makeWASocket, {
+  Browsers,
   DisconnectReason,
   fetchLatestBaileysVersion,
   makeCacheableSignalKeyStore,
@@ -13,6 +14,9 @@ import { loadBotConfig } from './core/config.js';
 import { composeAdminAlertMessage } from './views/templates.js';
 import { AUTH_DIR, PROJECT_ROOT, SQLITE_PATH } from './core/paths.js';
 import process from 'node:process';
+
+// BAILEYS_DEBUG=1 → logs detallados de Baileys (útil en el VPS para "Esperando mensaje")
+const BAILEYS_DEBUG = process.env.BAILEYS_DEBUG === '1';
 
 // ==============================================================================
 // OBJETIVO: Punto de entrada del bot de WhatsApp.
@@ -98,19 +102,24 @@ async function startBot() {
 
   try {
     const config = loadBotConfig();
-    const logger = pino({ level: 'silent' });
+    // silent en producción; BAILEYS_DEBUG=1 sube a debug para investigar descifrado
+    const logger = pino({ level: BAILEYS_DEBUG ? 'debug' : 'silent' });
 
     console.log(`[BOOT] Proyecto: ${PROJECT_ROOT}`);
     console.log(`[BOOT] Auth: ${AUTH_DIR}`);
     console.log(`[BOOT] SQLite: ${SQLITE_PATH}`);
     console.log(`[BOOT] cwd: ${process.cwd()}`);
+    console.log(`[BOOT] Node: ${process.version}`);
+    console.log(`[BOOT] BAILEYS_DEBUG: ${BAILEYS_DEBUG}`);
 
     // AUTH_DIR es ruta absoluta → auth/ siempre en la raíz del repo
     const { state, saveCreds } = await useMultiFileAuthState(AUTH_DIR);
-    const { version } = await fetchLatestBaileysVersion();
+    const { version, isLatest } = await fetchLatestBaileysVersion();
+    console.log(`[BOOT] WA version: ${version.join('.')} (isLatest=${isLatest})`);
 
     // makeCacheableSignalKeyStore: cachea claves Signal en RAM (más estable y menos I/O a disco).
     // getMessage: obligatorio para que WhatsApp pueda pedir reenvío si falla el descifrado.
+    // browser: identidad de dispositivo vinculado (recomendado por Baileys en Linux/VPS).
     const sock = makeWASocket({
       version,
       auth: {
@@ -118,20 +127,29 @@ async function startBot() {
         keys: makeCacheableSignalKeyStore(state.keys, logger)
       },
       logger,
+      browser: Browsers.ubuntu('Chrome'),
       printQRInTerminal: false,
       markOnlineOnConnect: false,
       syncFullHistory: false,
       defaultQueryTimeoutMs: 60000,
       getMessage: async (key) => {
-        // 1) Buscamos en nuestra caché de mensajes recientes
+        // WhatsApp pide el contenido original para reintentar el envío cifrado
         const cached = key?.id ? recentMessages.get(key.id) : undefined;
+        console.log(`[getMessage] id=${key?.id} jid=${key?.remoteJid} hit=${!!cached}`);
         if (cached) return cached;
-        // 2) Fallback vacío: evita crash; WhatsApp puede pedir otro reintento
         return undefined;
       }
     });
 
     sock.ev.on('creds.update', saveCreds);
+
+    // Diagnóstico: estado de entrega (ACK). Si status avanza pero el celular no lee → fallo de descifrado.
+    sock.ev.on('messages.update', (updates) => {
+      for (const u of updates) {
+        if (!u.key?.fromMe) continue;
+        console.log(`[ACK] id=${u.key.id} jid=${u.key.remoteJid} status=${u.update?.status} err=${u.update?.error || '-'}`);
+      }
+    });
 
     // Si nunca llega open/close (cuelga en "connecting"), liberamos el flag a los 60s
     const connectingWatchdog = setTimeout(() => {
@@ -353,14 +371,26 @@ async function startBot() {
 
       // El engine puede devolver un string o un array de mensajes (bloques separados)
       const replies = Array.isArray(reply) ? reply : [reply];
+      const targetJid = message.key.remoteJid;
+
+      // Asegura sesión Signal con el destinatario (reduce "Esperando mensaje" en primer contacto)
+      try {
+        await sock.assertSessions([targetJid], true);
+      } catch (e) {
+        console.warn(`[SEND] assertSessions falló para ${targetJid}:`, e.message);
+      }
+
       for (const textPart of replies) {
         if (!textPart) continue;
         // Sin quoted: en algunos celulares el quote rompe el descifrado ("Esperando mensaje")
-        const sentMsg = await sock.sendMessage(message.key.remoteJid, { text: textPart });
+        const sentMsg = await sock.sendMessage(targetJid, { text: textPart });
         if (sentMsg?.key?.id) {
           botSentMessageIds.add(sentMsg.key.id);
           // Guardamos el mensaje saliente para getMessage (reintentos de WhatsApp)
           rememberMessage(sentMsg.key.id, sentMsg.message || { conversation: textPart });
+          console.log(`[SEND] OK id=${sentMsg.key.id} to=${targetJid} len=${textPart.length}`);
+        } else {
+          console.warn(`[SEND] sin id de mensaje hacia ${targetJid}`);
         }
       }
 
