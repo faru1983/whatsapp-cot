@@ -117,9 +117,9 @@ async function startBot() {
     const { version, isLatest } = await fetchLatestBaileysVersion();
     console.log(`[BOOT] WA version: ${version.join('.')} (isLatest=${isLatest})`);
 
-    // makeCacheableSignalKeyStore: cachea claves Signal en RAM (más estable y menos I/O a disco).
-    // getMessage: obligatorio para que WhatsApp pueda pedir reenvío si falla el descifrado.
-    // browser: identidad de dispositivo vinculado (recomendado por Baileys en Linux/VPS).
+    // Baileys 7: enableRecentMessageCache + enableAutoSessionRecreation
+    // ayudan con "Esperando mensaje" (reintentos de descifrado / sesión Signal).
+    // getMessage: WhatsApp pide el contenido original para reenviar cifrado.
     const sock = makeWASocket({
       version,
       auth: {
@@ -128,10 +128,11 @@ async function startBot() {
       },
       logger,
       browser: Browsers.ubuntu('Chrome'),
-      printQRInTerminal: false,
       markOnlineOnConnect: false,
       syncFullHistory: false,
       defaultQueryTimeoutMs: 60000,
+      enableRecentMessageCache: true,
+      enableAutoSessionRecreation: true,
       getMessage: async (key) => {
         // WhatsApp pide el contenido original para reintentar el envío cifrado
         const cached = key?.id ? recentMessages.get(key.id) : undefined;

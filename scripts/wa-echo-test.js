@@ -2,8 +2,9 @@
 // OBJETIVO: Prueba mínima de Baileys (sin motor del bot).
 // Sirve para saber si el "Esperando mensaje" es de Baileys/sesión o del flujo COT.
 //
-// Uso en el VPS:
+// Uso en el VPS (Node >= 20):
 //   cd ~/whatsapp-cot
+//   rm -rf auth-echo-test
 //   npm run test:wa-echo
 //
 // Tras escanear el QR, WhatsApp suele cerrar con código 515 ("restart required").
@@ -30,7 +31,7 @@ const recent = new Map();
 let reconnectTimer = null;
 let isConnecting = false;
 
-console.log('=== WA ECHO TEST (Baileys aislado) ===');
+console.log('=== WA ECHO TEST (Baileys 7 aislado) ===');
 console.log('Auth temporal:', authDir);
 console.log('Node:', process.version);
 console.log('Cierra WhatsApp Web / otros vínculos del mismo número antes de escanear.');
@@ -48,6 +49,7 @@ async function startEcho() {
   const { state, saveCreds } = await useMultiFileAuthState(authDir);
   const { version, isLatest } = await fetchLatestBaileysVersion();
   console.log(`[BOOT] WA version: ${version.join('.')} (isLatest=${isLatest})`);
+  console.log(`[BOOT] Baileys: 7.x (enableRecentMessageCache + enableAutoSessionRecreation)`);
 
   const logger = pino({ level: process.env.BAILEYS_DEBUG === '1' ? 'debug' : 'info' });
 
@@ -59,9 +61,10 @@ async function startEcho() {
     },
     logger,
     browser: Browsers.ubuntu('Chrome'),
-    printQRInTerminal: false,
     markOnlineOnConnect: false,
     syncFullHistory: false,
+    enableRecentMessageCache: true,
+    enableAutoSessionRecreation: true,
     getMessage: async (key) => {
       console.log(`[getMessage] pedido reintento id=${key?.id} jid=${key?.remoteJid}`);
       return key?.id ? recent.get(key.id) : undefined;
@@ -87,8 +90,6 @@ async function startEcho() {
       const loggedOut = code === DisconnectReason.loggedOut;
       console.log(`Conexión cerrada. code=${code} loggedOut=${loggedOut}`);
 
-      // 515 = restart required tras pairing (esperado). Reconectamos.
-      // loggedOut = hay que borrar auth y escanear de nuevo.
       try {
         sock.ev.removeAllListeners('connection.update');
         sock.ev.removeAllListeners('messages.upsert');
@@ -97,7 +98,7 @@ async function startEcho() {
       } catch (_) { /* ignore */ }
 
       if (loggedOut) {
-        console.log('Sesión invalidada. Borra auth-echo-test y vuelve a correr el script:');
+        console.log('Sesión invalidada. Borra auth-echo-test y vuelve a correr:');
         console.log('  rm -rf auth-echo-test && npm run test:wa-echo');
         process.exit(1);
         return;
@@ -115,7 +116,6 @@ async function startEcho() {
     }
   });
 
-  // Recibos de entrega / lectura
   sock.ev.on('messages.update', (updates) => {
     for (const u of updates) {
       console.log('[messages.update]', JSON.stringify({
@@ -143,6 +143,7 @@ async function startEcho() {
       type,
       fromMe: m.key.fromMe,
       jid: m.key.remoteJid,
+      jidAlt: m.key.remoteJidAlt,
       id: m.key.id,
       hasMessage: !!m.message,
       text: text.slice(0, 80)
@@ -150,15 +151,19 @@ async function startEcho() {
 
     if (m.key.fromMe || !text) return;
 
+    // En Baileys 7 el chat puede venir como @lid; usamos el JID del mensaje tal cual
+    const targetJid = m.key.remoteJid;
     const reply = `ECHO: ${text}`;
     try {
-      await sock.assertSessions([m.key.remoteJid], true);
-      const sent = await sock.sendMessage(m.key.remoteJid, { text: reply });
+      if (typeof sock.assertSessions === 'function') {
+        await sock.assertSessions([targetJid], true);
+      }
+      const sent = await sock.sendMessage(targetJid, { text: reply });
       if (sent?.key?.id) {
         recent.set(sent.key.id, sent.message || { conversation: reply });
       }
       console.log('[SEND OK]', {
-        to: m.key.remoteJid,
+        to: targetJid,
         id: sent?.key?.id,
         status: sent?.status
       });
