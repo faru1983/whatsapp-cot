@@ -16,6 +16,7 @@ import { getSession, saveSession, resetSession } from './db.js';
 import { statesMap } from '../flows/index.js';
 import { readPrompt } from '../views/prompts.js';
 import { buildFaqCatalogContext } from '../logic/utils.js';
+import { buildAdminSosBody } from '../views/templates.js';
 
 const isMainModule = process.argv[1] === fileURLToPath(import.meta.url);
 
@@ -193,10 +194,15 @@ export async function processMessage(sessionId, messageText) {
         if (session.intentSwitchCount >= maxIntentSwitches) {
           cliLog(`SEGURIDAD: demasiados cambios de intención (>= ${maxIntentSwitches}). Silenciando.`);
           session.isMuted = true;
+          // Alerta SOS unificada: cabecera (cliente) la arma index.js
           if (sendAdminAlert) {
             sendAdminAlert({
               type: 'SOS',
-              message: `⚠️ *El cliente necesita asistencia*\nNúmero: ${sessionId}\n\nHa cambiado de opinión entre Barriles y Eventos demasiadas veces (Indecisión extrema).`
+              title: 'INDECISIÓN',
+              body: buildAdminSosBody({
+                reason: 'Cambió demasiadas veces entre Barriles y Eventos.',
+                stateId: currentStateId
+              })
             });
           }
           saveSession(sessionId, session);
@@ -331,10 +337,16 @@ export async function processMessage(sessionId, messageText) {
       session.isMuted = true;
       session.silenciado_timestamp = Date.now();
 
+      // Alerta SOS unificada: cabecera (cliente) la arma index.js
       if (sendAdminAlert) {
         sendAdminAlert({
           type: 'SOS',
-          message: `⚠️ *El cliente necesita asistencia*\nNúmero: ${sessionId}\n\nSolicitó hablar con el equipo en el paso "${currentStateId}".\nÚltimo mensaje: "${messageText}"`
+          title: 'PIDIÓ HUMANO',
+          body: buildAdminSosBody({
+            reason: 'Solicitó hablar con el equipo.',
+            stateId: currentStateId,
+            lastMessage: messageText
+          })
         });
       }
       reply = `Disculpa, no te entendí. Te comunicaré con alguien de nuestro equipo para que te ayude directamente. ¡Ya te escriben! 🙌`;
@@ -348,11 +360,17 @@ export async function processMessage(sessionId, messageText) {
       cliLog(`SEGURIDAD: anti-loop (${session.consecutiveErrors}/${maxConsecutiveErrors}). Silenciando.`);
       session.isMuted = true;
       session.silenciado_timestamp = Date.now();
-      
+
+      // Alerta SOS unificada: cabecera (cliente) la arma index.js
       if (sendAdminAlert) {
         sendAdminAlert({
           type: 'SOS',
-          message: `⚠️ *El cliente necesita asistencia*\nNúmero: ${sessionId}\n\nHa dado múltiples respuestas incomprensibles en el paso "${currentStateId}".\nÚltimo mensaje: "${messageText}"`
+          title: 'ANTI-LOOP',
+          body: buildAdminSosBody({
+            reason: 'Varias respuestas seguidas que el bot no entendió.',
+            stateId: currentStateId,
+            lastMessage: messageText
+          })
         });
       }
       saveSession(sessionId, session);

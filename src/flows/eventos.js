@@ -1,4 +1,9 @@
-import { getWelcomeEventos, getDoubtClarificationTemplate, getEventQuotationTemplate } from '../views/templates.js';
+import {
+  getWelcomeEventos,
+  getDoubtClarificationTemplate,
+  getEventQuotationTemplate,
+  buildAdminEventosOrderBody
+} from '../views/templates.js';
 import { STATE_PROMPTS } from '../views/prompts.js';
 import {
   findLocationByFuzzyMatch,
@@ -498,15 +503,26 @@ export const eventosStates = {
         const totalStr = quote?.total != null ? formatPrice(quote.total) : 'Revisar chat';
         const formatKey = getEventFormatKey(eventoFormato);
 
+        // Armamos las líneas del menú (nombre + litraje + precio) para no perder la orden
         let adminProducts = '';
         for (const entry of Object.values(session.orderBuilder?.products || {})) {
           const price = preciosData.cocteles[entry.name]?.[formatKey]?.[entry.litrage] || 0;
           adminProducts += `- ${entry.quantity}x ${entry.name} (${entry.litrage}): ${formatPrice(price * entry.quantity)}\n`;
         }
 
+        // Cabecera (cliente WhatsApp) la pone index.js; aquí el cuerpo con la orden
         const alert = {
           type: 'SUCCESS',
-          message: `✅ *NUEVO EVENTO CONFIRMADO*\nCliente: ${userName || 'No informado'}\n\n📋 *Resumen:*\n- Formato: ${eventoFormato || 'No informado'}\n- Invitados: ${guests || 'No informado'}\n- Ubicación: ${location || 'No informado'}\n- Fecha: ${date || 'No informado'}\n\n🍹 *Cócteles:*\n${adminProducts.trim() || '- (ver chat)'}\n\nTotal a facturar: ${totalStr}`
+          title: 'EVENTOS',
+          body: buildAdminEventosOrderBody({
+            userName,
+            eventoFormato,
+            guests,
+            location,
+            date,
+            productsText: adminProducts,
+            totalStr
+          })
         };
 
         const closingReply = `✅ Tu cotización quedó registrada.\n\nEn unos minutos uno de nuestros ejecutivos revisará la disponibilidad para esa fecha y te enviará los datos de transferencia.\n\nUna vez confirmado el pago, agendamos formalmente tu evento. 🥂`;

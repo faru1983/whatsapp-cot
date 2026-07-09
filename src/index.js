@@ -9,6 +9,7 @@ import { processMessage, setAdminAlertFunction } from './core/engine.js';
 import { shouldHandleMessage, stripTriggerPrefix } from './logic/utils.js';
 import { getSession, saveSession, resetSession } from './core/db.js';
 import { loadBotConfig } from './core/config.js';
+import { composeAdminAlertMessage } from './views/templates.js';
 import process from 'node:process';
 
 // ==============================================================================
@@ -174,25 +175,33 @@ async function startBot() {
 
     try {
       // Función que engine usará para avisar eventos importantes (SOS / cierre de venta) a admins.
+      // Formato unificado: cabecera (tipo + cliente) + cuerpo (pedido o motivo).
+      // alertData = { type: 'SUCCESS'|'SOS', title: string, body: string }
       const sendAdminAlert = async (alertData) => {
+        // Identificamos al cliente con el JID real de WhatsApp + nombre de perfil (pushName)
         const realId = message.key.participant || message.key.remoteJid;
         let displayId = realId.replace('@s.whatsapp.net', '').replace('@c.us', '');
         const nombrePerfil = message.pushName ? ` (${message.pushName})` : '';
-        
+
+        // Algunos chats usan @lid (ID oculto): no tenemos el número público
         if (displayId.includes('@lid')) {
           displayId = displayId.replace('@lid', '') + ' [ID Oculto]';
         }
-        
-        const rawNumberOnly = message.key.remoteJid.split('@')[0];
-        const formattedUser = `+${displayId}${nombrePerfil}`;
-        
-        const mensajeLimpio = alertData.message
-          .replace(message.key.remoteJid, formattedUser)
-          .replace(rawNumberOnly, formattedUser);
 
+        const clientLabel = `+${displayId}${nombrePerfil}`;
+
+        // Armamos el mensaje con la misma cabecera para SOS y cotizaciones
+        const mensajeFinal = composeAdminAlertMessage({
+          type: alertData.type || 'SOS',
+          title: alertData.title || '',
+          clientLabel,
+          body: alertData.body || alertData.message || ''
+        });
+
+        // Una copia idéntica a cada administrador de ADMIN_NUMBERS
         for (const adminNum of adminList) {
           try {
-            await sock.sendMessage(adminNum, { text: mensajeLimpio });
+            await sock.sendMessage(adminNum, { text: mensajeFinal });
           } catch (e) {
             console.error(`Error enviando alerta a ${adminNum}:`, e.message);
           }

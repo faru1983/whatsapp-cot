@@ -1,7 +1,7 @@
 import { formatPrice } from '../logic/utils.js';
 
 // ==============================================================================
-// OBJETIVO: Textos fijos que el bot envía al cliente por WhatsApp.
+// OBJETIVO: Textos fijos que el bot envía por WhatsApp (cliente y alertas a admin).
 // Aquí NO hay lógica de negocio (eso va en flows/ y logic/).
 // Solo funciones que devuelven strings formateados para copiar al chat.
 // ==============================================================================
@@ -263,4 +263,116 @@ export function getEventQuotationTemplate(sessionData, quote, deliveryCost, isRM
 
   text += `\n¿Tu pedido *está bien* así para avanzar o necesitas *modificar* algo?`;
   return text;
+}
+
+// ==============================================================================
+// 4. ALERTAS A ADMINISTRADORES (mismo formato en SOS y cotizaciones)
+// ==============================================================================
+// Cabecera (tipo + cliente) la arma index.js con el número real de WhatsApp.
+// Aquí solo va el *cuerpo*: resumen, pedido y total (o motivo del SOS).
+// Estructura final que recibe el admin:
+//   {emoji} *TIPO* — {título}
+//   👤 Cliente: +569... (NombrePerfil)
+//
+//   {cuerpo}
+// ==============================================================================
+
+/**
+ * buildAdminBarrilesOrderBody: Cuerpo de alerta cuando se confirma cotización de barriles.
+ * Incluye ubicación, fecha, cócteles, extras y total (la orden no se pierde).
+ *
+ * @param {object} data
+ * @param {string} data.location - Comuna/región del cliente
+ * @param {string} data.date - Fecha del pedido
+ * @param {string} data.productsText - Líneas de cócteles ya formateadas
+ * @param {string} [data.extrasText] - Bloque de extras (puede ir vacío)
+ * @param {string} data.totalStr - Total ya formateado con formatPrice
+ * @returns {string} Cuerpo del mensaje (sin cabecera de cliente)
+ */
+export function buildAdminBarrilesOrderBody({ location, date, productsText, extrasText = '', totalStr }) {
+  let body = `📋 *Resumen:*\n`;
+  body += `- Ubicación: ${location || 'No informada'}\n`;
+  body += `- Fecha: ${date || 'No informada'}\n\n`;
+  body += `🍹 *Pedido:*\n`;
+  body += `${(productsText || '').trim() || '- (ver chat)'}\n`;
+  if (extrasText && extrasText.trim()) {
+    body += `\n✨ *Extras:*\n${extrasText.trim()}\n`;
+  }
+  body += `\n💰 *Total a facturar:* ${totalStr || 'Revisar chat'}`;
+  return body;
+}
+
+/**
+ * buildAdminEventosOrderBody: Cuerpo de alerta cuando se confirma cotización de eventos.
+ * Incluye datos del evento, menú con litraje y total.
+ *
+ * @param {object} data
+ * @param {string} [data.userName] - Nombre que dio el cliente en el flujo
+ * @param {string} [data.eventoFormato] - Dispensador o Muro
+ * @param {string|number} [data.guests] - Cantidad de invitados
+ * @param {string} [data.location] - Ubicación
+ * @param {string} [data.date] - Fecha del evento
+ * @param {string} data.productsText - Líneas del menú ya formateadas
+ * @param {string} data.totalStr - Total ya formateado
+ * @returns {string} Cuerpo del mensaje (sin cabecera de cliente)
+ */
+export function buildAdminEventosOrderBody({
+  userName,
+  eventoFormato,
+  guests,
+  location,
+  date,
+  productsText,
+  totalStr
+}) {
+  let body = `📋 *Resumen:*\n`;
+  body += `- Nombre: ${userName || 'No informado'}\n`;
+  body += `- Formato: ${eventoFormato || 'No informado'}\n`;
+  body += `- Invitados: ${guests || 'No informado'}\n`;
+  body += `- Ubicación: ${location || 'No informada'}\n`;
+  body += `- Fecha: ${date || 'No informada'}\n\n`;
+  body += `🍹 *Pedido:*\n`;
+  body += `${(productsText || '').trim() || '- (ver chat)'}\n`;
+  body += `\n💰 *Total a facturar:* ${totalStr || 'Revisar chat'}`;
+  return body;
+}
+
+/**
+ * buildAdminSosBody: Cuerpo de alerta SOS (pide humano, anti-loop o indecisión).
+ *
+ * @param {object} data
+ * @param {string} data.reason - Por qué se dispara el SOS (texto corto)
+ * @param {string} [data.stateId] - Estado actual de la máquina (paso del flujo)
+ * @param {string} [data.lastMessage] - Último mensaje del cliente
+ * @returns {string} Cuerpo del mensaje (sin cabecera de cliente)
+ */
+export function buildAdminSosBody({ reason, stateId, lastMessage }) {
+  let body = `📌 *Motivo:* ${reason || 'Asistencia requerida'}\n`;
+  if (stateId) {
+    body += `📍 *Paso:* ${stateId}\n`;
+  }
+  if (lastMessage != null && String(lastMessage).trim() !== '') {
+    body += `💬 *Último mensaje:* "${lastMessage}"`;
+  }
+  return body.trim();
+}
+
+/**
+ * composeAdminAlertMessage: Une cabecera estándar + cuerpo.
+ * La usa index.js para que TODAS las alertas (SOS y cotización) se vean igual.
+ *
+ * @param {object} opts
+ * @param {'SUCCESS'|'SOS'} opts.type - Tipo de alerta
+ * @param {string} opts.title - Subtítulo (ej. "BARRILES DESECHABLES", "ANTI-LOOP")
+ * @param {string} opts.clientLabel - Identificación ya formateada: "+569... (Nombre)"
+ * @param {string} opts.body - Cuerpo (pedido o motivo SOS)
+ * @returns {string} Mensaje completo listo para enviar al admin
+ */
+export function composeAdminAlertMessage({ type, title, clientLabel, body }) {
+  // Cabecera según tipo: cotización confirmada vs pedido de ayuda
+  const headline = type === 'SUCCESS'
+    ? `✅ *COTIZACIÓN CONFIRMADA* — ${title || 'PEDIDO'}`
+    : `⚠️ *SOS — ASISTENCIA*${title ? ` — ${title}` : ''}`;
+
+  return `${headline}\n👤 Cliente: ${clientLabel || 'Desconocido'}\n\n${(body || '').trim()}`;
 }

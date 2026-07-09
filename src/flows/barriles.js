@@ -4,7 +4,8 @@
   getDoubtClarificationTemplate,
   getQuotationTemplate,
   getOfferQuoteAfterCatalog,
-  getBrowseOnlyGoodbye
+  getBrowseOnlyGoodbye,
+  buildAdminBarrilesOrderBody
 } from '../views/templates.js';
 import { STATE_PROMPTS } from '../views/prompts.js';
 import { 
@@ -361,12 +362,13 @@ export const barrilesStates = {
       const isConfirming = /(si|sí|ok|perfecto|listo|dale|confirm|esta bien|está bien|todo bien|vamos|súper|super|correcto|excelente|genial|aprob|bueno)/i.test(messageText);
       const isModifying = /cambiar|sacar|agregar|quitar|modif|ajust|cantidad|litro|cóctel|coctel|producto|extra|otro/i.test(messageText);
 
-      // Cliente confirma sin pedir cambios → venta cerrada, alerta a admins
+      // Cliente confirma sin pedir cambios → venta cerrada, alerta a admins (formato unificado)
       if (isConfirming && !isModifying) {
         const { location, date } = session.orderBuilder.clientData;
         const total = session.orderBuilder.quote?.total;
         const totalStr = total ? formatPrice(total) : 'Revisar chat';
 
+        // Armamos las líneas del pedido para que el admin vea la orden completa
         let adminProducts = '';
         for (const [pName, qty] of Object.entries(session.orderBuilder.products)) {
           const price = preciosData.cocteles[pName]?.desechable?.["5L"] || 0;
@@ -375,16 +377,23 @@ export const barrilesStates = {
 
         let adminExtras = '';
         if (Object.keys(session.orderBuilder.extras).length > 0) {
-          adminExtras += `\n✨ *Extras:*\n`;
           for (const [eName, qty] of Object.entries(session.orderBuilder.extras)) {
             const price = preciosData.extras[eName] || 0;
             adminExtras += `- ${qty}x ${eName}: ${formatPrice(price * qty)}\n`;
           }
         }
 
+        // Cabecera (cliente) la pone index.js; aquí solo el cuerpo con la orden
         const alert = {
           type: 'SUCCESS',
-          message: `✅ *NUEVA COTIZACIÓN FINALIZADA - BARRILES DESECHABLES*\n\n📋 *Resumen:*\n- Ubicación: ${location}\n- Fecha: ${date}\n\n🍹 *Cócteles:*\n${adminProducts.trim()}\n${adminExtras}\nTotal a facturar: ${totalStr}`
+          title: 'BARRILES DESECHABLES',
+          body: buildAdminBarrilesOrderBody({
+            location,
+            date,
+            productsText: adminProducts,
+            extrasText: adminExtras,
+            totalStr
+          })
         };
 
         const closingReply = `✅ Tu pedido quedó registrado.\n\nEn unos minutos uno de nuestros ejecutivos revisará la disponibilidad para esa fecha y te enviará los datos de transferencia.\n\nUna vez confirmado el pago, tu pedido queda agendado. 🍹`;
