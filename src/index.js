@@ -207,11 +207,14 @@ async function startBot() {
         return;
       }
 
-      const sentMsg = await sock.sendMessage(message.key.remoteJid, { text: reply }, { quoted: message });
-
-      // Guardamos el ID para no reprocesar nuestra propia respuesta.
-      if (sentMsg?.key?.id) {
-        botSentMessageIds.add(sentMsg.key.id);
+      // El engine puede devolver un string o un array de mensajes (bloques separados)
+      const replies = Array.isArray(reply) ? reply : [reply];
+      for (const textPart of replies) {
+        if (!textPart) continue;
+        const sentMsg = await sock.sendMessage(message.key.remoteJid, { text: textPart }, { quoted: message });
+        if (sentMsg?.key?.id) {
+          botSentMessageIds.add(sentMsg.key.id);
+        }
       }
 
     } catch (error) {

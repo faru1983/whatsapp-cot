@@ -2,7 +2,9 @@ import {
   getWelcomeBarriles, 
   getCatalogDesechables,
   getDoubtClarificationTemplate,
-  getQuotationTemplate
+  getQuotationTemplate,
+  getOfferQuoteAfterCatalog,
+  getBrowseOnlyGoodbye
 } from '../views/templates.js';
 import { STATE_PROMPTS } from '../views/prompts.js';
 import { 
@@ -24,8 +26,8 @@ import { OrderBuilder } from '../logic/order-builder.js';
 // ============================================================================
 // OBJETIVO: Flujo A (Barriles Desechables).
 // Aquí están todos los pasos para vender barriles por WhatsApp:
-// 1) Elegir canal, 2) ver catálogo, 3) armar pedido, 4) pedir datos,
-// 5) revisar cotización y 6) confirmar.
+// 1) Elegir canal, 2) ver catálogo, 2.1) ofrecer cotización,
+// 3) armar pedido, 4) pedir datos, 5) revisar cotización y 6) confirmar.
 // ============================================================================
 export const flowAStates = {
   
@@ -73,21 +75,86 @@ export const flowAStates = {
         };
       }
 
+      // Carta y pregunta en mensajes separados (más claro en WhatsApp)
       if (wantsFullCatalog) {
-        return { success: true, nextState: 'A3_RECOGIDA_PRODUCTOS', customReply: getCartaCocteles() };
+        return {
+          success: true,
+          nextState: 'A2_1_OFRECER_COTIZACION',
+          customReplies: [
+            getCartaCocteles('desechable'),
+            getOfferQuoteAfterCatalog()
+          ]
+        };
       }
 
       // Cliente no quiere catálogo ni comprar ahora → despedida y reset de sesión
       const refusesCatalog = /\b(no|no\s+gracias|despu[eé]s|luego|en\s+otro\s+momento|nada|cancelar)\b/i.test(messageText.trim());
       if (refusesCatalog) {
-         return { success: true, nextState: 'CERRADO', customReply: "¡No hay problema! Si cambias de idea en el futuro, no dudes en escribirnos. ¡Hasta pronto! 🍹", shouldReset: true };
+         return { success: true, nextState: 'CERRADO', customReply: getBrowseOnlyGoodbye(), mute: true, shouldReset: true };
       }
 
-      // Si ya nombra cócteles sin ver catálogo, saltamos directo al paso de productos
+      // Si ya nombra cócteles sin ver catálogo, salta a armar pedido (quiere cotizar)
       if (hasDrinkSelection(messageText)) {
         return flowAStates.A3_RECOGIDA_PRODUCTOS.validateAndProcess(messageText, session);
       }
 
+      return { success: false };
+    }
+  },
+
+  // ==============================================================================
+  // A2.1 — OFRECER COTIZACIÓN (después de ver precios)
+  // No asumimos que quiere pedir: pregunta si cotiza o solo estaba mirando.
+  // ==============================================================================
+  A2_1_OFRECER_COTIZACION: {
+    id: 'A2_1_OFRECER_COTIZACION',
+    promptQuestion: () => getOfferQuoteAfterCatalog(),
+    shortQuestion: `¿Respondes *sí* / *cotizar*, o *solo mirando* / *Instagram*?`,
+    aiContextPrompt: STATE_PROMPTS.A2_1_OFRECER_COTIZACION,
+
+    async validateAndProcess(messageText, session) {
+      // Asegurar carrito vacío listo por si avanza a A3
+      if (!session.orderBuilder || session.orderBuilder.type !== 'desechable') {
+        session.orderBuilder = {
+          type: 'desechable',
+          products: {},
+          extras: {},
+          clientData: { name: null, date: null, location: null },
+        };
+      }
+
+      const trimmed = messageText.trim();
+      const lower = messageText.toLowerCase();
+
+      // 1) Instagram / solo mirando PRIMERO (antes que "ok"/"sí", para no confundir "ok dame el instagram")
+      const wantsInstagram = /\b(instagram|insta|ig|redes?|segu(ir|irme|irnos)|historia|historias|video|videos)\b/i.test(lower);
+      const onlyBrowsing = /\b(solo\s+(estaba\s+)?(mirando|consultando|viendo)|solo\s+mirando|solo\s+miraba|estaba\s+mirando|solo\s+consultaba|no\s+gracias|no\s+quiero(\s+cotiz)?|no\s+deseo|no\s+me\s+interesa|despues|despu[eé]s|luego|en\s+otro\s+momento|nada|cancelar|por\s+ahora\s+no|ahora\s+no|solo\s+ver)\b/i.test(lower)
+        || /^(no|nop|nope)$/i.test(trimmed);
+
+      if (wantsInstagram || onlyBrowsing) {
+        return {
+          success: true,
+          nextState: 'CERRADO',
+          customReply: getBrowseOnlyGoodbye(),
+          mute: true
+        };
+      }
+
+      // 2) Ya nombra cócteles → entra a armar pedido
+      if (hasDrinkSelection(messageText)) {
+        return flowAStates.A3_RECOGIDA_PRODUCTOS.validateAndProcess(messageText, session);
+      }
+
+      // 3) Quiere cotizar (keywords sugeridas en la pregunta: sí / cotizar)
+      const wantsQuote = /\b(si|sí|claro|ok|okay|dale|vamos|partamos|partimos|cotiz|pedido|armar|empez|comenz|me\s+gustar[ií]a|por\s+favor|porfa|aqui|ac[aá]|por\s+aqu[ií])\b/i.test(lower)
+        || /\bquiero\b/i.test(lower);
+
+      if (wantsQuote) {
+        const reply = `¡Perfecto! 🍸 En unos pasos simples armamos tu cotización.\n\nDime qué cócteles de la lista te gustaron o te interesan (ej: "2 mojitos y 1 aperol").`;
+        return { success: true, nextState: 'A3_RECOGIDA_PRODUCTOS', customReply: reply };
+      }
+
+      // 4) No entendimos → engine: FAQ → IA → re-pregunta con keywords
       return { success: false };
     }
   },
@@ -112,7 +179,11 @@ export const flowAStates = {
       // Pedido de catálogo otra vez (solo si el carrito está vacío)
       const wantsFullCatalog = /\b(si|sí|claro|ok|okay|dale|mu[eé]strame|precio|precios|valor|por favor|porfa|todos|todas|todo|lista|cat[áa]logo|menu|opciones|cuales|cu[aá]les|ver)\b/i.test(messageText);
       if (wantsFullCatalog && Object.keys(session.orderBuilder.products).length === 0) {
-        return { success: true, nextState: 'A3_RECOGIDA_PRODUCTOS', customReply: getCartaCocteles() };
+        return {
+          success: true,
+          nextState: 'A3_RECOGIDA_PRODUCTOS',
+          customReply: `${getCartaCocteles('desechable')}\n\n¿Cuál o cuáles de la lista quieres agregar? (ej: "2 mojitos y 1 aperol")`
+        };
       }
 
       // --- Rama: eliminar productos ("quita 1 mojito") ---

@@ -69,6 +69,30 @@ export const WELCOME_SECONDARY_FILTER = `¡Hola! Somos *Cocktails on Tap* 🍸
 /** Pregunta corta para re-encaminar sin repetir toda la bienvenida */
 export const SHORT_INTENT_QUESTION = `¿Buscas *Barriles Desechables* o *Servicio para Eventos*?`;
 
+/**
+ * getOfferQuoteAfterCatalog: Pregunta tras mostrar la carta de barriles.
+ * Mensaje separado de la lista. Keywords en *negrita* para guiar la respuesta del cliente.
+ *
+ * @returns {string}
+ */
+export function getOfferQuoteAfterCatalog() {
+  return `¿Te gustaría armar una *cotización* por aquí?
+
+Si quieres cotizar, responde *sí* o *cotizar* y en unos pasos simples nos indiques qué cócteles de la lista te gustaron.
+
+Si por ahora solo estabas *mirando*, escribe *solo mirando* o *Instagram* y te dejo el link.`;
+}
+
+/**
+ * getBrowseOnlyGoodbye: Despedida cuando el cliente solo consultaba precios.
+ * Invita a Instagram y el flujo cierra con mute.
+ *
+ * @returns {string}
+ */
+export function getBrowseOnlyGoodbye() {
+  return `¡Ningún problema! Gracias por escribirnos. 🙌\n\nSi quieres conocernos un poco mejor, síguenos en Instagram: https://instagram.com/cocktailsontap.chile\nAhí verás videos e historias destacadas de nuestros cócteles.\n\nCuando quieras cotizar, nos escribes por aquí y te ayudamos con gusto. ¡Hasta pronto! 🍹`;
+}
+
 /** Respuesta cuando el cliente dice que le interesan ambas opciones */
 export const MENSAJE_AMBAS = `🍸 ¡Perfecto! Te doy un resumen de ambos:
 
@@ -98,9 +122,9 @@ export function getCatalogDesechables(isSwitch = false) {
 
 ✅ Rinden aprox. *25 tragos* (5 Litros).
 ❄️ Conservan su sabor fresco hasta por *3 semanas* refrigerados (¡puedes servirte un trago y volver a guardarlo!).
-💰 El precio parte desde los *$31.990* (cada trago te queda a solo $1.280 aprox. 🤯).
+💰 El precio parte desde los *$31.990* (cada trago te queda a solo *$1.280* aprox. 🤯).
 
-¿Te muestro los barriles disponibles y sus precios?`;
+¿Quieres conocer los barriles disponibles y sus precios?`;
 }
 
 /**

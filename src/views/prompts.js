@@ -48,6 +48,15 @@ El cliente no ha elegido claramente.
 El cliente debe confirmar si quiere ver la lista de precios y cócteles. Responde brevemente y pregúntale si se la muestras.`;
   },
 
+  get A2_1_OFRECER_COTIZACION() {
+    return `[SISTEMA - ESTADO: OFRECER COTIZACIÓN TRAS VER PRECIOS]
+El cliente ya vio la carta de Barriles Desechables. Debe elegir: cotizar o solo mirar / pedir Instagram.
+1. Responde dudas breves (precios, sabores, despacho) sin armar cotización completa.
+2. NO asumas que ya quiere pedir. Si pide Instagram o dice que solo mira, indícale que escriba *solo mirando* o *Instagram*.
+3. Al finalizar, pregunta con keywords claras: *sí* / *cotizar* para cotizar, o *solo mirando* / *Instagram* si solo consultaba.
+REGLA DE NEGRITA: un solo asterisco (*) para negrita en WhatsApp.`;
+  },
+
   get A3_RECOGIDA_PRODUCTOS_DUDAS() {
     return `[SISTEMA - ESTADO: CATÁLOGO (FALLBACK)]
 El cliente está revisando las opciones pero hizo una pregunta diferente o tiene dudas.

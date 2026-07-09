@@ -40,9 +40,10 @@ index.js → engine.js → statesMap (flows/) → utils.js + order-builder.js
 
 Cada estado exporta:
 - `id`, `promptQuestion` (string o función), `shortQuestion`, `aiContextPrompt`
-- `validateAndProcess(messageText, session)` → `{ success, nextState?, customReply?, mute?, notifyAdmin?, shouldReset? }`
+- `validateAndProcess(messageText, session)` → `{ success, nextState?, customReply?, customReplies?, mute?, notifyAdmin?, shouldReset? }`
 
 `engine.js` orquesta: validación → transición → prompt del siguiente estado → fallback (SOS / FAQ / LLM).
+`customReplies` (array) envía varios mensajes de WhatsApp separados; `customReply` (string) uno solo.
 
 **Estado terminal `CERRADO`:** registrado en `statesMap` (`flows/cerrado.js`); las transiciones van con `customReply` + `mute: true`.
 
@@ -50,7 +51,7 @@ Cada estado exporta:
 
 **Router:** `ESPERANDO_INTENCION` → detecta BARRILES / EVENTOS / ambos.
 
-**Flujo A (barriles):** `A1_FILTRO_CANAL` → `A2_OFRECER_CATALOGO` → `A3_RECOGIDA_PRODUCTOS` (NLU con `extractProductsWithAI`) → `A3_RECOGIDA_DATOS` → `A4_REVISION_COTIZACION` (`OrderBuilder`) → `A4_1_ROUTER_MODIFICACION`.
+**Flujo A (barriles):** `A1_FILTRO_CANAL` → `A2_OFRECER_CATALOGO` → `A2_1_OFRECER_COTIZACION` (cotizar o solo mirar) → `A3_RECOGIDA_PRODUCTOS` (NLU con `extractProductsWithAI`) → `A3_RECOGIDA_DATOS` → `A4_REVISION_COTIZACION` (`OrderBuilder`) → `A4_1_ROUTER_MODIFICACION`.
 
 **Flujo B (eventos):** `B1_FILTRO_CANAL_EVENTOS` → `B2_RECOGIDA_DATOS_EVENTOS` → `B3_ELECCION_FORMATO` → `B4_ELECCION_MENU` (NLU con `extractEventProductsWithAI` + carrito) → `B5_COTIZACION` (`OrderBuilder` + `getEventQuotationTemplate`).
 

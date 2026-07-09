@@ -37,6 +37,11 @@ export function formatPrice(val) {
 	return `$${val.toLocaleString('es-CL')}`;
 }
 
+/**
+ * getCoctelesByCategoria: Agrupa el catálogo de datos.json por categoría de negocio.
+ *
+ * @returns {{ 'CLÁSICOS': object[], COMBINADOS: object[], MOCKTAILS: object[] }}
+ */
 export function getCoctelesByCategoria() {
 	const cats = {
 		'CLÁSICOS': [],
@@ -53,38 +58,180 @@ export function getCoctelesByCategoria() {
 	return cats;
 }
 
-export function getCartaCocteles(format = 'desechable') {
+/**
+ * getProductFamilyBase: Detecta la "familia" de un cóctel para agrupar sabores.
+ * Ej: "Mojito Maracuyá" → "Mojito"; "Piscola Alto 35°" → "Piscola".
+ * Si no hay familia clara, retorna null (se lista como producto suelto).
+ *
+ * @param {string} name - Nombre oficial del catálogo
+ * @returns {string|null}
+ */
+function getProductFamilyBase(name) {
+	if (!name) return null;
+	// Familias conocidas con variantes de sabor/marca en el catálogo
+	const knownFamilies = ['Mojito', 'Piscola', 'Sangría'];
+	for (const family of knownFamilies) {
+		const re = new RegExp(`^${family}\\b`, 'i');
+		if (re.test(name)) return family;
+	}
+	return null;
+}
+
+/**
+ * formatVariantLabel: Quita el prefijo de familia y "Mocktail" para mostrar solo el sabor.
+ * Ej: "Mojito Maracuyá" → "Maracuyá"; "Mojito Mocktail" → "Clásico";
+ *     "Mojito Maracuyá Mocktail" → "Maracuyá"
+ *
+ * @param {string} name - Nombre completo
+ * @param {string} familyBase - Prefijo de familia
+ * @returns {string}
+ */
+function formatVariantLabel(name, familyBase) {
+	let rest = name.slice(familyBase.length).trim();
+	const isMocktail = /\bmocktail\b/i.test(rest) || /\bmocktail\b/i.test(name);
+	rest = rest.replace(/\bmocktail\b/gi, '').trim();
+	if (!rest) return isMocktail ? 'Clásico' : 'Clásico';
+	return rest;
+}
+
+/**
+ * formatGroupedNames: Arma el texto de una línea agrupada.
+ * - Misma familia + variantes → "Mojito (Maracuyá, Frambuesa, Mango)"
+ * - Mezcla de familias y sueltos → "Mojito (Maracuyá, Mango) / Caipiriña"
+ * - Productos distintos mismo precio → "Caipiriña / Sangría / Mojito"
+ *
+ * @param {string[]} names - Nombres oficiales del grupo
+ * @returns {string}
+ */
+function formatGroupedNames(names) {
+	if (names.length === 1) return names[0];
+
+	/** @type {Map<string, string[]>} familia → nombres completos */
+	const byFamily = new Map();
+	/** @type {string[]} */ const singles = [];
+
+	for (const name of names) {
+		const base = getProductFamilyBase(name);
+		if (base) {
+			if (!byFamily.has(base)) byFamily.set(base, []);
+			byFamily.get(base).push(name);
+		} else {
+			singles.push(name);
+		}
+	}
+
+	const parts = [];
+
+	// Familias con 2+ variantes primero (ej. Mojito sabores), luego ítems sueltos
+	const familyParts = [];
+	const singleParts = [];
+
+	for (const [base, familyNames] of byFamily.entries()) {
+		if (familyNames.length === 1) {
+			singleParts.push(familyNames[0]);
+		} else {
+			const variants = familyNames.map((n) => formatVariantLabel(n, base));
+			familyParts.push(`${base} (${variants.join(', ')})`);
+		}
+	}
+
+	singleParts.push(...singles);
+	singleParts.sort((a, b) => a.localeCompare(b, 'es'));
+	familyParts.sort((a, b) => a.localeCompare(b, 'es'));
+
+	parts.push(...familyParts, ...singleParts);
+	return parts.join(' / ');
+}
+
+/**
+ * buildGroupedCatalogLines: Agrupa ítems de una categoría por precio (o tabla de precios)
+ * para acortar la carta en WhatsApp sin inventar datos.
+ *
+ * @param {object[]} items - Cócteles de una categoría
+ * @param {function(object): string|null} priceKeyFn - Clave de agrupación (precio o JSON de litrajes)
+ * @param {function(object): string} priceLabelFn - Texto de precio a mostrar
+ * @returns {string[]} Líneas "- Nombre(s): $precio"
+ */
+function buildGroupedCatalogLines(items, priceKeyFn, priceLabelFn) {
+	/** @type {Map<string, { names: string[], label: string, sortPrice: number }>} */
+	const groups = new Map();
+
+	for (const item of items) {
+		const key = priceKeyFn(item);
+		if (key == null) continue;
+
+		if (!groups.has(key)) {
+			groups.set(key, {
+				names: [],
+				label: priceLabelFn(item),
+				sortPrice: Number(String(key).split('|')[0]) || 0
+			});
+		}
+		groups.get(key).names.push(item.name);
+	}
+
+	// Ordenamos de más barato a más caro para que la carta se lea natural
+	return Array.from(groups.values())
+		.sort((a, b) => a.sortPrice - b.sortPrice)
+		.map((g) => `- ${formatGroupedNames(g.names)}: ${g.label}`);
+}
+
+/**
+ * getCartaCocteles: Arma la carta de precios para WhatsApp.
+ * Agrupa productos con el mismo precio (y variantes de familia como Mojito)
+ * para que el listado no sea tan largo. Los precios salen siempre de datos.json.
+ *
+ * @param {string} format - 'desechable' | 'dispensador' | 'muro'
+ * @param {object} [options]
+ * @param {boolean} [options.includeClosingQuestion=true] - Si false, solo la lista (sin pregunta final)
+ * @returns {string} Texto formateado para el chat
+ */
+export function getCartaCocteles(format = 'desechable', options = {}) {
+	const { includeClosingQuestion = true } = options;
 	const cats = getCoctelesByCategoria();
 
-	const formatItem = (c) => {
+	const buildSection = (items) => {
 		if (format === 'desechable') {
-			const price = c.desechable?.['5L'] || 0;
-			return `- ${c.name}: ${formatPrice(price)}`;
+			return buildGroupedCatalogLines(
+				items,
+				(c) => {
+					const price = c.desechable?.['5L'];
+					return price != null ? String(price) : null;
+				},
+				(c) => formatPrice(c.desechable?.['5L'] || 0)
+			).join('\n');
 		}
 
-		const formatPrices = c[format];
-		if (!formatPrices || Object.keys(formatPrices).length === 0) {
-			return null;
-		}
-
-		const priceStrings = Object.entries(formatPrices)
-			.map(([litraje, price]) => `${litraje} (${formatPrice(price)})`)
-			.join(' / ');
-
-		return `- ${c.name}: ${priceStrings}`;
+		// Eventos: agrupamos si la tabla de litrajes es idéntica
+		return buildGroupedCatalogLines(
+			items,
+			(c) => {
+				const formatPrices = c[format];
+				if (!formatPrices || Object.keys(formatPrices).length === 0) return null;
+				// Clave = primer precio + JSON de la tabla (para ordenar y comparar)
+				const firstPrice = Object.values(formatPrices)[0] || 0;
+				return `${firstPrice}|${JSON.stringify(formatPrices)}`;
+			},
+			(c) => {
+				const formatPrices = c[format] || {};
+				return Object.entries(formatPrices)
+					.map(([litraje, price]) => `${litraje} (${formatPrice(price)})`)
+					.join(' / ');
+			}
+		).join('\n');
 	};
 
-	const clasicosStr = cats['CLÁSICOS'].map(formatItem).filter(Boolean).join('\n');
-	const combinadosStr = cats.COMBINADOS.map(formatItem).filter(Boolean).join('\n');
-	const mocktailsStr = cats.MOCKTAILS.map(formatItem).filter(Boolean).join('\n');
+	const clasicosStr = buildSection(cats['CLÁSICOS']);
+	const combinadosStr = buildSection(cats.COMBINADOS);
+	const mocktailsStr = buildSection(cats.MOCKTAILS);
 
 	let text = `🍸 *CLÁSICOS*\n${clasicosStr}`;
 	text += `\n\n🥃 *COMBINADOS*\n${combinadosStr}`;
 	text += `\n\n🍹 *MOCKTAILS (Sin Alcohol)*\n${mocktailsStr}`;
 
-	if (format === 'desechable') {
-		text += '\n\n¿Cuál o cuáles de la lista quieres agregar a tu cotización? (ej: "2 mojitos y 1 aperol")';
-	} else {
+	// En barriles la pregunta de cotizar va en el estado A2_1 (no aquí).
+	// En eventos sí cerramos pidiendo cócteles + litraje.
+	if (includeClosingQuestion && format !== 'desechable') {
 		text += '\n\n¿Ahora índicame cuáles te gustarían, por ej. 5L Mojito, 10L Aperol Spritz?';
 	}
 	return text;

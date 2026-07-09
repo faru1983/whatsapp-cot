@@ -166,7 +166,7 @@ export async function processMessage(sessionId, messageText) {
   // 2. CAPA DE SEGURIDAD BÁSICA (Cambios de intención)
   // ==============================================================================
   if (currentStateId !== 'ESPERANDO_INTENCION' && currentStateId !== 'CERRADO') {
-    const earlyStates = ['A1_FILTRO_CANAL', 'A2_OFRECER_CATALOGO', 'A3_RECOGIDA_PRODUCTOS', 'B1_FILTRO_CANAL_EVENTOS', 'B2_RECOGIDA_DATOS_EVENTOS'];
+    const earlyStates = ['A1_FILTRO_CANAL', 'A2_OFRECER_CATALOGO', 'A2_1_OFRECER_COTIZACION', 'A3_RECOGIDA_PRODUCTOS', 'B1_FILTRO_CANAL_EVENTOS', 'B2_RECOGIDA_DATOS_EVENTOS'];
     
     if (earlyStates.includes(currentStateId)) {
       const isCurrentlyEventos = currentStateId.startsWith('B');
@@ -246,6 +246,18 @@ export async function processMessage(sessionId, messageText) {
 
     if (processResult.notifyAdmin && sendAdminAlert) {
       sendAdminAlert(processResult.notifyAdmin);
+    }
+
+    // customReplies: varios mensajes separados (ej. carta + pregunta de cotizar)
+    // customReply: un solo mensaje (compatibilidad con el resto del flujo)
+    if (Array.isArray(processResult.customReplies) && processResult.customReplies.length > 0) {
+      const parts = processResult.customReplies.filter((p) => typeof p === 'string' && p.trim());
+      for (const part of parts) {
+        session.history.turns.push({ role: 'model', text: part });
+      }
+      saveSession(sessionId, session);
+      // Devolvemos array para que index.js / CLI envíen cada bloque por separado
+      return parts.length === 1 ? parts[0] : parts;
     }
 
     if (processResult.customReply) {
@@ -339,15 +351,18 @@ export async function processMessage(sessionId, messageText) {
       return null;
     }
 
-    // 4.2 Buscar en faq.json
+    // 4.2 Buscar en faq.json (también usa IA para decidir si aplica y redactar)
+    cliLog('FAQ: consultando faq.json con IA...');
     const faqData = JSON.parse(fs.readFileSync(path.join(process.cwd(), 'db', 'faq.json'), 'utf8'));
     const faqResponse = await responderFAQ(messageText, faqData);
 
     if (faqResponse !== "NO_FAQ") {
       // FAQ respondió: re-preguntamos el paso solo si la FAQ no lo hizo ya
+      cliLog('FAQ: match encontrado → respondiendo desde faq.json');
       reply = appendStepQuestionIfNeeded(faqResponse, finalQuestion);
     } else {
       // 4.3 Delegar a la Inteligencia Artificial (LLM Generativo)
+      cliLog('FAQ: sin match (NO_FAQ) → fallback IA generativa');
       let systemInstruction = readPrompt();
       if (currentState.aiContextPrompt) {
         systemInstruction = `${systemInstruction}\n\n${currentState.aiContextPrompt}`;
@@ -414,8 +429,13 @@ function cliChat() {
     const stateAfter = sessionAfter.currentState || '(sin estado)';
 
     // --- Respuesta del bot (si hubo) ---
+    // Puede ser string o array de bloques (carta + pregunta, etc.)
     if (response) {
-      console.log(`\nBot: ${response}`);
+      const replies = Array.isArray(response) ? response : [response];
+      for (let i = 0; i < replies.length; i++) {
+        const label = replies.length > 1 ? `Bot (${i + 1}/${replies.length})` : 'Bot';
+        console.log(`\n${label}: ${replies[i]}`);
+      }
     }
 
     // --- Feedback [TEST] siempre, mismo formato ---
