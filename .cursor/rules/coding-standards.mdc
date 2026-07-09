@@ -1,0 +1,137 @@
+---
+description: Estándares de código — limpieza, comentarios didácticos, modularidad y buenas prácticas
+alwaysApply: true
+---
+
+# Estándares de Código — whatsapp-cot
+
+Este proyecto debe ser **legible para estudiantes de programación de primer año**, **modular** y **fácil de hacer crecer**. Al escribir o modificar código, seguir estas reglas siempre.
+
+## Comentarios didácticos (obligatorio — enfoque educativo)
+
+Este código es **material de aprendizaje**. Comentar **todo lo que se pueda**: no solo la cabecera, sino funciones, secciones y pasos lógicos importantes. Un estudiante de 1er año debe poder leer el archivo como un tutorial.
+
+### 1. Cabecera de archivo (siempre)
+
+```js
+// ==============================================================================
+// OBJETIVO: [Qué hace este archivo en una frase simple]
+// [1-2 líneas explicando por qué existe y quién lo usa]
+// ==============================================================================
+```
+
+### 2. Secciones dentro del archivo (siempre)
+
+Separar bloques lógicos con comentarios de sección numerados o titulados:
+
+```js
+// ==============================================================================
+// 1. SILENCIO (MUTE) Y COMANDOS DEL SISTEMA
+// ==============================================================================
+```
+
+Usar este patrón en: `engine.js`, flujos largos (`barriles.js`, `eventos.js`), `utils.js`, `index.js`.
+
+### 3. Funciones (siempre comentar)
+
+**Toda función** (exportada o interna) lleva JSDoc antes de su declaración:
+
+```js
+/**
+ * normalizeString: Convierte texto a minúsculas sin acentos ni símbolos.
+ * Así "Mojíto" y "mojito" se tratan igual al buscar en el catálogo.
+ *
+ * @param {string} str - Texto que escribió el usuario
+ * @returns {string} Texto normalizado para comparar
+ */
+export function normalizeString(str) { ... }
+```
+
+Incluir en el comentario: qué hace, para qué sirve en el bot, parámetros y retorno.
+
+### 4. Pasos dentro de funciones (comentar lo importante)
+
+Dentro de funciones largas o con lógica no trivial, comentar **cada paso relevante**:
+
+```js
+// Si el cliente elige web, cerramos el chat para no duplicar la venta
+if (wantsWeb) { ... }
+
+// Extraemos cócteles del mensaje usando IA (NLU híbrido)
+const { productos, dudas } = await extractProductsWithAI(...);
+
+// Si hay ambigüedad (ej: "piscola"), pedimos que elija marca
+if (dudas?.length > 0) { ... }
+```
+
+Comentar especialmente: `if/else` de decisiones de negocio, llamadas a IA, cambios de estado, regex, loops, `try/catch`, mute/SOS/alertas admin.
+
+### 5. Estilo del comentario
+
+- Lenguaje **simple y en español** (como si explicaras a un compañero de curso).
+- Explicar el **por qué** además del qué ("cerramos el chat para no duplicar la venta").
+- Si usas un término técnico (NLU, JID, fallback), definirlo en la misma línea o arriba.
+- Referencia de estilo: `engine.js`, `llm.js`, `db.js`, `index.js`.
+
+### 6. Qué no comentar (excepciones mínimas)
+
+Solo omitir comentarios en líneas totalmente obvias dentro de funciones ya documentadas (ej: `return null` tras un comentario de bloque que ya explica el caso). En duda, **comentar**.
+
+## Código limpio y sin legacy
+
+- **Eliminar** código muerto, comentado o rutas que ya no se usan — no dejar "por si acaso".
+- **No duplicar** lógica: si algo se repite en 2+ lugares, extraer a `utils.js` o módulo propio.
+- **No acumular** parches sobre código roto: refactorizar la pieza afectada.
+- Preferir **nombres descriptivos** en español o inglés consistente (el proyecto mezcla ambos en nombres de negocio; mantener coherencia por archivo).
+- Una función = una responsabilidad. Si supera ~40 líneas, considerar dividirla.
+- Evitar `magic numbers`: usar constantes con nombre o leer de `datos.json`.
+
+## Modularidad y crecimiento
+
+Respetar las capas existentes; no mezclar responsabilidades:
+
+| Capa | Responsabilidad |
+|------|-----------------|
+| `src/index.js` | Solo WhatsApp (conexión, listeners, envío) |
+| `src/core/engine.js` | Solo orquestación de estados y fallbacks |
+| `src/core/llm.js` | Solo llamadas a IA |
+| `src/core/db.js` | Solo persistencia de sesiones |
+| `src/flows/` | Solo lógica de cada estado (`validateAndProcess`) |
+| `src/logic/` | Lógica de negocio reutilizable (parsing, precios, pedidos) |
+| `src/views/` | Solo textos y prompts (sin lógica de negocio) |
+| `db/` | Solo datos estáticos (JSON) |
+
+Al agregar funcionalidad nueva:
+1. ¿Es un estado nuevo? → `flows/` + prompt en `views/prompts.js` + registro en `flows/index.js`.
+2. ¿Es lógica reutilizable? → `logic/`.
+3. ¿Es texto fijo al usuario? → `views/templates.js`.
+4. ¿Es dato de negocio? → `db/datos.json` o `db/faq.json`.
+
+## Buenas prácticas al editar
+
+- **Cambios mínimos:** resolver solo lo pedido; no refactorizar de más en la misma tarea.
+- **Reutilizar** funciones existentes (`normalizeString`, `parseDate`, `OrderBuilder`, etc.) antes de crear nuevas.
+- **Validación programática primero**, LLM como fallback (patrón del proyecto).
+- **Manejo de errores:** `try/catch` con `console.error` descriptivo; no tragar errores silenciosamente.
+- **Sesiones:** mutar `session` en el estado; persistir desde `engine.js` con `saveSession`.
+- **Imports ESM:** usar rutas relativas con extensión `.js`.
+- No commitear secretos (`.env`), sesiones (`auth/`, `conversation-memory.sqlite`) ni `node_modules/`.
+
+## Lo que NO hacer
+
+- No dejar `TODO` sin issue o contexto claro.
+- No copiar-pegar bloques grandes entre `barriles.js` y `eventos.js` — extraer helper compartido.
+- No meter lógica de precios o parsing dentro de `views/`.
+- No agregar dependencias npm sin necesidad real.
+- No escribir comentarios en inglés y código en español mezclados sin razón en el mismo bloque.
+
+## Checklist antes de terminar un cambio
+
+- [ ] ¿El archivo tiene cabecera OBJETIVO?
+- [ ] ¿Las secciones principales están separadas con comentarios titulados?
+- [ ] ¿Cada función tiene JSDoc (qué hace, params, returns)?
+- [ ] ¿Los pasos importantes dentro de funciones largas están comentados?
+- [ ] ¿Las funciones nuevas están en la capa correcta?
+- [ ] ¿Se eliminó código que quedó obsoleto?
+- [ ] ¿Un estudiante de 1er año podría seguir el flujo solo leyendo comentarios?
+- [ ] ¿`npm run check` pasa sin errores?

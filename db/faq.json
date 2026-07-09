@@ -1,0 +1,38 @@
+[
+  {
+    "pregunta": "¿Cuáles son sus horarios de atención?",
+    "respuesta": "Nos puedes escribir 24/7."
+  },
+  {
+    "pregunta": "¿Hacen envíos a regiones o solo en Santiago?",
+    "respuesta": "Hacemos envíos a todas las comunas de la Región Metropolitana. Para otras Regiones, despachamos por encomienda (Blue Express, Starken o empresas similares)"
+  },
+  {
+    "pregunta": "¿Cuáles son los métodos de pago?",
+    "respuesta": "Por el momento solo aceptamos transferencias bancarias."
+  },
+  {
+    "pregunta": "¿Cuál es su página web o link directo para comprar o cotizar?",
+    "respuesta": "Nuestra página es: https://cocktailsontap.cl\nEn ella puedes cotizar, comprar y revisar todos nuestros productos y servicios."
+  },
+  {
+    "pregunta": "¿Tienen Instagram o redes sociales?",
+    "respuesta": "Síguenos en Instagram: https://instagram.com/cocktailsontap.chile"
+  },
+  {
+    "pregunta": "¿Cuál es su correo de contacto o email?",
+    "respuesta": "Puedes escribirnos al correo: contacto@cocktailsontap.cl"
+  },
+  {
+    "pregunta": "¿Tienen un teléfono, celular o WhatsApp de contacto?",
+    "respuesta": "Nuestro WhatsApp es: +569-29672978"
+  },
+  {
+    "pregunta": "¿Cuánto rinden los barriles? (Rendimiento en cócteles)",
+    "respuesta": "El rendimiento es válido para todos nuestros formatos (barriles desechables, dispensadores y muro):\n- 5 Litros rinden 25 cócteles aprox.\n- 10 Litros rinden 50 cócteles aprox.\n- 20 Litros rinden 100 cócteles aprox.\n- 30 Litros rinden 150 cócteles aprox."
+  },
+  {
+    "pregunta": "¿Cuáles son los precios, valores, o dónde veo el catálogo y la carta?",
+    "respuesta": "La forma más rápida de revisar todos nuestros productos, servicios y precios es directamente en nuestra web 👉 https://cocktailsontap.cl/cotizar"
+  }
+]

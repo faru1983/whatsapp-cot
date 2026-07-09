@@ -1,0 +1,939 @@
+{
+  "instalacion_muro": 50000,
+  "rendimientos_barriles": {
+    "5L": 25,
+    "10L": 50,
+    "20L": 100,
+    "30L": 150
+  },
+  "extras": {
+    "Bolsa Hielo Cubo 2kg": 2000,
+    "Bolsa Hielo Picado 2kg": 2000,
+    "Limón Deshidratado 30g": 1000,
+    "Naranja Deshidratada 30g": 1000,
+    "Menta Fresca 20g": 1000,
+    "50 Bombillas de Papel": 1000
+  },
+  "comunas_rm": {
+    "Alhué": {
+      "evento": 50000,
+      "desechable": 15000
+    },
+    "Buin": {
+      "evento": 40000,
+      "desechable": 12000
+    },
+    "Calera de Tango": {
+      "evento": 40000,
+      "desechable": 12000
+    },
+    "Cerrillos": {
+      "evento": 5000,
+      "desechable": 5000
+    },
+    "Cerro Navia": {
+      "evento": 5000,
+      "desechable": 5000
+    },
+    "Colina": {
+      "evento": 20000,
+      "desechable": 8000
+    },
+    "Conchalí": {
+      "evento": 5000,
+      "desechable": 5000
+    },
+    "Curacaví": {
+      "evento": 50000,
+      "desechable": 15000
+    },
+    "El Bosque": {
+      "evento": 5000,
+      "desechable": 5000
+    },
+    "El Monte": {
+      "evento": 30000,
+      "desechable": 10000
+    },
+    "Estación Central": {
+      "evento": 5000,
+      "desechable": 5000
+    },
+    "Huechuraba": {
+      "evento": 5000,
+      "desechable": 5000
+    },
+    "Independencia": {
+      "evento": 5000,
+      "desechable": 5000
+    },
+    "Isla de Maipo": {
+      "evento": 30000,
+      "desechable": 10000
+    },
+    "La Cisterna": {
+      "evento": 5000,
+      "desechable": 5000
+    },
+    "La Florida": {
+      "evento": 5000,
+      "desechable": 5000
+    },
+    "La Granja": {
+      "evento": 5000,
+      "desechable": 5000
+    },
+    "La Pintana": {
+      "evento": 20000,
+      "desechable": 8000
+    },
+    "La Reina": {
+      "evento": 5000,
+      "desechable": 5000
+    },
+    "Lampa": {
+      "evento": 20000,
+      "desechable": 8000
+    },
+    "Las Condes": {
+      "evento": 5000,
+      "desechable": 5000
+    },
+    "Lo Barnechea": {
+      "evento": 5000,
+      "desechable": 5000
+    },
+    "Lo Espejo": {
+      "evento": 5000,
+      "desechable": 5000
+    },
+    "Lo Prado": {
+      "evento": 5000,
+      "desechable": 5000
+    },
+    "Macul": {
+      "evento": 5000,
+      "desechable": 5000
+    },
+    "Maipú": {
+      "evento": 5000,
+      "desechable": 5000
+    },
+    "María Pinto": {
+      "evento": 50000,
+      "desechable": 15000
+    },
+    "Melipilla": {
+      "evento": 50000,
+      "desechable": 15000
+    },
+    "Ñuñoa": {
+      "evento": 5000,
+      "desechable": 5000
+    },
+    "Padre Hurtado": {
+      "evento": 30000,
+      "desechable": 10000
+    },
+    "Paine": {
+      "evento": 40000,
+      "desechable": 12000
+    },
+    "Pedro Aguirre Cerda": {
+      "evento": 5000,
+      "desechable": 5000
+    },
+    "Peñaflor": {
+      "evento": 30000,
+      "desechable": 10000
+    },
+    "Peñalolén": {
+      "evento": 5000,
+      "desechable": 5000
+    },
+    "Pirque": {
+      "evento": 30000,
+      "desechable": 10000
+    },
+    "Providencia": {
+      "evento": 5000,
+      "desechable": 5000
+    },
+    "Pudahuel": {
+      "evento": 15000,
+      "desechable": 8000
+    },
+    "Puente Alto": {
+      "evento": 30000,
+      "desechable": 10000
+    },
+    "Quilicura": {
+      "evento": 5000,
+      "desechable": 5000
+    },
+    "Quinta Normal": {
+      "evento": 5000,
+      "desechable": 5000
+    },
+    "Recoleta": {
+      "evento": 5000,
+      "desechable": 5000
+    },
+    "Renca": {
+      "evento": 5000,
+      "desechable": 5000
+    },
+    "San Bernardo": {
+      "evento": 30000,
+      "desechable": 10000
+    },
+    "San Joaquín": {
+      "evento": 5000,
+      "desechable": 5000
+    },
+    "San José de Maipo": {
+      "evento": 30000,
+      "desechable": 10000
+    },
+    "San Miguel": {
+      "evento": 5000,
+      "desechable": 5000
+    },
+    "San Pedro": {
+      "evento": 50000,
+      "desechable": 15000
+    },
+    "San Ramón": {
+      "evento": 5000,
+      "desechable": 5000
+    },
+    "Santiago": {
+      "evento": 5000,
+      "desechable": 5000
+    },
+    "Talagante": {
+      "evento": 30000,
+      "desechable": 10000
+    },
+    "Tiltil": {
+      "evento": 20000,
+      "desechable": 8000
+    },
+    "Vitacura": {
+      "evento": 5000,
+      "desechable": 5000
+    }
+  },
+  "cocteles": {
+    "Pisco Sour": {
+      "categoria": "CLÁSICOS",
+      "ingredientes": "Pisco Transparente, Limón Sutil, Azúcar, Albumina.",
+      "desechable": {
+        "5L": 47990
+      },
+      "dispensador": {
+        "5L": 79990,
+        "10L": 119990
+      },
+      "muro": {
+        "10L": 119990,
+        "20L": 189990,
+        "30L": 254990
+      }
+    },
+    "Caipiriña": {
+      "categoria": "CLÁSICOS",
+      "ingredientes": "Cachaza, Limón, Azúcar.",
+      "desechable": {
+        "5L": 39990
+      },
+      "dispensador": {
+        "5L": 69990,
+        "10L": 109990
+      },
+      "muro": {
+        "10L": 109990,
+        "20L": 169900,
+        "30L": 239990
+      }
+    },
+    "Sangría": {
+      "categoria": "CLÁSICOS",
+      "ingredientes": "Vino Tinto CS, Triple Sec, Destilado Añejado, Naranja, Limón, Azúcar.",
+      "desechable": {
+        "5L": 39990
+      },
+      "dispensador": {
+        "5L": 69990,
+        "10L": 109990
+      },
+      "muro": {
+        "10L": 109990,
+        "20L": 169900,
+        "30L": 239990
+      }
+    },
+    "Mojito": {
+      "categoria": "CLÁSICOS",
+      "ingredientes": "Ron Blanco, Agua Mineral Gasificada, Limón, Menta, Azúcar.",
+      "desechable": {
+        "5L": 39990
+      },
+      "dispensador": {
+        "5L": 69990,
+        "10L": 109990
+      },
+      "muro": {
+        "10L": 109990,
+        "20L": 169900,
+        "30L": 239990
+      }
+    },
+    "Mojito Maracuyá": {
+      "categoria": "CLÁSICOS",
+      "ingredientes": "Ron Blanco, Agua Mineral Gasificada, Maracuyá, Limón, Menta, Azúcar.",
+      "desechable": {
+        "5L": 43990
+      },
+      "dispensador": {
+        "5L": 74990,
+        "10L": 119990
+      },
+      "muro": {
+        "10L": 119990,
+        "20L": 189990,
+        "30L": 259990
+      }
+    },
+    "Mojito Frambuesa": {
+      "categoria": "CLÁSICOS",
+      "ingredientes": "Ron Blanco, Agua Mineral Gasificada, Frambuesa, Limón, Menta, Azúcar.",
+      "desechable": {
+        "5L": 43990
+      },
+      "dispensador": {
+        "5L": 74990,
+        "10L": 119990
+      },
+      "muro": {
+        "10L": 119990,
+        "20L": 189990,
+        "30L": 259990
+      }
+    },
+    "Mojito Mango": {
+      "categoria": "CLÁSICOS",
+      "ingredientes": "Ron Blanco, Agua Mineral Gasificada, Mango, Limón, Menta, Azúcar.",
+      "desechable": {
+        "5L": 43990
+      },
+      "dispensador": {
+        "5L": 74990,
+        "10L": 119990
+      },
+      "muro": {
+        "10L": 119990,
+        "20L": 189990,
+        "30L": 259990
+      }
+    },
+    "Gin & Tonic": {
+      "categoria": "CLÁSICOS",
+      "ingredientes": "Gin Bombay, Agua Tónica.",
+      "desechable": {
+        "5L": 47990
+      },
+      "dispensador": {
+        "5L": 79990,
+        "10L": 124990
+      },
+      "muro": {
+        "10L": 124990,
+        "20L": 194990,
+        "30L": 259990
+      }
+    },
+    "Ramazzotti Spritz": {
+      "categoria": "CLÁSICOS",
+      "ingredientes": "Ramazzotti, Espumante Brut, Agua Mineral Gasificada.",
+      "desechable": {
+        "5L": 55990
+      },
+      "dispensador": {
+        "5L": 89990,
+        "10L": 159990
+      },
+      "muro": {
+        "10L": 159990,
+        "20L": 259990,
+        "30L": 359990
+      }
+    },
+    "Aperol Spritz": {
+      "categoria": "CLÁSICOS",
+      "ingredientes": "Aperol, Espumante Brut, Agua Mineral Gasificada.",
+      "desechable": {
+        "5L": 55990
+      },
+      "dispensador": {
+        "5L": 89990,
+        "10L": 159990
+      },
+      "muro": {
+        "10L": 159990,
+        "20L": 259990,
+        "30L": 359990
+      }
+    },
+    "Tropical Gin": {
+      "categoria": "CLÁSICOS",
+      "ingredientes": "Gin, Red Bull Tropical.",
+      "desechable": {
+        "5L": 55990
+      },
+      "dispensador": {
+        "5L": 89990,
+        "10L": 159990
+      },
+      "muro": {
+        "10L": 159990,
+        "20L": 259990,
+        "30L": 359990
+      }
+    },
+    "Moscow Mule": {
+      "categoria": "CLÁSICOS",
+      "ingredientes": "Vodka, Ginger Beer, Limón, Azúcar.",
+      "desechable": {
+        "5L": 55990
+      },
+      "dispensador": {
+        "5L": 89990,
+        "10L": 159990
+      },
+      "muro": {
+        "10L": 159990,
+        "20L": 259990,
+        "30L": 359990
+      }
+    },
+    "Tequila Margarita": {
+      "categoria": "CLÁSICOS",
+      "ingredientes": "Tequila Blanco, Triple Sec, Limón, Azúcar.",
+      "desechable": {
+        "5L": 71990
+      },
+      "dispensador": {
+        "5L": 109990,
+        "10L": 179990
+      },
+      "muro": {
+        "10L": 179990,
+        "20L": 309990,
+        "30L": 429990
+      }
+    },
+    "Piscola Alto 35°": {
+      "categoria": "COMBINADOS",
+      "ingredientes": "Pisco Alto 35°, Bebida a elección.",
+      "desechable": {
+        "5L": 31990
+      },
+      "dispensador": {
+        "5L": 59990,
+        "10L": 89990
+      },
+      "muro": {
+        "10L": 89990,
+        "20L": 134990,
+        "30L": 179990
+      }
+    },
+    "Piscola Mistral 35°": {
+      "categoria": "COMBINADOS",
+      "ingredientes": "Pisco Mistral 35°, Bebida a elección.",
+      "desechable": {
+        "5L": 31990
+      },
+      "dispensador": {
+        "5L": 59990,
+        "10L": 89990
+      },
+      "muro": {
+        "10L": 89990,
+        "20L": 134990,
+        "30L": 179990
+      }
+    },
+    "Piscola 3R Transparente 40°": {
+      "categoria": "COMBINADOS",
+      "ingredientes": "Pisco 3R Transparente 40°, Bebida a elección.",
+      "desechable": {
+        "5L": 31990
+      },
+      "dispensador": {
+        "5L": 59990,
+        "10L": 89990
+      },
+      "muro": {
+        "10L": 89990,
+        "20L": 134990,
+        "30L": 179990
+      }
+    },
+    "Piscola Alto Transparente 40°": {
+      "categoria": "COMBINADOS",
+      "ingredientes": "Pisco Alto Transparente 40°, Bebida a elección.",
+      "desechable": {
+        "5L": 39990
+      },
+      "dispensador": {
+        "5L": 69990,
+        "10L": 99990
+      },
+      "muro": {
+        "10L": 99990,
+        "20L": 149990,
+        "30L": 199990
+      }
+    },
+    "Whiskcola J.W. Black": {
+      "categoria": "COMBINADOS",
+      "ingredientes": "Johnnie Walker Black Label 40°, Bebida a elección.",
+      "desechable": {
+        "5L": 59990
+      },
+      "dispensador": {
+        "5L": 94990,
+        "10L": 164990
+      },
+      "muro": {
+        "10L": 164990,
+        "20L": 279990,
+        "30L": 399990
+      }
+    },
+    "Mojito Mocktail": {
+      "categoria": "MOCKTAILS",
+      "ingredientes": "Agua Mineral Gasificada, Limón, Menta, Azúcar.",
+      "desechable": {
+        "5L": 31990
+      },
+      "dispensador": {
+        "5L": 59990,
+        "10L": 89990
+      },
+      "muro": {
+        "10L": 89990,
+        "20L": 149990,
+        "30L": 209990
+      }
+    },
+    "Mojito Maracuyá Mocktail": {
+      "categoria": "MOCKTAILS",
+      "ingredientes": "Agua Mineral Gasificada, Maracuyá, Limón, Menta, Azúcar.",
+      "desechable": {
+        "5L": 35990
+      },
+      "dispensador": {
+        "5L": 64990,
+        "10L": 104990
+      },
+      "muro": {
+        "10L": 104990,
+        "20L": 174990,
+        "30L": 249990
+      }
+    },
+    "Mojito Frambuesa Mocktail": {
+      "categoria": "MOCKTAILS",
+      "ingredientes": "Agua Mineral Gasificada, Frambuesa, Limón, Menta, Azúcar.",
+      "desechable": {
+        "5L": 35990
+      },
+      "dispensador": {
+        "5L": 64990,
+        "10L": 104990
+      },
+      "muro": {
+        "10L": 104990,
+        "20L": 174990,
+        "30L": 249990
+      }
+    },
+    "Mojito Mango Mocktail": {
+      "categoria": "MOCKTAILS",
+      "ingredientes": "Agua Mineral Gasificada, Mango, Limón, Menta, Azúcar.",
+      "desechable": {
+        "5L": 35990
+      },
+      "dispensador": {
+        "5L": 64990,
+        "10L": 104990
+      },
+      "muro": {
+        "10L": 104990,
+        "20L": 174990,
+        "30L": 249990
+      }
+    },
+    "Sangría Mocktail": {
+      "categoria": "MOCKTAILS",
+      "ingredientes": "Vino Tinto CS Sin Alcohol, Syrup Mix Cítricos, Naranja, Limón.",
+      "desechable": {
+        "5L": 39990
+      },
+      "dispensador": {
+        "5L": 69990,
+        "10L": 109990
+      },
+      "muro": {
+        "10L": 109990,
+        "20L": 169990,
+        "30L": 239990
+      }
+    },
+    "Maracuyá Spritz Mocktail": {
+      "categoria": "MOCKTAILS",
+      "ingredientes": "Maracuyá, Pomelo, Espumante Sin Alcohol, Azúcar.",
+      "desechable": {
+        "5L": 52990
+      },
+      "dispensador": {
+        "5L": 85990,
+        "10L": 135990
+      },
+      "muro": {
+        "10L": 135990,
+        "20L": 215990,
+        "30L": 295990
+      }
+    }
+  },
+  "regiones_chile": {
+    "Arica y Parinacota": [
+      "Arica",
+      "Camarones",
+      "Putre",
+      "General Lagos"
+    ],
+    "Tarapacá": [
+      "Iquique",
+      "Alto Hospicio",
+      "Pozo Almonte",
+      "Camiña",
+      "Colchane",
+      "Huara",
+      "Pica"
+    ],
+    "Antofagasta": [
+      "Antofagasta",
+      "Mejillones",
+      "Sierra Gorda",
+      "Taltal",
+      "Calama",
+      "Ollagüe",
+      "San Pedro de Atacama",
+      "Tocopilla",
+      "María Elena"
+    ],
+    "Atacama": [
+      "Copiapó",
+      "Caldera",
+      "Tierra Amarilla",
+      "Chañaral",
+      "Diego de Almagro",
+      "Vallenar",
+      "Alto del Carmen",
+      "Freirina",
+      "Huasco"
+    ],
+    "Coquimbo": [
+      "La Serena",
+      "Coquimbo",
+      "Andacollo",
+      "La Higuera",
+      "Paiguano",
+      "Vicuña",
+      "Illapel",
+      "Canela",
+      "Los Vilos",
+      "Salamanca",
+      "Ovalle",
+      "Combarbalá",
+      "Monte Patria",
+      "Punitaqui",
+      "Río Hurtado"
+    ],
+    "Valparaíso": [
+      "Valparaíso",
+      "Casablanca",
+      "Concón",
+      "Juan Fernández",
+      "Puchuncaví",
+      "Quintero",
+      "Viña del Mar",
+      "Isla de Pascua",
+      "Los Andes",
+      "Calle Larga",
+      "Riconada",
+      "San Esteban",
+      "La Ligua",
+      "Cabildo",
+      "Papudo",
+      "Petorca",
+      "Zapallar",
+      "Quillota",
+      "La Calera",
+      "Hijuelas",
+      "La Cruz",
+      "Nogales",
+      "San Antonio",
+      "Algarrobo",
+      "Cartagena",
+      "El Quisco",
+      "El Tabo",
+      "Santo Domingo",
+      "San Felipe",
+      "Catemu",
+      "Llaillay",
+      "Panquehue",
+      "Putaendo",
+      "Santa María",
+      "Quilpué",
+      "Limache",
+      "Olmué",
+      "Villa Alemana"
+    ],
+    "Región del Libertador Gral. Bernardo O'Higgins": [
+      "Rancagua",
+      "Codegua",
+      "Coinco",
+      "Coltauco",
+      "Doñihue",
+      "Graneros",
+      "Las Cabras",
+      "Machalí",
+      "Malloa",
+      "Mostazal",
+      "Olivar",
+      "Peumo",
+      "Pichidegua",
+      "Quinta de Tilcoco",
+      "Rengo",
+      "Requínoa",
+      "San Vicente",
+      "Pichilemu",
+      "La Estrella",
+      "Litueche",
+      "Marichihue",
+      "Navidad",
+      "Paredones",
+      "San Fernando",
+      "Chépica",
+      "Chimbarongo",
+      "Lolol",
+      "Nancagua",
+      "Palmilla",
+      "Peralillo",
+      "Placilla",
+      "Pumanque",
+      "Santa Cruz"
+    ],
+    "Región del Maule": [
+      "Talca",
+      "Constitución",
+      "Curepto",
+      "Empedrado",
+      "Maule",
+      "Pelarco",
+      "Pencahue",
+      "Río Claro",
+      "San Clemente",
+      "San Rafael",
+      "Cauquenes",
+      "Chanco",
+      "Pelluhue",
+      "Curicó",
+      "Hualañé",
+      "Licantén",
+      "Molina",
+      "Rauco",
+      "Romeral",
+      "Sagrada Familia",
+      "Teno",
+      "Vichuquén",
+      "Linares",
+      "Colbún",
+      "Longaví",
+      "Parral",
+      "Retiro",
+      "San Javier",
+      "Villa Alegre",
+      "Yerbas Buenas"
+    ],
+    "Región de Ñuble": [
+      "Chillán",
+      "Chillán Viejo",
+      "Quillón",
+      "Bulnes",
+      "San Ignacio",
+      "El Carmen",
+      "Pinto",
+      "Pemuco",
+      "Yungay",
+      "Quirihue",
+      "Cobquecura",
+      "Ninhue",
+      "Treguaco",
+      "Coelemu",
+      "Portezuelo",
+      "Ránqui",
+      "San Carlos",
+      "Ñiquén",
+      "Coihueco",
+      "San Fabián",
+      "San Nico"
+    ],
+    "Región del Biobío": [
+      "Concepción",
+      "Coronel",
+      "Chiguayante",
+      "Florida",
+      "Hualqui",
+      "Lota",
+      "Penco",
+      "San Pedro de la Paz",
+      "Santa Juana",
+      "Talcahuano",
+      "Tomé",
+      "Hualpén",
+      "Lebu",
+      "Arauco",
+      "Cañete",
+      "Contulmo",
+      "Curanilahue",
+      "Los Álamos",
+      "Tirúa",
+      "Los Ángeles",
+      "Antuco",
+      "Cabrero",
+      "Laja",
+      "Mulchén",
+      "Nacimiento",
+      "Negrete",
+      "Quilaco",
+      "Quilleco",
+      "San Rosendo",
+      "Santa Bárbara",
+      "Tucapel",
+      "Yumbel",
+      "Alto Biobío"
+    ],
+    "Región de la Araucanía": [
+      "Temuco",
+      "Carahue",
+      "Cunco",
+      "Curarrehue",
+      "Freire",
+      "Galvarino",
+      "Gorbea",
+      "Lautaro",
+      "Loncoche",
+      "Melipeuco",
+      "Nueva Imperial",
+      "Padre Las Casas",
+      "Perquenco",
+      "Pitrufquén",
+      "Pucón",
+      "Saavedra",
+      "Teodoro Schmidt",
+      "Toltén",
+      "Vilcún",
+      "Villarrica",
+      "Cholchol",
+      "Angol",
+      "Collipulli",
+      "Curacautín",
+      "Ercilla",
+      "Lonquimay",
+      "Los Sauces",
+      "Lumaco",
+      "Purén",
+      "Renaico",
+      "Traiguén",
+      "Victoria"
+    ],
+    "Región de los Ríos": [
+      "Valdivia",
+      "Corral",
+      "Lanco",
+      "Los Lagos",
+      "Máfil",
+      "Mariquina",
+      "Paillaco",
+      "Panguipulli",
+      "La Unión",
+      "Futrono",
+      "Lago Ranco",
+      "Río Bueno"
+    ],
+    "Región de los Lagos": [
+      "Puerto Montt",
+      "Calbuco",
+      "Cochamó",
+      "Fresia",
+      "Frutillar",
+      "Los Muermos",
+      "Llanquihue",
+      "Maullín",
+      "Puerto Varas",
+      "Castro",
+      "Ancud",
+      "Chonchi",
+      "Curaco de Vélez",
+      "Dalcahue",
+      "Puqueldón",
+      "Queilén",
+      "Quellón",
+      "Quemchi",
+      "Quinchao",
+      "Osorno",
+      "Puerto Octay",
+      "Purranque",
+      "Puyehue",
+      "Río Negro",
+      "San Juan de la Costa",
+      "San Pablo",
+      "Chaitén",
+      "Futaleufú",
+      "Hualaihué",
+      "Palena"
+    ],
+    "Región Aisén del Gral. Carlos Ibañez del Campo": [
+      "Coihaique",
+      "Lago Verde",
+      "Aisén",
+      "Cisnes",
+      "Guaitecas",
+      "Cochrane",
+      "O'Higgins",
+      "Tortel",
+      "Chile Chico",
+      "Río Ibáñez"
+    ],
+    "Región de Magallanes y de la Antártica Chilena": [
+      "Punta Arenas",
+      "Laguna Blanca",
+      "Río Verde",
+      "San Gregorio",
+      "Cabo de Hornos",
+      "Antártica",
+      "Porvenir",
+      "Primavera",
+      "Timaukel",
+      "Natales",
+      "Torres del Paine"
+    ]
+  }
+}

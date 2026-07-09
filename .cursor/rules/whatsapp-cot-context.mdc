@@ -1,0 +1,97 @@
+---
+description: Contexto del proyecto whatsapp-cot — arquitectura, flujos, convenciones y reglas de edición
+alwaysApply: true
+---
+
+# whatsapp-cot — Contexto del Proyecto
+
+Bot de WhatsApp para **Cocktails on Tap** (Chile). Guía cotizaciones de **Barriles Desechables** (5L) y **Servicio para Eventos** (Dispensador / Muro).
+
+**Stack:** Node.js ESM (≥18.18), Baileys, SQLite (`better-sqlite3`), Gemini o Nvidia (LLM), `dotenv`.
+
+## Arquitectura
+
+```
+index.js → engine.js → statesMap (flows/) → utils.js + order-builder.js
+                      ↘ llm.js (fallback/NLU/FAQ)
+                      ↘ db.js (sesiones SQLite)
+                      ↘ views/ (templates + prompts)
+                      ↘ db/datos.json + db/faq.json
+```
+
+| Archivo | Rol |
+|---------|-----|
+| `src/index.js` | WhatsApp: QR, reconexión, filtros, comandos admin, alertas |
+| `src/core/engine.js` | Máquina de estados + red de seguridad + CLI (`npm run test:local`) |
+| `src/core/llm.js` | `generateResponse`, `extractProductsWithAI`, `extractEventProductsWithAI`, `responderFAQ` |
+| `src/core/db.js` | Sesiones en `conversation-memory.sqlite` |
+| `src/core/config.js` | `.env`: LLM provider, API keys, `ADMIN_NUMBERS` |
+| `src/flows/router.js` | Estado inicial `ESPERANDO_INTENCION` |
+| `src/flows/barriles.js` | Flujo A (barriles desechables) |
+| `src/flows/eventos.js` | Flujo B (eventos) |
+| `src/flows/index.js` | `statesMap` unificado |
+| `src/logic/utils.js` | Precios, parsing, carta, fuzzy match ubicaciones |
+| `src/logic/order-builder.js` | Cotización programática (barriles + eventos) |
+| `src/flows/cerrado.js` | Estado terminal `CERRADO` (mute) |
+| `src/views/templates.js` | Mensajes fijos (bienvenida, cotización barriles/eventos) |
+| `src/views/prompts.js` | `STATE_PROMPTS` + `readPrompt()` para LLM |
+
+## Patrón de estados
+
+Cada estado exporta:
+- `id`, `promptQuestion` (string o función), `shortQuestion`, `aiContextPrompt`
+- `validateAndProcess(messageText, session)` → `{ success, nextState?, customReply?, mute?, notifyAdmin?, shouldReset? }`
+
+`engine.js` orquesta: validación → transición → prompt del siguiente estado → fallback (SOS / FAQ / LLM).
+
+**Estado terminal `CERRADO`:** registrado en `statesMap` (`flows/cerrado.js`); las transiciones van con `customReply` + `mute: true`.
+
+## Flujos
+
+**Router:** `ESPERANDO_INTENCION` → detecta BARRILES / EVENTOS / ambos.
+
+**Flujo A (barriles):** `A1_FILTRO_CANAL` → `A2_OFRECER_CATALOGO` → `A3_RECOGIDA_PRODUCTOS` (NLU con `extractProductsWithAI`) → `A3_RECOGIDA_DATOS` → `A4_REVISION_COTIZACION` (`OrderBuilder`) → `A4_1_ROUTER_MODIFICACION`.
+
+**Flujo B (eventos):** `B1_FILTRO_CANAL_EVENTOS` → `B2_RECOGIDA_DATOS_EVENTOS` → `B3_ELECCION_FORMATO` → `B4_ELECCION_MENU` (NLU con `extractEventProductsWithAI` + carrito) → `B5_COTIZACION` (`OrderBuilder` + `getEventQuotationTemplate`).
+
+## Red de seguridad (engine.js)
+
+- **Mute:** intervención humana (`index.js`), SOS (`NO`/`SOS`/pedir humano), anti-loop (≥2 errores), cierre de venta.
+- **Cambio de intención:** máx. 2 switches barriles↔eventos en estados tempranos.
+- **Fallback en `success: false`:** FAQ → LLM con contexto del estado → re-pregunta del paso actual.
+- **Comandos admin WhatsApp:** `/detenerbot`, `/iniciarbot`, `/reiniciarbot` (+ número opcional).
+- **Comandos CLI:** `/reset`, `/mute`, `/unmute`, `/exit`.
+
+## Datos y config
+
+- `db/datos.json`: precios cócteles (desechable/dispensador/muro), extras, comunas RM, regiones.
+- `db/faq.json`: 8 FAQs; respondidas vía LLM estricto (`NO_FAQ` si no aplica).
+- `.env`: `LLM_PROVIDER` (gemini|nvidia), `GEMINI_API_KEY`, `NVIDIA_API_KEY`, `ADMIN_NUMBERS`.
+- Seguridad: `SECURITY_MAX_CONSECUTIVE_ERRORS` (anti-loop), `SECURITY_MAX_INTENT_SWITCHES` (barriles↔eventos).
+
+## Convenciones al editar
+
+Ver también regla **`coding-standards.mdc`** (limpieza, comentarios didácticos, modularidad).
+
+1. **Híbrido reglas + IA:** validación programática primero; LLM solo como fallback o NLU estructurado.
+2. **Minimizar scope:** no tocar archivos ajenos al flujo que se modifica.
+3. **Sesión:** mutar `session` en `validateAndProcess`; persistir con `saveSession` desde `engine.js`.
+4. **Precios:** nunca inventar; leer de `datos.json` vía `preciosData` en `utils.js`.
+5. **Negrita WhatsApp:** un solo asterisco `*texto*`, nunca `**`.
+6. **Idioma:** respuestas al cliente en español chileno cordial.
+7. **Nuevos estados:** registrar en `barriles.js`/`eventos.js`, agregar prompt en `prompts.js`, exportar en `index.js`.
+8. **No commitear** `.env` ni `auth/` ni `conversation-memory.sqlite`.
+9. **Sin legacy:** eliminar código muerto; no dejar bloques comentados ni rutas obsoletas.
+10. **Comentarios didácticos extensos:** cabecera OBJETIVO + secciones tituladas + JSDoc en cada función + comentarios en pasos importantes (enfoque tutorial para 1er año).
+
+## Quirks conocidos
+
+- Carrito de eventos usa claves `nombre::litrage` (ej. `Mojito::10L`); barriles sigue con `{ "Mojito": 2 }`.
+- `getWelcomeBarriles(isSwitch)` y `getWelcomeEventos(isSwitch)` aceptan flag de cambio de intención pero no siempre se usa.
+- README vacío; documentación vive en comentarios del código y esta regla.
+
+## Scripts
+
+- `npm start` — bot WhatsApp real
+- `npm run test:local` — simulador CLI (`engine.js`)
+- `npm run check` — syntax check de archivos core
