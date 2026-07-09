@@ -257,6 +257,287 @@ npm run check
 
 ---
 
+## Instalar en un servidor Linux (VPS / nube)
+
+Esta guía es para dejar el bot **siempre encendido** en un servidor, no en tu PC de casa. Sirve para Ubuntu (y similares) en la nube, por ejemplo una máquina gratuita o barata de Oracle Cloud como **VM.Standard.E2.1.Micro**.
+
+> **Idea simple:** el servidor es un computador remoto que está 24/7. Tú te conectas por SSH (una terminal a distancia), instalas lo mismo que en tu PC, vinculas WhatsApp una vez, y dejas el bot corriendo con **PM2** para que no se apague al cerrar la ventana.
+
+### Qué vas a necesitar
+
+| Qué | Para qué |
+|---|---|
+| Una VM Linux (Ubuntu 22.04 LTS recomendado) | Donde vivirá el bot |
+| Acceso SSH (IP pública + usuario, a menudo `ubuntu` o `opc`) | Entrar al servidor desde tu PC |
+| Tu repositorio en GitHub | Para clonar el código |
+| Claves de IA y número admin | Igual que en la instalación local (archivo `.env`) |
+| El celular con WhatsApp | Para escanear el QR la primera vez |
+
+No hace falta instalar Baileys ni SQLite “a mano”: `npm install` ya trae esas piezas dentro del proyecto.
+
+---
+
+### Paso A — Conectarte al servidor
+
+Desde tu computador (PowerShell, Terminal, etc.):
+
+```bash
+ssh ubuntu@TU_IP_PUBLICA
+```
+
+En Oracle a veces el usuario es `opc` en vez de `ubuntu`. Usa el que te dio la consola de la nube.
+
+Si te pide confirmar la huella del servidor (`Are you sure you want to continue connecting?`), escribe `yes` la primera vez.
+
+Cuando veas un prompt tipo `ubuntu@nombre-vm:~$`, ya estás dentro.
+
+---
+
+### Paso B — Comprobar lo esencial (e instalar lo que falte)
+
+Ejecuta estas comprobaciones **una por una**. Si un comando dice “not found” o “command not found”, instálalo con el bloque de abajo.
+
+#### 1) Actualizar la lista de paquetes del sistema
+
+```bash
+sudo apt update
+sudo apt upgrade -y
+```
+
+#### 2) ¿Hay Git?
+
+```bash
+git --version
+```
+
+Si no está:
+
+```bash
+sudo apt install -y git
+```
+
+#### 3) ¿Hay herramientas para compilar? (las necesita `better-sqlite3`)
+
+```bash
+gcc --version
+python3 --version
+make --version
+```
+
+Si falta alguna:
+
+```bash
+sudo apt install -y build-essential python3
+```
+
+#### 4) ¿Hay Node.js 18.18 o superior?
+
+```bash
+node -v
+npm -v
+```
+
+Si no está, o la versión es menor a `v18.18.0`, instala Node 20 LTS con NodeSource (método habitual en Ubuntu):
+
+```bash
+curl -fsSL https://deb.nodesource.com/setup_20.x | sudo -E bash -
+sudo apt install -y nodejs
+node -v
+npm -v
+```
+
+Debes ver algo como `v20.x.x` y un número de `npm`.
+
+#### 5) ¿Hay PM2? (para dejar el bot corriendo en segundo plano)
+
+```bash
+pm2 -v
+```
+
+Si no está:
+
+```bash
+sudo npm install -g pm2
+pm2 -v
+```
+
+Con esto ya tienes lo esencial: Git, compiladores, Node/npm y PM2.
+
+---
+
+### Paso C — Clonar el repositorio
+
+Elige una carpeta (por ejemplo tu home) y clona:
+
+```bash
+cd ~
+git clone https://github.com/TU_USUARIO/whatsapp-cot.git
+cd whatsapp-cot
+```
+
+Cambia la URL por la de **tu** repositorio en GitHub.
+
+Si el repo es privado, GitHub te pedirá autenticación (token personal o SSH). En repos públicos basta con la URL HTTPS.
+
+Comprueba que estás en la carpeta correcta:
+
+```bash
+ls
+```
+
+Deberías ver cosas como `package.json`, `src`, `db`, `.env.example`.
+
+---
+
+### Paso D — Instalar dependencias del proyecto
+
+Dentro de `whatsapp-cot`:
+
+```bash
+npm install
+```
+
+Esto descarga Baileys, SQLite embebido, clientes de IA, etc. en `node_modules/`.  
+Si falla por compilación, vuelve al Paso B (instalar `build-essential` y `python3`) y reintenta `npm install`.
+
+Opcional: verificar sintaxis:
+
+```bash
+npm run check
+```
+
+---
+
+### Paso E — Configurar el archivo `.env`
+
+El `.env` **no** viene en el clone (es secreto). Créalo en el servidor:
+
+```bash
+cp .env.example .env
+nano .env
+```
+
+Completa al menos:
+
+- `LLM_PROVIDER` (`gemini` o `nvidia`)
+- la API key del proveedor elegido (`GEMINI_API_KEY` o `NVIDIA_API_KEY`)
+- `ADMIN_NUMBERS` (WhatsApp sin `+`, ej. `56912345678`)
+
+Guarda en nano: `Ctrl+O`, Enter, luego `Ctrl+X` para salir.
+
+> Nunca subas `.env` a GitHub. En el servidor también conviene no pegarlo en capturas ni chats públicos.
+
+---
+
+### Paso F — Primera conexión a WhatsApp (escanear el QR)
+
+La carpeta `auth/` guarda la sesión (como WhatsApp Web). La **primera vez** debes ver el QR en la terminal.
+
+**Todavía no uses PM2.** Arranca a mano:
+
+```bash
+npm start
+```
+
+1. Aparece un código QR en la consola.
+2. En el celular: WhatsApp → **Dispositivos vinculados** → **Vincular un dispositivo**.
+3. Escanea el QR (mejor desde un PC con terminal ancha; por SSH en pantalla chica el QR a veces se deforma).
+4. Cuando diga `WhatsApp conectado. El bot está listo para trabajar.`, ya quedó vinculado.
+5. Detén el proceso con `Ctrl+C`.
+
+Si el QR expira o falla, vuelve a correr `npm start`. No borres `auth/` salvo que quieras forzar un vínculo nuevo.
+
+---
+
+### Paso G — Dejar el bot corriendo con PM2
+
+Desde la carpeta del proyecto (`~/whatsapp-cot` o donde lo hayas clonado):
+
+```bash
+pm2 start src/index.js --name whatsapp-cot
+```
+
+Comprueba:
+
+```bash
+pm2 status
+pm2 logs whatsapp-cot
+```
+
+Debe aparecer `online`. Si ya existe `auth/`, no debería pedir QR otra vez.
+
+#### Que sobreviva un reinicio del servidor
+
+```bash
+pm2 save
+pm2 startup
+```
+
+PM2 imprimirá un comando que empieza con `sudo env PATH=...`. **Cópialo, pégalo y ejecútalo.** Luego:
+
+```bash
+pm2 save
+```
+
+Así, si la VM de Oracle se reinicia, el bot vuelve solo.
+
+#### Comandos útiles de PM2
+
+| Comando | Qué hace |
+|---|---|
+| `pm2 status` | Ver si está online |
+| `pm2 logs whatsapp-cot` | Ver mensajes en vivo |
+| `pm2 restart whatsapp-cot` | Reiniciar el bot |
+| `pm2 stop whatsapp-cot` | Detenerlo |
+| `pm2 delete whatsapp-cot` | Quitar el proceso de la lista de PM2 |
+
+---
+
+### Paso H — Probar que responde
+
+1. Escribe al número de WhatsApp **vinculado** desde **otro celular** (un número de prueba).
+2. **No respondas tú** en ese chat mientras pruebas: si un humano escribe ahí, el bot se silencia solo en ese chat (protección de “intervención humana”).
+3. Si quedó silenciado, desde el WhatsApp del bot (o un admin) escribe en ese chat: `/iniciarbot`  
+   Para empezar de cero: `/reiniciarbot`.
+
+---
+
+### Actualizar el bot en el servidor (cuando cambies el código)
+
+```bash
+cd ~/whatsapp-cot
+git pull
+npm install
+pm2 restart whatsapp-cot
+```
+
+Si cambió mucho la lógica de sesión o perdiste `auth/`, puede hacer falta volver a escanear el QR (`npm start` una vez, luego otra vez PM2).
+
+---
+
+### Notas importantes en servidores (Oracle Micro y similares)
+
+- **Un solo proceso** con el mismo número de WhatsApp. No corras `npm start` y PM2 a la vez, ni dos instancias PM2: WhatsApp se desconecta.
+- **`auth/` y `*.sqlite*`** son locales del servidor. No los subas a Git. Haz respaldo si te importa no re-vincular.
+- **RAM limitada** (la E2.1.Micro tiene poca memoria): cierra cosas innecesarias; este bot es liviano, pero evita muchos procesos extra.
+- **Firewall de Oracle:** este bot no abre un puerto web para clientes; habla hacia afuera con WhatsApp e IA. En la mayoría de casos no necesitas abrir puertos de entrada solo por el bot. Si no puedes salir a internet, revisa reglas de egress / security lists en la consola de Oracle.
+- Trabaja siempre **dentro** de la carpeta del repo al usar PM2, para que encuentre `.env`, `auth/` y `db/`.
+
+---
+
+### Checklist rápido (servidor Linux)
+
+- [ ] SSH al servidor OK  
+- [ ] `git`, `build-essential`, `python3`, Node ≥ 18.18, `pm2` instalados  
+- [ ] Repo clonado y `npm install` OK  
+- [ ] `.env` creado y con claves + `ADMIN_NUMBERS`  
+- [ ] `npm start` → QR escaneado → `Ctrl+C`  
+- [ ] `pm2 start src/index.js --name whatsapp-cot`  
+- [ ] `pm2 save` + `pm2 startup` (y el comando `sudo` que muestra)  
+- [ ] Prueba desde otro número de WhatsApp  
+
+---
+
 ## La tecnología (explicada sin misterio)
 
 Aquí no asumimos que sepas programar. Vamos de lo general a lo particular.
