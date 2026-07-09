@@ -6,17 +6,13 @@ import makeWASocket, {
   useMultiFileAuthState
 } from '@whiskeysockets/baileys';
 import pino from 'pino';
-import qr from 'qrcode-terminal';
 import { processMessage, setAdminAlertFunction } from './core/engine.js';
 import { shouldHandleMessage, stripTriggerPrefix } from './logic/utils.js';
 import { getSession, saveSession, resetSession } from './core/db.js';
 import { loadBotConfig } from './core/config.js';
 import { composeAdminAlertMessage } from './views/templates.js';
-import { AUTH_DIR, PROJECT_ROOT, SQLITE_PATH } from './core/paths.js';
+import { AUTH_DIR, PROJECT_ROOT } from './core/paths.js';
 import process from 'node:process';
-
-// BAILEYS_DEBUG=1 → logs detallados de Baileys (útil en el VPS para "Esperando mensaje")
-const BAILEYS_DEBUG = process.env.BAILEYS_DEBUG === '1';
 
 // ==============================================================================
 // OBJETIVO: Punto de entrada del bot de WhatsApp.
@@ -29,7 +25,6 @@ const botSentMessageIds = new Set();
 
 // Caché en memoria de mensajes recientes (id → contenido).
 // Baileys la usa en getMessage cuando el celular pide reintento de descifrado.
-// Sin esto, el destinatario ve "Esperando mensaje..." con el reloj verde.
 const recentMessages = new Map();
 const RECENT_MESSAGES_MAX = 200;
 
@@ -82,6 +77,23 @@ function scheduleReconnect(delayMs = 3000) {
   }, delayMs);
 }
 
+/**
+ * printPairingQrLink: Muestra un link para abrir el QR en el navegador.
+ * En SSH el QR dibujado en terminal se deforma; el link es más fiable.
+ *
+ * @param {string} qrCode - Texto del QR que entrega Baileys
+ */
+function printPairingQrLink(qrCode) {
+  const url = `https://api.qrserver.com/v1/create-qr-code/?size=400x400&data=${encodeURIComponent(qrCode)}`;
+  console.log('');
+  console.log('========== VINCULAR WHATSAPP ==========');
+  console.log('1) En el celular: WhatsApp > Dispositivos vinculados > Vincular dispositivo');
+  console.log('2) Abre este link en el navegador del PC y escanea la imagen:');
+  console.log(url);
+  console.log('======================================');
+  console.log('');
+}
+
 // Inicializa conexión con WhatsApp y registra todos los listeners de eventos.
 async function startBot() {
   // Si ya hay un intento de conexión en curso, no abrimos otro socket
@@ -102,23 +114,15 @@ async function startBot() {
 
   try {
     const config = loadBotConfig();
-    // silent en producción; BAILEYS_DEBUG=1 sube a debug para investigar descifrado
-    const logger = pino({ level: BAILEYS_DEBUG ? 'debug' : 'silent' });
+    const logger = pino({ level: 'silent' });
 
-    console.log(`[BOOT] Proyecto: ${PROJECT_ROOT}`);
-    console.log(`[BOOT] Auth: ${AUTH_DIR}`);
-    console.log(`[BOOT] SQLite: ${SQLITE_PATH}`);
-    console.log(`[BOOT] cwd: ${process.cwd()}`);
-    console.log(`[BOOT] Node: ${process.version}`);
-    console.log(`[BOOT] BAILEYS_DEBUG: ${BAILEYS_DEBUG}`);
+    console.log(`Iniciando bot en: ${PROJECT_ROOT}`);
 
     // AUTH_DIR es ruta absoluta → auth/ siempre en la raíz del repo
     const { state, saveCreds } = await useMultiFileAuthState(AUTH_DIR);
-    const { version, isLatest } = await fetchLatestBaileysVersion();
-    console.log(`[BOOT] WA version: ${version.join('.')} (isLatest=${isLatest})`);
+    const { version } = await fetchLatestBaileysVersion();
 
-    // Baileys 7: enableRecentMessageCache + enableAutoSessionRecreation
-    // ayudan con "Esperando mensaje" (reintentos de descifrado / sesión Signal).
+    // Baileys 7: caché de mensajes + recreación de sesión ayudan al descifrado.
     // getMessage: WhatsApp pide el contenido original para reenviar cifrado.
     const sock = makeWASocket({
       version,
@@ -134,28 +138,17 @@ async function startBot() {
       enableRecentMessageCache: true,
       enableAutoSessionRecreation: true,
       getMessage: async (key) => {
-        // WhatsApp pide el contenido original para reintentar el envío cifrado
         const cached = key?.id ? recentMessages.get(key.id) : undefined;
-        console.log(`[getMessage] id=${key?.id} jid=${key?.remoteJid} hit=${!!cached}`);
-        if (cached) return cached;
-        return undefined;
+        return cached || undefined;
       }
     });
 
     sock.ev.on('creds.update', saveCreds);
 
-    // Diagnóstico: estado de entrega (ACK). Si status avanza pero el celular no lee → fallo de descifrado.
-    sock.ev.on('messages.update', (updates) => {
-      for (const u of updates) {
-        if (!u.key?.fromMe) continue;
-        console.log(`[ACK] id=${u.key.id} jid=${u.key.remoteJid} status=${u.update?.status} err=${u.update?.error || '-'}`);
-      }
-    });
-
     // Si nunca llega open/close (cuelga en "connecting"), liberamos el flag a los 60s
     const connectingWatchdog = setTimeout(() => {
       if (!connectionSettled) {
-        console.warn('[BOOT] Timeout esperando open/close; se libera isConnecting.');
+        console.warn('Timeout esperando conexión WhatsApp; se libera el bloqueo de arranque.');
         releaseConnecting();
       }
     }, 60000);
@@ -163,17 +156,7 @@ async function startBot() {
     // Listener de estado de conexión (QR, conectado, desconectado, reconexión automática).
     sock.ev.on('connection.update', ({ connection, lastDisconnect, qr: qrCode }) => {
       if (qrCode) {
-        // En SSH el QR "small" casi nunca se escanea bien. Link de imagen + QR grande.
-        console.log('');
-        console.log('========== VINCULAR WHATSAPP ==========');
-        console.log('Opción A — Abre este link en el navegador del PC y escanea la imagen:');
-        console.log(`https://api.qrserver.com/v1/create-qr-code/?size=400x400&data=${encodeURIComponent(qrCode)}`);
-        console.log('');
-        console.log('Opción B — QR en terminal (amplía la ventana SSH):');
-        console.log('WhatsApp > Dispositivos vinculados > Vincular dispositivo');
-        qr.generate(qrCode, { small: false });
-        console.log('======================================');
-        console.log('');
+        printPairingQrLink(qrCode);
       }
 
       if (connection === 'open') {
@@ -187,7 +170,7 @@ async function startBot() {
         releaseConnecting();
         const statusCode = lastDisconnect?.error?.output?.statusCode;
         const shouldReconnect = statusCode !== DisconnectReason.loggedOut;
-        console.log('Conexión cerrada. ¿Intentar reconectar automáticamente?:', shouldReconnect, `(code=${statusCode})`);
+        console.log('Conexión cerrada. ¿Intentar reconectar automáticamente?:', shouldReconnect);
 
         // Liberamos listeners del socket viejo para no acumular handlers
         try {
@@ -209,205 +192,197 @@ async function startBot() {
 
     // Listener principal de mensajes entrantes.
     sock.ev.on('messages.upsert', async ({ messages }) => {
-    const message = messages[0];
+      const message = messages[0];
 
-    if (!message || message.key.remoteJid === 'status@broadcast') {
-      return;
-    }
+      if (!message || message.key.remoteJid === 'status@broadcast') {
+        return;
+      }
 
-    // Guardamos el contenido por si WhatsApp pide reintento de descifrado (getMessage)
-    if (message.message && message.key?.id) {
-      rememberMessage(message.key.id, message.message);
-    }
+      // Guardamos el contenido por si WhatsApp pide reintento de descifrado (getMessage)
+      if (message.message && message.key?.id) {
+        rememberMessage(message.key.id, message.message);
+      }
 
-    const text = message.message?.conversation || message.message?.extendedTextMessage?.text || '';
+      const text = message.message?.conversation || message.message?.extendedTextMessage?.text || '';
 
-    const botConfig = loadBotConfig();
-    const adminList = botConfig.numeros_notificar || [];
+      const botConfig = loadBotConfig();
+      const adminList = botConfig.numeros_notificar || [];
 
-    const isFromMe = message.key.fromMe;
-    const senderJid = message.key.remoteJid;
-    
-    let isFromAdmin = adminList.includes(senderJid);
-    if (!isFromAdmin && message.key.participant) {
-      isFromAdmin = adminList.includes(message.key.participant);
-    }
+      const isFromMe = message.key.fromMe;
+      const senderJid = message.key.remoteJid;
 
-    const isAuthorized = isFromMe || isFromAdmin;
+      let isFromAdmin = adminList.includes(senderJid);
+      if (!isFromAdmin && message.key.participant) {
+        isFromAdmin = adminList.includes(message.key.participant);
+      }
 
-    // Si el mensaje viene de administradores o desde la propia cuenta del bot,
-    // aquí manejamos comandos operativos como pausar/reanudar/reiniciar sesiones.
-    if (isAuthorized) {
-      if (botSentMessageIds.has(message.key.id)) return;
+      const isAuthorized = isFromMe || isFromAdmin;
 
-      let targetJid = message.key.remoteJid;
+      // Si el mensaje viene de administradores o desde la propia cuenta del bot,
+      // aquí manejamos comandos operativos como pausar/reanudar/reiniciar sesiones.
+      if (isAuthorized) {
+        if (botSentMessageIds.has(message.key.id)) return;
 
-      const parts = text.trim().split(' ');
-      const command = parts[0].toLowerCase();
-      const validCommands = ['/detenerbot', '/iniciarbot', '/reiniciarbot'];
+        let targetJid = message.key.remoteJid;
 
-      if (validCommands.includes(command)) {
-        let commandTargetJid = targetJid;
-        let usingRemoteConsole = false;
+        const parts = text.trim().split(' ');
+        const command = parts[0].toLowerCase();
+        const validCommands = ['/detenerbot', '/iniciarbot', '/reiniciarbot'];
 
-        if (parts.length >= 2) {
-          const rawTarget = parts[1];
-          commandTargetJid = rawTarget.includes('@') ? rawTarget : `${rawTarget}@s.whatsapp.net`;
-          usingRemoteConsole = true;
+        if (validCommands.includes(command)) {
+          let commandTargetJid = targetJid;
+          let usingRemoteConsole = false;
+
+          if (parts.length >= 2) {
+            const rawTarget = parts[1];
+            commandTargetJid = rawTarget.includes('@') ? rawTarget : `${rawTarget}@s.whatsapp.net`;
+            usingRemoteConsole = true;
+          }
+
+          if (!usingRemoteConsole) {
+            try {
+              await sock.sendMessage(targetJid, { delete: message.key });
+            } catch (e) { console.error('Error borrando comando:', e.message); }
+          }
+
+          const tgtSession = getSession(commandTargetJid);
+
+          if (command === '/detenerbot') {
+            tgtSession.isMuted = true;
+            console.log(`🔇 Bot DETENIDO manualmente para: ${commandTargetJid}`);
+            if (usingRemoteConsole) {
+              const sent = await sock.sendMessage(targetJid, { text: `🔇 Cliente ${parts[1] || 'actual'} silenciado.` });
+              rememberMessage(sent?.key?.id, sent?.message || { conversation: `🔇 Cliente ${parts[1] || 'actual'} silenciado.` });
+            }
+          } else if (command === '/iniciarbot') {
+            tgtSession.isMuted = false;
+            console.log(`🤖 Bot INICIADO manualmente para: ${commandTargetJid}`);
+            if (usingRemoteConsole) {
+              const sent = await sock.sendMessage(targetJid, { text: `🤖 Cliente ${parts[1] || 'actual'} iniciado.` });
+              rememberMessage(sent?.key?.id, sent?.message || { conversation: `🤖 Cliente ${parts[1] || 'actual'} iniciado.` });
+            }
+          } else if (command === '/reiniciarbot') {
+            resetSession(commandTargetJid);
+            console.log(`🔄 Sesión REINICIADA para: ${commandTargetJid}`);
+            if (usingRemoteConsole) {
+              const sent = await sock.sendMessage(targetJid, { text: `✅ Sesión de ${parts[1] || 'actual'} reiniciada.` });
+              rememberMessage(sent?.key?.id, sent?.message || { conversation: `✅ Sesión de ${parts[1] || 'actual'} reiniciada.` });
+            }
+            return;
+          }
+          saveSession(commandTargetJid, tgtSession);
+          return;
         }
 
-        if (!usingRemoteConsole) {
-          try {
-            await sock.sendMessage(targetJid, { delete: message.key });
-          } catch (e) { console.error("Error borrando comando:", e.message); }
-        }
+        // Si un humano escribe en el chat de un cliente, silenciamos al bot automáticamente
+        // para no interrumpir la conversación del vendedor.
+        const isClientChat = (targetJid.endsWith('@s.whatsapp.net') || targetJid.endsWith('@lid')) && !adminList.includes(targetJid);
 
-        const tgtSession = getSession(commandTargetJid);
-        
-        if (command === '/detenerbot') {
-          tgtSession.isMuted = true;
-          console.log(`🔇 Bot DETENIDO manualmente para: ${commandTargetJid}`);
-          if (usingRemoteConsole) {
-            const sent = await sock.sendMessage(targetJid, { text: `🔇 Cliente ${parts[1] || 'actual'} silenciado.` });
-            rememberMessage(sent?.key?.id, sent?.message || { conversation: `🔇 Cliente ${parts[1] || 'actual'} silenciado.` });
-          }
-        } else if (command === '/iniciarbot') {
-          tgtSession.isMuted = false;
-          console.log(`🤖 Bot INICIADO manualmente para: ${commandTargetJid}`);
-          if (usingRemoteConsole) {
-            const sent = await sock.sendMessage(targetJid, { text: `🤖 Cliente ${parts[1] || 'actual'} iniciado.` });
-            rememberMessage(sent?.key?.id, sent?.message || { conversation: `🤖 Cliente ${parts[1] || 'actual'} iniciado.` });
-          }
-        } else if (command === '/reiniciarbot') {
-          resetSession(commandTargetJid);
-          console.log(`🔄 Sesión REINICIADA para: ${commandTargetJid}`);
-          if (usingRemoteConsole) {
-            const sent = await sock.sendMessage(targetJid, { text: `✅ Sesión de ${parts[1] || 'actual'} reiniciada.` });
-            rememberMessage(sent?.key?.id, sent?.message || { conversation: `✅ Sesión de ${parts[1] || 'actual'} reiniciada.` });
+        if (isClientChat) {
+          const session = getSession(targetJid);
+          if (!session.isMuted) {
+            session.isMuted = true;
+            session.silenciado_timestamp = Date.now();
+            saveSession(targetJid, session);
+            console.log(`🔇 Bot SILENCIADO automáticamente (Intervención humana en ${targetJid})`);
           }
           return;
         }
-        saveSession(commandTargetJid, tgtSession);
-        return;
-      }
 
-      // Si un humano escribe en el chat de un cliente, silenciamos al bot automáticamente
-      // para no interrumpir la conversación del vendedor.
-      const isClientChat = (targetJid.endsWith('@s.whatsapp.net') || targetJid.endsWith('@lid')) && !adminList.includes(targetJid);
-
-      if (isClientChat) {
-        const session = getSession(targetJid);
-        if (!session.isMuted) {
-          session.isMuted = true;
-          session.silenciado_timestamp = Date.now();
-          saveSession(targetJid, session);
-          console.log(`🔇 Bot SILENCIADO automáticamente (Intervención humana en ${targetJid})`);
+        if (isFromMe) {
+          return;
         }
+      }
+
+      // Desde aquí en adelante: flujo normal para clientes.
+      const session = getSession(message.key.remoteJid);
+      if (session.isMuted) {
         return;
       }
-      
-      if (isFromMe) {
+
+      const isGroup = message.key.remoteJid?.endsWith('@g.us');
+      if (isGroup && !config.allowGroups) {
         return;
       }
-    }
 
-    // Desde aquí en adelante: flujo normal para clientes.
-    const session = getSession(message.key.remoteJid);
-    if (session.isMuted) {
-      console.log(`[MSG] Ignorado (mute): ${message.key.remoteJid}`);
-      return;
-    }
+      if (!shouldHandleMessage(text, config)) {
+        return;
+      }
 
-    const isGroup = message.key.remoteJid?.endsWith('@g.us');
-    if (isGroup && !config.allowGroups) {
-      return;
-    }
+      const cleanText = stripTriggerPrefix(text, config);
+      if (!cleanText) {
+        return;
+      }
 
-    if (!shouldHandleMessage(text, config)) {
-      return;
-    }
+      try {
+        // Función que engine usará para avisar eventos importantes (SOS / cierre de venta) a admins.
+        // Formato unificado: cabecera (tipo + cliente) + cuerpo (pedido o motivo).
+        // alertData = { type: 'SUCCESS'|'SOS', title: string, body: string }
+        const sendAdminAlert = async (alertData) => {
+          // Identificamos al cliente con el JID real de WhatsApp + nombre de perfil (pushName)
+          const realId = message.key.participant || message.key.remoteJid;
+          let displayId = realId.replace('@s.whatsapp.net', '').replace('@c.us', '');
+          const nombrePerfil = message.pushName ? ` (${message.pushName})` : '';
 
-    const cleanText = stripTriggerPrefix(text, config);
-    if (!cleanText) {
-      console.log(`[MSG] Sin texto usable de ${message.key.remoteJid} (¿solo media/sticker?)`);
-      return;
-    }
+          // Algunos chats usan @lid (ID oculto): no tenemos el número público
+          if (displayId.includes('@lid')) {
+            displayId = displayId.replace('@lid', '') + ' [ID Oculto]';
+          }
 
-    console.log(`[MSG] De ${message.key.remoteJid}: "${cleanText.slice(0, 80)}"`);
+          const clientLabel = `+${displayId}${nombrePerfil}`;
 
-    try {
-      // Función que engine usará para avisar eventos importantes (SOS / cierre de venta) a admins.
-      // Formato unificado: cabecera (tipo + cliente) + cuerpo (pedido o motivo).
-      // alertData = { type: 'SUCCESS'|'SOS', title: string, body: string }
-      const sendAdminAlert = async (alertData) => {
-        // Identificamos al cliente con el JID real de WhatsApp + nombre de perfil (pushName)
-        const realId = message.key.participant || message.key.remoteJid;
-        let displayId = realId.replace('@s.whatsapp.net', '').replace('@c.us', '');
-        const nombrePerfil = message.pushName ? ` (${message.pushName})` : '';
+          // Armamos el mensaje con la misma cabecera para SOS y cotizaciones
+          const mensajeFinal = composeAdminAlertMessage({
+            type: alertData.type || 'SOS',
+            title: alertData.title || '',
+            clientLabel,
+            body: alertData.body || alertData.message || ''
+          });
 
-        // Algunos chats usan @lid (ID oculto): no tenemos el número público
-        if (displayId.includes('@lid')) {
-          displayId = displayId.replace('@lid', '') + ' [ID Oculto]';
+          // Una copia idéntica a cada administrador de ADMIN_NUMBERS
+          for (const adminNum of adminList) {
+            try {
+              const sent = await sock.sendMessage(adminNum, { text: mensajeFinal });
+              rememberMessage(sent?.key?.id, sent?.message || { conversation: mensajeFinal });
+            } catch (e) {
+              console.error(`Error enviando alerta a ${adminNum}:`, e.message);
+            }
+          }
+        };
+
+        setAdminAlertFunction(sendAdminAlert);
+
+        const reply = await processMessage(message.key.remoteJid, cleanText);
+
+        if (!reply) {
+          return;
         }
 
-        const clientLabel = `+${displayId}${nombrePerfil}`;
+        // El engine puede devolver un string o un array de mensajes (bloques separados)
+        const replies = Array.isArray(reply) ? reply : [reply];
+        const targetJid = message.key.remoteJid;
 
-        // Armamos el mensaje con la misma cabecera para SOS y cotizaciones
-        const mensajeFinal = composeAdminAlertMessage({
-          type: alertData.type || 'SOS',
-          title: alertData.title || '',
-          clientLabel,
-          body: alertData.body || alertData.message || ''
-        });
+        // Asegura sesión Signal con el destinatario antes del primer envío
+        try {
+          await sock.assertSessions([targetJid], true);
+        } catch (e) {
+          console.warn(`assertSessions falló para ${targetJid}:`, e.message);
+        }
 
-        // Una copia idéntica a cada administrador de ADMIN_NUMBERS
-        for (const adminNum of adminList) {
-          try {
-            const sent = await sock.sendMessage(adminNum, { text: mensajeFinal });
-            rememberMessage(sent?.key?.id, sent?.message || { conversation: mensajeFinal });
-          } catch (e) {
-            console.error(`Error enviando alerta a ${adminNum}:`, e.message);
+        for (const textPart of replies) {
+          if (!textPart) continue;
+          // Sin quoted: en algunos celulares el quote rompe el descifrado
+          const sentMsg = await sock.sendMessage(targetJid, { text: textPart });
+          if (sentMsg?.key?.id) {
+            botSentMessageIds.add(sentMsg.key.id);
+            rememberMessage(sentMsg.key.id, sentMsg.message || { conversation: textPart });
           }
         }
-      };
 
-      setAdminAlertFunction(sendAdminAlert);
-
-      const reply = await processMessage(message.key.remoteJid, cleanText);
-
-      if (!reply) {
-        return;
+      } catch (error) {
+        console.error('Error procesando mensaje de WhatsApp:', error.message);
       }
-
-      // El engine puede devolver un string o un array de mensajes (bloques separados)
-      const replies = Array.isArray(reply) ? reply : [reply];
-      const targetJid = message.key.remoteJid;
-
-      // Asegura sesión Signal con el destinatario (reduce "Esperando mensaje" en primer contacto)
-      try {
-        await sock.assertSessions([targetJid], true);
-      } catch (e) {
-        console.warn(`[SEND] assertSessions falló para ${targetJid}:`, e.message);
-      }
-
-      for (const textPart of replies) {
-        if (!textPart) continue;
-        // Sin quoted: en algunos celulares el quote rompe el descifrado ("Esperando mensaje")
-        const sentMsg = await sock.sendMessage(targetJid, { text: textPart });
-        if (sentMsg?.key?.id) {
-          botSentMessageIds.add(sentMsg.key.id);
-          // Guardamos el mensaje saliente para getMessage (reintentos de WhatsApp)
-          rememberMessage(sentMsg.key.id, sentMsg.message || { conversation: textPart });
-          console.log(`[SEND] OK id=${sentMsg.key.id} to=${targetJid} len=${textPart.length}`);
-        } else {
-          console.warn(`[SEND] sin id de mensaje hacia ${targetJid}`);
-        }
-      }
-
-    } catch (error) {
-      console.error('Error procesando mensaje de WhatsApp:', error.message);
-    }
-  });
+    });
   } catch (error) {
     // Falló antes de conectar (auth, red, etc.): liberamos flag y reintentamos
     console.error('Error iniciando socket WhatsApp:', error.message);

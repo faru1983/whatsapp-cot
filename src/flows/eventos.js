@@ -2,12 +2,15 @@ import {
   getWelcomeEventos,
   getDoubtClarificationTemplate,
   getEventQuotationTemplate,
-  buildAdminEventosOrderBody
+  buildAdminEventosOrderBody,
+  getEventFormatPitch,
+  getEventLitersSuggestion,
+  getEventFormatRecommendation,
+  getEventDataSummary
 } from '../views/templates.js';
 import { STATE_PROMPTS } from '../views/prompts.js';
 import {
   findLocationByFuzzyMatch,
-  parseClientName,
   parseDate,
   hasDrinkSelection,
   formatPrice,
@@ -15,18 +18,115 @@ import {
   getCartaCocteles,
   findClosestCatalogMatch,
   resolveDoubtsProgrammatically,
-  parseEventElimination
+  parseEventElimination,
+  isEventMenuCorrection,
+  fixEventLitrageShorthand
 } from '../logic/utils.js';
 import { extractEventProductsWithAI } from '../core/llm.js';
 import { OrderBuilder } from '../logic/order-builder.js';
+import { resolveDecisionIntent } from '../logic/decision-intent.js';
 
 // ==============================================================================
 // OBJETIVO: Flujo Eventos (Servicio para Eventos).
 // Guía al cliente desde que elige "eventos" hasta confirmar la cotización.
 // Pasos (orden típico; las transiciones reales van en nextState):
-// filtro canal -> recogida datos -> elección formato ->
-// elección menú (NLU + carrito) -> cotización (OrderBuilder).
+// filtro canal -> recogida datos -> confirmar datos (ok) -> elección formato ->
+// confirmar formato (pitch) -> elección menú (carta + NLU + carrito) -> cotización.
 // ==============================================================================
+
+/**
+ * parseCelebrationType: Detecta qué celebra el cliente (matrimonio, cumpleaños, etc.).
+ * Es opcional: si no aparece, el flujo sigue igual con invitados/fecha/comuna.
+ *
+ * @param {string} messageText - Mensaje del cliente
+ * @returns {string|null} Tipo de celebración o null
+ */
+function parseCelebrationType(messageText) {
+  const lower = String(messageText || '').toLowerCase();
+  const map = [
+    [/matrimonio|casamiento|boda|wedding/i, 'Matrimonio'],
+    [/cumplea[nñ]os|cumple/i, 'Cumpleaños'],
+    [/empresa|corporativ|oficina|trabajo/i, 'Evento corporativo'],
+    [/graduaci[oó]n|egreso/i, 'Graduación'],
+    [/aniversario/i, 'Aniversario'],
+    [/baby\s*shower|babyshower/i, 'Baby shower'],
+    [/fiesta|celebraci[oó]n|evento/i, 'Celebración']
+  ];
+  for (const [re, label] of map) {
+    if (re.test(lower)) return label;
+  }
+  return null;
+}
+
+/**
+ * applyEventDataFromMessage: Extrae celebración, comuna, fecha, invitados del mensaje
+ * y los guarda en sesión. Devuelve true si algo nuevo se anotó.
+ * Reutilizado en recogida y en confirmación (por si corrige en el mismo paso).
+ *
+ * @param {string} messageText - Mensaje del cliente
+ * @param {object} session - Sesión (se muta)
+ * @returns {boolean} true si hubo al menos un dato nuevo
+ */
+function applyEventDataFromMessage(messageText, session) {
+  let hasNewInfo = false;
+
+  const celebration = parseCelebrationType(messageText);
+  if (celebration && celebration !== session.celebrationType) {
+    session.celebrationType = celebration;
+    hasNewInfo = true;
+  }
+
+  const locationSearch = findLocationByFuzzyMatch(messageText);
+  if (locationSearch) {
+    session.location = locationSearch.name;
+    session.isRM = locationSearch.isRM;
+    session.region = locationSearch.region;
+    hasNewInfo = true;
+  } else {
+    const locationMatch = messageText.match(/\ben\s+([A-Za-záéíóúÁÉÍÓÚñÑ]+(?:\s+[A-Za-záéíóúÁÉÍÓÚñÑ]+)?)\b/i);
+    if (locationMatch && !/el|la|un|una|mi|casa/i.test(locationMatch[1])) {
+      session.location = locationMatch[1].trim();
+      session.isRM = false;
+      session.region = null;
+      hasNewInfo = true;
+    }
+  }
+
+  const dateSearch = parseDate(messageText);
+  if (dateSearch) {
+    session.date = dateSearch;
+    hasNewInfo = true;
+  }
+
+  // Quitamos fechas del texto para no confundir "15 de mayo" con cantidad de invitados
+  const cleanText = messageText.replace(/\b\d+\s*de\s*(enero|febrero|marzo|abril|mayo|junio|julio|agosto|septiembre|octubre|noviembre|diciembre)/gi, "");
+  const guestsMatch = cleanText.match(/\b(\d+)\s*(personas|invitados|pax|inv)?\b/i);
+  if (guestsMatch) {
+    session.guests = parseInt(guestsMatch[1], 10);
+    hasNewInfo = true;
+  }
+
+  return hasNewInfo;
+}
+
+/**
+ * buildMenuEntryReplies: Tras confirmar formato: carta + sugerencia de litros + pregunta.
+ * Tres burbujas para que el cliente lea precios y orientación de consumo con calma.
+ *
+ * @param {object} session - Sesión (guests, eventoFormato)
+ * @param {string} formatKey - 'dispensador' | 'muro'
+ * @returns {string[]}
+ */
+function buildMenuEntryReplies(session, formatKey) {
+  // Carta sin pregunta final: la pregunta va en la 3ª burbuja
+  const carta = getCartaCocteles(formatKey, { includeClosingQuestion: false });
+  const litersHint = getEventLitersSuggestion(session.guests, formatKey);
+  return [
+    carta,
+    litersHint,
+    `¿Qué cócteles te gustaría incluir en tu evento? (ej: "Mojito 10L y 1 Aperol 5L")`
+  ];
+}
 
 /**
  * getEventFormatKey: Traduce el nombre amigable del formato a la clave de precios.
@@ -73,7 +173,6 @@ function ensureEventOrderBuilder(session, formatKey) {
       products: {},
       extras: {},
       clientData: {
-        name: session.userName || null,
         date: session.date || null,
         location: session.location || null,
         guests: session.guests || null
@@ -127,6 +226,7 @@ export const eventosStates = {
 
   // ==============================================================================
   // FILTRO DE CANAL (¿web o WhatsApp?)
+  // promptQuestion viene en 2 bloques (formatos + pregunta) vía getWelcomeEventos().
   // ==============================================================================
   EVENTOS_FILTRO_CANAL: {
     id: 'EVENTOS_FILTRO_CANAL',
@@ -141,14 +241,15 @@ export const eventosStates = {
       const wantsWeb = /web|link|pagina|sitio/i.test(normalizedMessage)
         && !/chat|whatsapp|aqui|por aqui/i.test(normalizedMessage);
 
-      // Palabras que indican "sigamos por aquí" (incluye "no" cuando el bot preguntó web vs chat)
-      const wantsWhatsapp = /^no$|aqui|aca|chat|whatsapp|ayuda|ayudar|ayudando|por favor|porfa|dime|muestra|catalogo|quiero|si|sigamos|seguimos|seguir|continuar|precio|valor|cuesta|cuanto/i.test(normalizedMessage);
+      // Palabras que indican "sigamos por aquí" (incluye "no" cuando el bot preguntó web vs chat).
+      // "aka" = typo frecuente de "acá" (mismo criterio que en barriles).
+      const wantsWhatsapp = /^no$|aqui|aca|aka|chat|whatsapp|ayuda|ayudar|ayudando|por favor|porfa|dime|muestra|catalogo|quiero|si|sigamos|seguimos|seguir|continuar|precio|valor|cuesta|cuanto/i.test(normalizedMessage);
 
       if (wantsWeb) {
         return {
           success: true,
           nextState: 'CERRADO',
-          customReply: `¡Buenísimo! Te dejo el link directo: https://cocktailsontap.cl/eventos\nSi tienes alguna pregunta mientras cotizas, me escribes por aquí y te ayudo con gusto. 🥂`,
+          customReply: `¡Buenísimo! Te recuerdo el link: https://cocktailsontap.cl/eventos\nSi tienes alguna pregunta mientras cotizas, me escribes por aquí y te ayudo con gusto. 🥂`,
           mute: true
         };
       }
@@ -162,70 +263,157 @@ export const eventosStates = {
   },
 
   // ==============================================================================
-  // RECOGIDA DE DATOS DEL EVENTO (invitados, fecha, comuna)
+  // RECOGIDA DE DATOS DEL EVENTO (qué celebra, invitados, fecha, comuna)
+  // Igual que el carrito de cócteles: el cliente puede mandar todo junto o de a uno.
+  // Guardamos lo que venga en sesión y pedimos SOLO lo que falta.
   // ==============================================================================
   EVENTOS_RECOGIDA_DATOS: {
     id: 'EVENTOS_RECOGIDA_DATOS',
-    promptQuestion: () => `¡Excelente! 🎉 Para poder asesorarte bien, por favor cuéntame sobre tu evento:\n\n- ¿Cuántos invitados esperas aproximadamente?\n- ¿Para qué fecha lo tienes planeado?\n- ¿En qué comuna se realizará?\n\nPuedes escribirlo así: "50 invitados, 15 de mayo, Las Condes"`,
-    shortQuestion: `¿Me ayudas con la comuna, fecha e invitados?`,
+    promptQuestion: () => [
+      `¡Excelente! 🎉 Para poder asesorarte bien, por favor cuéntame sobre tu evento:
+
+- ¿Qué celebras?
+- ¿Cuántos invitados serán aprox?
+- ¿Para qué fecha?
+- ¿En qué comuna se realizará?`,
+      `Puedes escribirlo así: _"matrimonio, 50 invitados, 15 de mayo, Las Condes"_`
+    ],
+    // Solo invitados es obligatorio para avanzar; celebración/fecha/comuna son bonus
+    shortQuestion: (session) => {
+      if (!session.guests) return `¿Cuántos invitados serán aproximadamente?`;
+      return `¿Me confirmas los datos del evento para seguir?`;
+    },
     aiContextPrompt: STATE_PROMPTS.EVENTOS_RECOGIDA_DATOS_DUDAS,
 
     async validateAndProcess(messageText, session) {
-      // --- Extraer ubicación con búsqueda flexible en datos.json ---
-      const locationSearch = findLocationByFuzzyMatch(messageText);
-      if (locationSearch) {
-        session.location = locationSearch.name;
-        session.isRM = locationSearch.isRM;       // ¿Está en Región Metropolitana?
-        session.region = locationSearch.region;
-      } else {
-        // Plan B: buscar patrón "en Las Condes" si el fuzzy match no encontró nada
-        const locationMatch = messageText.match(/\ben\s+([A-Za-záéíóúÁÉÍÓÚñÑ]+(?:\s+[A-Za-záéíóúÁÉÍÓÚñÑ]+)?)\b/i);
-        if (locationMatch && !/el|la|un|una|mi|casa/i.test(locationMatch[1])) {
-          session.location = locationMatch[1].trim();
-          session.isRM = false;
-          session.region = null;
-        }
-      }
+      // Extraemos lo que venga (puede ser 1 dato o varios)
+      const hasNewInfo = applyEventDataFromMessage(messageText, session);
+      const guestsJustParsed = /\b(\d+)\s*(personas|invitados|pax|inv)?\b/i.test(
+        messageText.replace(/\b\d+\s*de\s*(enero|febrero|marzo|abril|mayo|junio|julio|agosto|septiembre|octubre|noviembre|diciembre)/gi, "")
+      );
 
-      // Nombre y fecha son opcionales en este paso pero los guardamos si aparecen
-      const nameSearch = parseClientName(messageText);
-      if (nameSearch && !session.userName) session.userName = nameSearch;
-
-      const dateSearch = parseDate(messageText);
-      if (dateSearch && !session.date) session.date = dateSearch;
-
-      // Quitamos fechas del texto para no confundir "15 de mayo" con cantidad de invitados
-      const cleanText = messageText.replace(/\b\d+\s*de\s*(enero|febrero|marzo|abril|mayo|junio|julio|agosto|septiembre|octubre|noviembre|diciembre)/gi, "");
-      const guestsMatch = cleanText.match(/\b(\d+)\s*(personas|invitados|pax|inv)?\b/i);
-
-      // Si pide precios sin dar datos del evento, redirigimos a la web pero seguimos en este estado
-      const isAskingForPriceWithoutData = /precio|precios|cu[aá]nto|cuanto|valor|vale|cat[aá]logo|carta|lista/i.test(messageText) && !guestsMatch;
+      // --- Pregunta de precios sin datos → web, pero seguimos en este estado ---
+      const isAskingForPriceWithoutData = /precio|precios|cu[aá]nto|cuanto|valor|vale|cat[aá]logo|carta|lista/i.test(messageText)
+        && !session.guests
+        && !guestsJustParsed;
       if (isAskingForPriceWithoutData) {
-        const reply = `¡Claro! La forma más rápida de ver todos los precios y armar tu cotización en tiempo real es directamente en nuestra web: https://cocktailsontap.cl/eventos 🍸\n\nAllí puedes elegir el formato, los cócteles y los litros que necesitas, y ver el total al instante. Si surge cualquier duda, estaremos atentos aquí para ayudarte. 🙌\n\nPara seguir por aquí, cuéntame: ¿cuántos invitados, qué fecha y en qué comuna será tu evento?`;
-        return { success: true, nextState: 'EVENTOS_RECOGIDA_DATOS', customReply: reply };
+        return {
+          success: true,
+          nextState: 'EVENTOS_RECOGIDA_DATOS',
+          customReplies: [
+            `¡Claro! La forma más rápida de ver todos los precios y armar tu cotización en tiempo real es directamente en nuestra web: https://cocktailsontap.cl/eventos 🍸
+
+Allí puedes elegir el formato, los cócteles y los litros que necesitas, y ver el total al instante. Si surge cualquier duda, estaremos atentos aquí para ayudarte. 🙌`,
+            `Para seguir por aquí, ¿cuántos *invitados* serán aproximadamente?`
+          ]
+        };
       }
 
-      // Cuando tenemos cantidad de invitados, calculamos litros estimados y recomendamos formato
-      if (guestsMatch) {
-        session.guests = parseInt(guestsMatch[1], 10);
+      // --- Con invitados → resumen para confirmar (ok) antes de recomendar formato ---
+      if (session.guests) {
+        return {
+          success: true,
+          nextState: 'EVENTOS_CONFIRMAR_DATOS',
+          customReplies: getEventDataSummary(session)
+        };
+      }
 
-        // Fórmula: invitados × tragos por persona × 0.2 (litros por trago), redondeado a múltiplos de 5L
-        const tranquilo = Math.ceil((session.guests * 2 * 0.2) / 5) * 5;
-        const fiesta = Math.ceil((session.guests * 4 * 0.2) / 5) * 5;
+      // --- Parcial sin invitados (ej. solo "cumpleaños") → pedir SOLO invitados ---
+      if (hasNewInfo) {
+        const got = [];
+        if (session.celebrationType) got.push(`celebración: *${session.celebrationType}*`);
+        if (session.date) got.push(`fecha: *${session.date}*`);
+        if (session.location) got.push(`comuna: *${session.location}*`);
 
-        // Menos de 100 invitados → Dispensador; más → Muro (regla de negocio)
-        const recomendacion = session.guests < 100 ? '*Dispensador Portátil*' : '*Muro de Coctelería*';
+        const ack = got.length > 0
+          ? `Perfecto, anoté ${got.join(', ')}. `
+          : `Perfecto. `;
+
+        return {
+          success: true,
+          nextState: 'EVENTOS_RECOGIDA_DATOS',
+          customReply: `${ack}Para recomendarte el formato, ¿cuántos *invitados* serán aproximadamente?`
+        };
+      }
+
+      // --- No entendimos nada nuevo → engine: FAQ → IA → re-pregunta ---
+      return { success: false };
+    }
+  },
+
+  // ==============================================================================
+  // CONFIRMAR DATOS DEL EVENTO (resumen + ok / corregir)
+  // Solo invitados es obligatorio; el resto puede quedar "Por confirmar".
+  // Decisión corta → keywords + classifyStepIntent.
+  // ==============================================================================
+  EVENTOS_CONFIRMAR_DATOS: {
+    id: 'EVENTOS_CONFIRMAR_DATOS',
+    promptQuestion: (session) => getEventDataSummary(session),
+    shortQuestion: `¿Todo bien? Escribe *ok* para continuar o corrige un dato.`,
+    aiContextPrompt: STATE_PROMPTS.EVENTOS_CONFIRMAR_DATOS,
+
+    async validateAndProcess(messageText, session) {
+      // Primero: ¿está corrigiendo o agregando un dato? (antes que "ok")
+      const hasNewInfo = applyEventDataFromMessage(messageText, session);
+
+      // Si aún no hay invitados (caso raro: borró el dato), volvemos a pedirlos
+      if (!session.guests) {
+        return {
+          success: true,
+          nextState: 'EVENTOS_RECOGIDA_DATOS',
+          customReply: `Para recomendarte el formato, ¿cuántos *invitados* serán aproximadamente?`
+        };
+      }
+
+      // Corrigió algo → reenviamos el resumen actualizado (sigue en este estado)
+      if (hasNewInfo) {
+        return {
+          success: true,
+          nextState: 'EVENTOS_CONFIRMAR_DATOS',
+          customReplies: getEventDataSummary(session)
+        };
+      }
+
+      // ¿Confirma con ok / sí / dale?
+      const intent = await resolveDecisionIntent({
+        messageText,
+        session,
+        stepQuestion: eventosStates.EVENTOS_CONFIRMAR_DATOS.shortQuestion,
+        allowedLabels: ['CONFIRMAR', 'CORREGIR'],
+        labelHints: {
+          CONFIRMAR: 'Los datos están bien; quiere seguir (ok, sí, dale, correcto, perfecto).',
+          CORREGIR: 'Quiere cambiar algún dato pero aún no dijo el valor nuevo (cambiar, modificar, mal).'
+        },
+        keywordGuess: () => {
+          const lower = messageText.toLowerCase().trim();
+          if (/^(ok|okay|si|sí|dale|listo|perfecto|correcto|esta bien|está bien|todo bien|vamos|claro)$/i.test(lower)) {
+            return 'CONFIRMAR';
+          }
+          if (/\b(ok|okay|correcto|esta bien|está bien|todo bien|perfecto|dale|listo)\b/i.test(lower)
+              && !/\b(no|mal|cambi|modific|equivoc)\b/i.test(lower)) {
+            return 'CONFIRMAR';
+          }
+          if (/\b(cambi|modific|equivoc|mal|correg)\b/i.test(lower)) return 'CORREGIR';
+          return null;
+        }
+      });
+
+      if (intent === 'CONFIRMAR') {
         const instalacionMuro = formatPrice(preciosData.instalacion_muro || 50000);
+        return {
+          success: true,
+          nextState: 'EVENTOS_ELECCION_FORMATO',
+          customReplies: getEventFormatRecommendation(session.guests, instalacionMuro)
+        };
+      }
 
-        // Mensaje corto: recomendación + 2 opciones + consumo estimado + pregunta
-        const reply =
-          `Para *${session.guests} invitados* te recomendamos el ${recomendacion}.\n\n` +
-          `1. *Dispensador Portátil* — instalación gratis, mín. 10L\n` +
-          `2. *Muro de Coctelería* — instalación ${instalacionMuro}, mín. 30L\n\n` +
-          `Solicitud de Litros de referencia: *${tranquilo}L* (tranquilo) o *${fiesta}L* (fiesta).\n\n` +
-          `¿Cuál prefieres: *Dispensador* o *Muro*?`;
-
-        return { success: true, nextState: 'EVENTOS_ELECCION_FORMATO', customReply: reply };
+      // Quiere corregir pero no dio el dato nuevo → pedimos que lo escriba
+      if (intent === 'CORREGIR') {
+        return {
+          success: true,
+          nextState: 'EVENTOS_CONFIRMAR_DATOS',
+          customReply: `Claro, ¿qué dato quieres cambiar? Puedes escribirlo directo (ej: "son 80 invitados", "es en Providencia" o "15 de mayo").`
+        };
       }
 
       return { success: false };
@@ -234,6 +422,7 @@ export const eventosStates = {
 
   // ==============================================================================
   // ELECCIÓN DE FORMATO (Dispensador vs Muro)
+  // Al elegir, NO mostramos carta aún: vamos al pitch + confirmación.
   // ==============================================================================
   EVENTOS_ELECCION_FORMATO: {
     id: 'EVENTOS_ELECCION_FORMATO',
@@ -242,22 +431,109 @@ export const eventosStates = {
     aiContextPrompt: STATE_PROMPTS.EVENTOS_ELECCION_FORMATO_DUDAS,
 
     async validateAndProcess(messageText, session) {
-      const isMuro = /muro/i.test(messageText);
-      const isDispensador = /dispensador|portatil|portátil/i.test(messageText);
+      const intent = await resolveDecisionIntent({
+        messageText,
+        session,
+        stepQuestion: eventosStates.EVENTOS_ELECCION_FORMATO.shortQuestion,
+        allowedLabels: ['DISPENSADOR', 'MURO'],
+        labelHints: {
+          DISPENSADOR: 'Elige opción 1 / Dispensador Portátil (instalación gratis, mínimo 10L). También: "1", "uno", "primera".',
+          MURO: 'Elige opción 2 / Muro de Coctelería (instalación con costo, mínimo 30L). También: "2", "dos", "segunda".'
+        },
+        keywordGuess: () => {
+          const trimmed = messageText.trim();
+          // Números y palabras: "1" / "uno" / "primera" → Dispensador; "2" / "dos" / "segunda" → Muro
+          if (/^(1|uno|primera?|opci[oó]n\s*1)$/i.test(trimmed)) return 'DISPENSADOR';
+          if (/^(2|dos|segunda?|opci[oó]n\s*2)$/i.test(trimmed)) return 'MURO';
 
-      if (isMuro || isDispensador) {
-        session.eventoFormato = isMuro ? 'Muro de Coctelería' : 'Dispensador Portátil';
+          const isMuro = /\bmuro\b/i.test(messageText);
+          const isDispensador = /\b(dispensador|portatil|portátil)\b/i.test(messageText);
+          if (isMuro && !isDispensador) return 'MURO';
+          if (isDispensador && !isMuro) return 'DISPENSADOR';
+          if (isMuro) return 'MURO';
+          if (isDispensador) return 'DISPENSADOR';
+          return null;
+        }
+      });
 
-        // Cada formato tiene mínimos de litros y tamaños de barril distintos
-        const minLiters = isMuro ? '30L' : '10L';
-        const formatsCompat = isMuro ? '10L, 20L y 30L' : '5L y 10L';
+      if (intent === 'MURO' || intent === 'DISPENSADOR') {
+        session.eventoFormato = intent === 'MURO' ? 'Muro de Coctelería' : 'Dispensador Portátil';
         const formatKey = getEventFormatKey(session.eventoFormato);
-
-        // Inicializamos carrito vacío para este formato
         ensureEventOrderBuilder(session, formatKey);
 
-        const reply = `¡Excelente elección! El ${session.eventoFormato} será un éxito. \nRecuerda que el pedido mínimo para este formato es de *${minLiters}* totales, y los barriles compatibles son de *${formatsCompat}*.\n\nAquí tienes nuestra carta de cócteles:\n\n${getCartaCocteles(formatKey)}`;
-        return { success: true, nextState: 'EVENTOS_ELECCION_MENU', customReply: reply };
+        // Pitch del formato + pregunta "ok para ver carta"
+        return {
+          success: true,
+          nextState: 'EVENTOS_CONFIRMAR_FORMATO',
+          customReplies: getEventFormatPitch(formatKey)
+        };
+      }
+
+      return { success: false };
+    }
+  },
+
+  // ==============================================================================
+  // CONFIRMAR FORMATO (pitch + ok / cambiar a otro formato)
+  // Decisión corta → keywords + classifyStepIntent. NO es paso de datos.
+  // ==============================================================================
+  EVENTOS_CONFIRMAR_FORMATO: {
+    id: 'EVENTOS_CONFIRMAR_FORMATO',
+    promptQuestion: (session) => getEventFormatPitch(getEventFormatKey(session.eventoFormato)),
+    shortQuestion: `¿Continuamos con este formato? Escribe *ok* o dime si prefieres el otro.`,
+    aiContextPrompt: STATE_PROMPTS.EVENTOS_CONFIRMAR_FORMATO,
+
+    async validateAndProcess(messageText, session) {
+      const currentKey = getEventFormatKey(session.eventoFormato);
+
+      const intent = await resolveDecisionIntent({
+        messageText,
+        session,
+        stepQuestion: eventosStates.EVENTOS_CONFIRMAR_FORMATO.shortQuestion,
+        allowedLabels: ['CONTINUAR', 'CAMBIAR_MURO', 'CAMBIAR_DISPENSADOR'],
+        labelHints: {
+          CONTINUAR: 'Confirma el formato actual y quiere ver la carta de cócteles (ok, sí, dale, adelante).',
+          CAMBIAR_MURO: 'Quiere cambiar al Muro de Coctelería en lugar del Dispensador.',
+          CAMBIAR_DISPENSADOR: 'Quiere cambiar al Dispensador Portátil en lugar del Muro.'
+        },
+        keywordGuess: () => {
+          const lower = messageText.toLowerCase();
+          const wantsMuro = /\bmuro\b/i.test(lower);
+          const wantsDisp = /\b(dispensador|portatil|portátil)\b/i.test(lower);
+          const wantsOk = /\b(ok|okay|si|sí|dale|vamos|listo|perfecto|continuar|continuemos|adelante|claro|por\s+favor|porfa)\b/i.test(lower);
+
+          // Cambio explícito de formato (antes que "ok")
+          if (wantsMuro && currentKey !== 'muro') return 'CAMBIAR_MURO';
+          if (wantsDisp && currentKey !== 'dispensador') return 'CAMBIAR_DISPENSADOR';
+          // Si nombra el mismo formato o dice ok → continuar
+          if (wantsOk || (wantsMuro && currentKey === 'muro') || (wantsDisp && currentKey === 'dispensador')) {
+            return 'CONTINUAR';
+          }
+          return null;
+        }
+      });
+
+      // Quiere el otro formato → actualizamos y reenviamos el pitch
+      if (intent === 'CAMBIAR_MURO' || intent === 'CAMBIAR_DISPENSADOR') {
+        session.eventoFormato = intent === 'CAMBIAR_MURO' ? 'Muro de Coctelería' : 'Dispensador Portátil';
+        const formatKey = getEventFormatKey(session.eventoFormato);
+        ensureEventOrderBuilder(session, formatKey);
+        return {
+          success: true,
+          nextState: 'EVENTOS_CONFIRMAR_FORMATO',
+          customReplies: getEventFormatPitch(formatKey)
+        };
+      }
+
+      // Confirma → carta + sugerencia de litros + pregunta de cócteles
+      if (intent === 'CONTINUAR') {
+        const formatKey = getEventFormatKey(session.eventoFormato);
+        ensureEventOrderBuilder(session, formatKey);
+        return {
+          success: true,
+          nextState: 'EVENTOS_ELECCION_MENU',
+          customReplies: buildMenuEntryReplies(session, formatKey)
+        };
       }
 
       return { success: false };
@@ -271,7 +547,7 @@ export const eventosStates = {
   // ==============================================================================
   EVENTOS_ELECCION_MENU: {
     id: 'EVENTOS_ELECCION_MENU',
-    promptQuestion: () => `¿Qué cócteles te gustaría incluir en tu evento?`,
+    promptQuestion: () => `¿Qué cócteles te gustaría incluir en tu evento? (ej: "Mojito 10L y 1 Aperol 5L")`,
     shortQuestion: `¿Qué cócteles de la carta te gustaría incluir?`,
     aiContextPrompt: STATE_PROMPTS.EVENTOS_ELECCION_MENU_DUDAS,
 
@@ -367,6 +643,7 @@ export const eventosStates = {
       }
 
       // Mapear nombres de la IA al catálogo oficial y validar litraje
+      const defaultLitrage = formatKey === 'muro' ? '10L' : '5L';
       const parsedProducts = [];
       const invalidLitrages = [];
       for (const item of extractedList) {
@@ -374,7 +651,16 @@ export const eventosStates = {
         const matchedName = findClosestCatalogMatch(item.name, catalogNames);
         if (!matchedName) continue;
 
-        let litrage = item.litrage || (formatKey === 'muro' ? '10L' : '5L');
+        // Corrige "10 de mojito" mal leído como 10 unidades del litraje default
+        const fixed = fixEventLitrageShorthand(
+          messageText,
+          { name: matchedName, quantity: item.quantity, litrage: item.litrage || defaultLitrage },
+          allowedLitrages,
+          defaultLitrage
+        );
+        const litrage = fixed.litrage;
+        const quantity = fixed.quantity;
+
         if (!allowedLitrages.includes(litrage)) {
           invalidLitrages.push({ name: matchedName, litrage });
           continue;
@@ -387,42 +673,60 @@ export const eventosStates = {
           continue;
         }
 
-        parsedProducts.push({ name: matchedName, quantity: item.quantity, litrage });
+        parsedProducts.push({ name: matchedName, quantity, litrage });
       }
 
-      if (dudas?.length > 0) {
-        // Cuando una palabra puede significar más de un cóctel, pedimos aclaración.
-        // Antes guardamos lo que sí quedó claro.
-        for (const p of parsedProducts) {
+      /**
+       * applyProductsToCart: Suma productos al carrito, o reemplaza líneas del mismo
+       * cóctel si el cliente está corrigiendo ("me equivoqué, son 10L no 10x").
+       *
+       * @param {Array<{name: string, quantity: number, litrage: string}>} products
+       * @param {boolean} replaceSameName - true = borrar otras líneas de ese nombre primero
+       */
+      const applyProductsToCart = (products, replaceSameName) => {
+        if (replaceSameName) {
+          // Sacamos todas las líneas del mismo cóctel (cualquier litraje) antes de poner la correcta
+          const namesToReplace = new Set(products.map((p) => p.name));
+          for (const key of Object.keys(session.orderBuilder.products)) {
+            const entry = session.orderBuilder.products[key];
+            if (entry?.name && namesToReplace.has(entry.name)) {
+              delete session.orderBuilder.products[key];
+            }
+          }
+        }
+        for (const p of products) {
           const key = OrderBuilder.productLineKey(p.name, p.litrage);
-          const prev = session.orderBuilder.products[key];
+          const prev = replaceSameName ? null : session.orderBuilder.products[key];
           session.orderBuilder.products[key] = {
             name: p.name,
             litrage: p.litrage,
             quantity: (prev?.quantity || 0) + p.quantity
           };
         }
+      };
+
+      // ¿Está corrigiendo un malentendido? (ej. "me equivoqué, son 10L no 10x")
+      const isCorrection = isEventMenuCorrection(messageText);
+
+      if (dudas?.length > 0) {
+        // Cuando una palabra puede significar más de un cóctel, pedimos aclaración.
+        // Antes guardamos lo que sí quedó claro.
+        applyProductsToCart(parsedProducts, isCorrection);
         const duda = dudas[0];
         return { success: true, nextState: 'EVENTOS_ELECCION_MENU', customReply: getDoubtClarificationTemplate(duda.mencionado, duda.opciones) };
       }
 
       if (parsedProducts.length > 0) {
-        for (const p of parsedProducts) {
-          const key = OrderBuilder.productLineKey(p.name, p.litrage);
-          const prev = session.orderBuilder.products[key];
-          session.orderBuilder.products[key] = {
-            name: p.name,
-            litrage: p.litrage,
-            quantity: (prev?.quantity || 0) + p.quantity
-          };
-        }
+        applyProductsToCart(parsedProducts, isCorrection);
 
         const orderBuilder = new OrderBuilder(formatKey, preciosData);
         orderBuilder.products = session.orderBuilder.products;
         const quote = orderBuilder.calculateQuote();
         const totalLiters = orderBuilder.getTotalLiters();
 
-        let reply = `🍹 Te confirmo los cócteles seleccionados:\n\n`;
+        let reply = isCorrection
+          ? `✅ Corregido. Tu pedido quedó así:\n\n`
+          : `🍹 Te confirmo los cócteles seleccionados:\n\n`;
         reply += formatEventCartSummary(session.orderBuilder.products, formatKey);
         reply += `\n*Subtotal:* ${formatPrice(quote.subtotal)} | *Litros:* ${totalLiters}L (mín. ${minLiters}L)\n`;
 
@@ -470,10 +774,10 @@ export const eventosStates = {
       return getEventQuotationTemplate(
         {
           eventoFormato: session.eventoFormato,
+          celebrationType: session.celebrationType,
           guests: session.guests,
           date: session.date,
-          location: session.location,
-          userName: session.userName
+          location: session.location
         },
         quote,
         deliveryCost,
@@ -498,7 +802,7 @@ export const eventosStates = {
 
       // Cliente aprueba la cotización → cerramos, silenciamos bot y avisamos al equipo
       if (isConfirming) {
-        const { userName, location, date, guests, eventoFormato } = session;
+        const { location, date, guests, eventoFormato, celebrationType } = session;
         const quote = session.orderBuilder?.quote;
         const totalStr = quote?.total != null ? formatPrice(quote.total) : 'Revisar chat';
         const formatKey = getEventFormatKey(eventoFormato);
@@ -515,8 +819,8 @@ export const eventosStates = {
           type: 'SUCCESS',
           title: 'EVENTOS',
           body: buildAdminEventosOrderBody({
-            userName,
             eventoFormato,
+            celebrationType,
             guests,
             location,
             date,

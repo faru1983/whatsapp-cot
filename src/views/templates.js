@@ -12,48 +12,62 @@ import { formatPrice } from '../logic/utils.js';
 
 /**
  * getWelcomeBarriles: Mensaje cuando el cliente elige barriles desechables.
- * Ofrece web o continuar por chat.
+ * Devuelve dos bloques: pitch + link, y la pregunta web vs chat (burbujas separadas).
  *
  * @param {boolean} isSwitch - true si el cliente cambió de eventos a barriles a mitad de conversación
- * @returns {string} Texto para WhatsApp
+ * @returns {string[]} [bloque informativo, pregunta]
  */
 export function getWelcomeBarriles(isSwitch = false) {
-  if (isSwitch) {
-    return `¡Buenísimo! Te cuento: la forma más rápida de comprar nuestros barriles desechables, ver fotos y conocer todos los precios es directamente en *nuestra web*: https://cocktailsontap.cl/barriles
+  // Pregunta final: siempre en su propio mensaje para que se lea con calma
+  const question = `¿Dime si prefieres ver la página web o te cuento más *por aquí*?`;
 
-¿Dime si prefieres ver la página web o te cuento más *por aquí*?`;
+  if (isSwitch) {
+    return [
+      `¡Buenísimo! Te cuento: la forma más rápida de comprar nuestros barriles desechables, ver fotos y conocer todos los precios es directamente en *nuestra web*: https://cocktailsontap.cl/barriles`,
+      question
+    ];
   }
 
-  return `👋 Gracias por tu interés en nuestros *Barriles Desechables*.
+  return [
+    `👋 Gracias por tu interés en nuestros *Barriles Desechables*.
 
 Cada barril contiene *5 litros* que rinden aprox. *25 cócteles*, lo maravilloso es que vienen listo para servir en segundos y directo a tu copa. 🍸
 
-La forma más rápida de comprar, ver fotos y conocer todos los precios es directamente en *nuestra web*: https://cocktailsontap.cl/barriles
-
-¿Dime si prefieres ver la página web o te cuento más *por aquí*?`;
+La forma más rápida de comprar, ver fotos y conocer todos los precios es directamente en *nuestra web*: https://cocktailsontap.cl/barriles`,
+    question
+  ];
 }
 
 /**
  * getWelcomeEventos: Mensaje cuando el cliente elige servicio para eventos.
  * Explica Dispensador vs Muro y ofrece web o chat.
+ * Devuelve dos bloques: pitch + formatos, y la pregunta web vs chat.
  *
  * @param {boolean} isSwitch - true si cambió de barriles a eventos
- * @returns {string} Texto para WhatsApp
+ * @returns {string[]} [bloque informativo, pregunta]
  */
 export function getWelcomeEventos(isSwitch = false) {
-  const intro = isSwitch
+  // Pregunta final: siempre en su propio mensaje (mismo patrón que barriles)
+  const question = `¿Prefieres cotizar en la página web o *seguimos por aquí*?`;
+
+  const header = isSwitch
     ? `¡Buenísimo!`
-    : `👋 Gracias por tu interés en nuestro *Servicio para Eventos*.\n\n`;
+    : `👋 Gracias por tu interés en nuestro *Servicio para Eventos*.`;
 
-  const promoWeb = isSwitch
-    ? `\n\n¿Prefieres cotizar en la página web o *seguímos por aquí*?`
-    : `\n\nLa forma más rápida de cotizar y armar tu menú en tiempo real es en *nuestra web*: https://cocktailsontap.cl/eventos\n\n¿Prefieres cotizar en la página web o *seguímos por aquí*?`;
+  const webLine = isSwitch
+    ? ''
+    : `\n\nLa forma más rápida de cotizar y armar tu menú en tiempo real es en *nuestra web*: https://cocktailsontap.cl/eventos`;
 
-  return `${intro} Contamos con dos formatos de alto impacto visual:
+  return [
+    `${header}
+
+Contamos con dos formatos de alto impacto visual:
 1. *Dispensador Portátil* (Para todo tipo de evento). La instalación es gratuita y el pedido mínimo es de 10 litros.
 2. *Muro de Coctelería* (Matrimonios y eventos grandes). La instalación cuesta $50.000 y el pedido mínimo es de 30 litros.
 
-Ambos formatos incluyen gratis: todo el hielo necesario, decoraciones deshidratadas, vaso/copas en prestamos y accesorios de bar.${promoWeb}`;
+Ambos formatos incluyen gratis: todo el hielo necesario, decoraciones deshidratadas, vaso/copas en préstamo y accesorios de bar.${webLine}`,
+    question
+  ];
 }
 
 /**
@@ -76,9 +90,9 @@ export const SHORT_INTENT_QUESTION = `¿Buscas *Barriles Desechables* o *Servici
  * @returns {string}
  */
 export function getOfferQuoteAfterCatalog() {
-  return `¿Te armo una *cotización* por aquí? Es fácil: me dices qué cócteles de la lista te gustaron y partimos 🍸
+  return `¿Te armo una cotización por aquí? Es fácil: me dices qué cócteles de la lista te gustaron y partimos 🍸
 
-Si por ahora solo estabas *mirando*, sin problema.`;
+Si por ahora solo estabas *mirando*, no hay problema.`;
 }
 
 /**
@@ -110,30 +124,33 @@ Puedes cotizar facilmente aquí: https://cocktailsontap.cl/eventos
 
 /**
  * getCatalogDesechables: Pitch de venta antes de mostrar la carta de cócteles.
+ * Devuelve dos bloques: beneficios, y la pregunta de si quiere ver precios.
  *
  * @param {boolean} isSwitch - Mensaje más corto si viene de otro flujo
- * @returns {string} Texto para WhatsApp
+ * @returns {string[]} [bloque informativo, pregunta]
  */
 export function getCatalogDesechables(isSwitch = false) {
   const intro = isSwitch ? '¡Buenísimo! 🤩' : '¡Excelente elección! 🤩';
-  return `${intro} Te cuento por qué nuestros barriles desechables son los favoritos:
+  return [
+    `${intro} Te cuento por qué nuestros barriles desechables son los favoritos:
 
 ✅ Rinden aprox. *25 tragos* (5 Litros).
 ❄️ Conservan su sabor fresco hasta por *3 semanas* refrigerados (¡puedes servirte un trago y volver a guardarlo!).
-💰 El precio parte desde los *$31.990* (cada trago te queda a solo *$1.280* aprox. 🤯).
-
-¿Quieres conocer los barriles disponibles y sus precios?`;
+💰 El precio parte desde los *$31.990* (cada trago te queda a solo *$1.280* aprox. 🤯).`,
+    `¿Quieres conocer los barriles disponibles y sus precios?`
+  ];
 }
 
 /**
  * getQuotationTemplate: Arma el mensaje de cotización final para barriles desechables.
  * Usa el resultado de OrderBuilder.calculateQuote().
+ * Devuelve dos bloques: la cotización completa, y la pregunta de confirmación.
  *
  * @param {object} clientData - { date, location, ... }
  * @param {object} quote - { subtotal, total, details }
  * @param {number|null} deliveryCost - Despacho RM o null
  * @param {object|null} locationData - Datos de comuna (isRM, name, etc.)
- * @returns {string} Cotización formateada para WhatsApp
+ * @returns {string[]} [cotización, pregunta de confirmación]
  */
 export function getQuotationTemplate(clientData, quote, deliveryCost, locationData) {
   let text = `✅ *COTIZACIÓN FINAL*\n\n`;
@@ -165,8 +182,11 @@ export function getQuotationTemplate(clientData, quote, deliveryCost, locationDa
     text += `  *TOTAL: ${formatPrice(quote.subtotal)}*\n`;
   }
 
-  text += `\n¿Todo está *correcto* o deseas hacer alguna modificación?`;
-  return text;
+  // Pregunta en segundo mensaje para que el cliente lea bien los montos primero
+  return [
+    text,
+    `¿Todo está *correcto* o deseas hacer alguna modificación?`
+  ];
 }
 
 /**
@@ -189,22 +209,24 @@ export function getDoubtClarificationTemplate(mencionado, opciones) {
 /**
  * getEventQuotationTemplate: Arma el mensaje de cotización final para eventos.
  * Usa el resultado de OrderBuilder.calculateQuote() con tipo dispensador/muro.
+ * Devuelve dos bloques: la cotización completa, y la pregunta de confirmación.
  *
- * @param {object} sessionData - Datos del evento (formato, invitados, fecha, ubicación)
+ * @param {object} sessionData - Datos del evento (formato, celebración, invitados, fecha, ubicación)
  * @param {object} quote - Resultado de calculateQuote (subtotal, installation, total, details, ...)
  * @param {number|null} deliveryCost - Logística RM o null
  * @param {boolean} isRM - true si la comuna está en Región Metropolitana
- * @returns {string} Cotización formateada para WhatsApp
+ * @returns {string[]} [cotización, pregunta de confirmación]
  */
 export function getEventQuotationTemplate(sessionData, quote, deliveryCost, isRM) {
-  const { eventoFormato, guests, date, location, userName } = sessionData;
+  const { eventoFormato, celebrationType, guests, date, location } = sessionData;
 
   let text = `✅ *COTIZACIÓN DE EVENTO*\n\n`;
-  if (userName) text += `👤 *Cliente:* ${userName}\n`;
+  // Celebración / fecha / comuna pueden faltar: se muestran como pendientes (no bloquean el flujo)
+  text += `🥂 *Celebración:* ${celebrationType || 'No informada'}\n`;
   text += `🎉 *Formato:* ${eventoFormato || 'No informado'}\n`;
-  if (guests) text += `👥 *Invitados:* ${guests}\n`;
-  if (date) text += `📅 *Fecha:* ${date}\n`;
-  if (location) text += `📍 *Ubicación:* ${location}\n`;
+  text += `👥 *Invitados:* ${guests || 'No informado'}\n`;
+  text += `📅 *Fecha:* ${date || 'Por confirmar'}\n`;
+  text += `📍 *Ubicación:* ${location || 'Por confirmar'}\n`;
   text += `\n📋 *Tu Pedido:*\n`;
 
   // Cada línea: cantidad x cóctel de litraje = subtotal
@@ -236,11 +258,16 @@ export function getEventQuotationTemplate(sessionData, quote, deliveryCost, isRM
     text += `  Instalación Dispensador: ${formatPrice(0)}\n`;
   }
 
-  // Tres casos de logística: RM con precio, región, o por confirmar
+  // Logística: con comuna RM → precio; sin comuna o fuera de RM → pendiente (no inventamos)
   if (deliveryCost != null) {
-    text += `  Despacho/Logística (${location || 'RM'}): ${formatPrice(deliveryCost)}\n`;
+    text += `  Despacho/Logística (${location}): ${formatPrice(deliveryCost)}\n`;
     text += `  -----------------------\n`;
     text += `  *TOTAL: ${formatPrice(quote.total)}*\n`;
+  } else if (!location) {
+    text += `  Despacho/Logística: *Pendiente* (falta comuna)\n`;
+    text += `  -----------------------\n`;
+    text += `  *TOTAL: ${formatPrice(quote.subtotal + (quote.installation || 0))}*\n`;
+    text += `  _+ logística por confirmar al agendar_\n`;
   } else if (isRM === false) {
     text += `  Despacho/Logística: Por confirmar (fuera de RM)\n`;
     text += `  -----------------------\n`;
@@ -261,8 +288,11 @@ export function getEventQuotationTemplate(sessionData, quote, deliveryCost, isRM
     text += `Ese ítem no se sumó al total.\n`;
   }
 
-  text += `\n¿Tu pedido *está bien* así para avanzar o necesitas *modificar* algo?`;
-  return text;
+  // Pregunta en segundo mensaje para que el cliente lea bien los montos primero
+  return [
+    text,
+    `¿Tu pedido *está bien* así para avanzar o necesitas *modificar* algo?`
+  ];
 }
 
 // ==============================================================================
@@ -305,10 +335,11 @@ export function buildAdminBarrilesOrderBody({ location, date, productsText, extr
 /**
  * buildAdminEventosOrderBody: Cuerpo de alerta cuando se confirma cotización de eventos.
  * Incluye datos del evento, menú con litraje y total.
+ * El nombre del cliente WhatsApp va en la cabecera (index.js); aquí no pedimos ni inventamos nombre.
  *
  * @param {object} data
- * @param {string} [data.userName] - Nombre que dio el cliente en el flujo
  * @param {string} [data.eventoFormato] - Dispensador o Muro
+ * @param {string} [data.celebrationType] - Qué celebra (matrimonio, cumpleaños, etc.)
  * @param {string|number} [data.guests] - Cantidad de invitados
  * @param {string} [data.location] - Ubicación
  * @param {string} [data.date] - Fecha del evento
@@ -317,8 +348,8 @@ export function buildAdminBarrilesOrderBody({ location, date, productsText, extr
  * @returns {string} Cuerpo del mensaje (sin cabecera de cliente)
  */
 export function buildAdminEventosOrderBody({
-  userName,
   eventoFormato,
+  celebrationType,
   guests,
   location,
   date,
@@ -326,7 +357,7 @@ export function buildAdminEventosOrderBody({
   totalStr
 }) {
   let body = `📋 *Resumen:*\n`;
-  body += `- Nombre: ${userName || 'No informado'}\n`;
+  body += `- Celebración: ${celebrationType || 'No informada'}\n`;
   body += `- Formato: ${eventoFormato || 'No informado'}\n`;
   body += `- Invitados: ${guests || 'No informado'}\n`;
   body += `- Ubicación: ${location || 'No informada'}\n`;
@@ -375,4 +406,128 @@ export function composeAdminAlertMessage({ type, title, clientLabel, body }) {
     : `⚠️ *SOS — ASISTENCIA*${title ? ` — ${title}` : ''}`;
 
   return `${headline}\n👤 Cliente: ${clientLabel || 'Desconocido'}\n\n${(body || '').trim()}`;
+}
+
+// ==============================================================================
+// 5. PITCH DE FORMATOS DE EVENTO (Dispensador / Muro)
+// ==============================================================================
+
+/**
+ * getEventFormatPitch: Texto de venta del formato elegido + pregunta de confirmación.
+ * Dos burbujas: explicación de lo incluido, y "¿continuamos? escribe ok".
+ *
+ * @param {'dispensador'|'muro'} formatKey - Formato elegido
+ * @returns {string[]} [pitch, pregunta]
+ */
+export function getEventFormatPitch(formatKey) {
+  const isMuro = formatKey === 'muro';
+
+  if (isMuro) {
+    return [
+      `¡Excelente elección! 🍸
+
+Nuestro *Muro de Coctelería* es una opción premium que convierte la barra en un verdadero punto de atracción para tus invitados. Su diseño elegante, iluminación LED y sistema de dispensación permiten servir cócteles de forma rápida, práctica y con una presentación espectacular.
+
+💫 Ideal si buscas sorprender a tus invitados y convertir la barra en parte de la decoración de tu evento.
+
+✨ Todo esto está incluido, sin costo adicional:
+
+🧊 Hielo abundante para todo el evento.
+🍊 Garnish premium con frutas deshidratadas y decoraciones.
+🥂 Vasos o copas plásticas premium para todos los invitados.
+🧰 Accesorios de bar como hieleras, palas, pinzas y todo lo necesario para servir.
+
+⏰ Sin límite de tiempo: instalamos el muro antes de tu evento y lo retiramos al día siguiente, sin costos ocultos.`,
+      `¿Te gustaría continuar con el *Muro de Coctelería*? 🍸
+
+Si es así, escribe *ok* y te muestro la lista de cócteles y precios. Si prefieres el *Dispensador*, dímelo y te cuento esa opción.`
+    ];
+  }
+
+  return [
+    `¡Excelente elección! 🍸
+
+Nuestro *Dispensador Portátil* es ideal para eventos. Funciona sin electricidad, mantiene los cócteles fríos con hielo gracias a su tecnología térmica y se adapta fácilmente a espacios pequeños o grandes.
+
+✨ Todo esto está incluido, sin costo adicional:
+
+🧊 Hielo abundante para todo el evento.
+🍊 Garnish premium con frutas deshidratadas y decoraciones.
+🥂 Vasos o copas plásticas premium para todos los invitados.
+🧰 Accesorios de bar como hieleras, palas, pinzas y todo lo necesario para servir.
+
+⏰ Sin límite de tiempo: instalamos el dispensador antes de tu evento y lo retiramos al día siguiente, sin costos ocultos.`,
+    `¿Te gustaría continuar con el *Dispensador Portátil*? 🍸
+
+Si es así, escribe *ok* y te muestro la lista de cócteles y precios. Si prefieres el *Muro*, dímelo y te cuento esa opción.`
+  ];
+}
+
+/**
+ * getEventLitersSuggestion: Explica cuántos litros pedir según invitados.
+ * Texto sugerente (no solo números) para que el cliente entienda el pedido.
+ *
+ * @param {number} guests - Cantidad de invitados
+ * @param {'dispensador'|'muro'} formatKey - Formato (define mínimo)
+ * @returns {string}
+ */
+export function getEventLitersSuggestion(guests, formatKey) {
+  const n = Number(guests) || 0;
+  // 3 tragos (tranquilo) o 5 (fiesta) × 0.2 L por trago, redondeado a múltiplos de 5L
+  const tranquilo = Math.ceil((n * 3 * 0.2) / 5) * 5;
+  const fiesta = Math.ceil((n * 5 * 0.2) / 5) * 5;
+  const minLiters = formatKey === 'muro' ? 30 : 10;
+  const litrajes = formatKey === 'muro' ? '10L, 20L y 30L' : '5L y 10L';
+
+  return `Para orientarte con *${n || 'tus'} invitados*, una buena referencia de consumo es:
+
+🍹 *${tranquilo}L* si el evento es más tranquilo (aprox. 3 tragos por persona)
+🎉 *${fiesta}L* si quieren fiesta (aprox. 5 tragos por persona)
+
+El pedido mínimo de este formato es *${minLiters}L* y los barriles vienen en *${litrajes}*. Puedes combinar sabores hasta llegar a esa cantidad (o más, si quieres).`;
+}
+
+/**
+ * getEventDataSummary: Resumen de lo anotado del evento + pregunta de confirmación.
+ * Muestra "Por confirmar" en fecha/comuna/celebración si faltan (no bloquean).
+ * Dos burbujas: resumen, y "escribe ok o corrige".
+ *
+ * @param {object} session - Sesión con guests, celebrationType, date, location
+ * @returns {string[]} [resumen, pregunta]
+ */
+export function getEventDataSummary(session) {
+  const lines = [
+    `📋 *Resumen de tu evento:*`,
+    ``,
+    `🥂 Celebración: *${session.celebrationType || 'Por confirmar'}*`,
+    `👥 Invitados: *${session.guests}*`,
+    `📅 Fecha: *${session.date || 'Por confirmar'}*`,
+    `📍 Comuna: *${session.location || 'Por confirmar'}*`
+  ];
+
+  return [
+    lines.join('\n'),
+    `¿Todo bien con estos datos?\nEscribe *ok* para continuar, o corrige lo que necesites (ej: "son 80 invitados" / "es en Providencia").`
+  ];
+}
+
+/**
+ * getEventFormatRecommendation: Mensaje al salir de confirmación de datos.
+ * Recomienda formato según invitados; la pregunta va en segunda burbuja.
+ *
+ * @param {number} guests - Invitados
+ * @param {string} instalacionMuroStr - Precio muro ya formateado (ej. $50.000)
+ * @returns {string[]} [recomendación, pregunta]
+ */
+export function getEventFormatRecommendation(guests, instalacionMuroStr) {
+  const recomendacion = guests < 100 ? '*Dispensador Portátil*' : '*Muro de Coctelería*';
+  return [
+    `Para *${guests} invitados* te recomendamos nuestro ${recomendacion}.
+
+Por supuesto, puedes elegir el que prefieras:
+
+1. *Dispensador Portátil* — instalación gratis, pedido mín. 10L
+2. *Muro de Coctelería* — instalación ${instalacionMuroStr}, pedido mín. 30L`,
+    `¿Cuál prefieres: *Dispensador* o *Muro*?`
+  ];
 }

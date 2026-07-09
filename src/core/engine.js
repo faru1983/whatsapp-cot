@@ -15,7 +15,7 @@ import { getSession, saveSession, resetSession } from './db.js';
 
 import { statesMap } from '../flows/index.js';
 import { readPrompt } from '../views/prompts.js';
-import { buildFaqCatalogContext } from '../logic/utils.js';
+import { buildFaqCatalogContext, sanitizeCustomerFacingReply } from '../logic/utils.js';
 import { buildAdminSosBody } from '../views/templates.js';
 import { FAQ_JSON_PATH } from './paths.js';
 
@@ -104,6 +104,67 @@ function appendStepQuestionIfNeeded(body, question) {
   if (!question) return body;
   if (replyAlreadyAsksQuestion(body, question)) return body;
   return `${body}\n\n${question}`;
+}
+
+/**
+ * normalizeReplyParts: Convierte un string o un array de strings en lista limpia de mensajes.
+ * Así promptQuestion puede devolver varios bloques (info + pregunta) y WhatsApp los envía separados.
+ *
+ * @param {string|string[]|null|undefined} reply - Respuesta del estado o customReply(s)
+ * @returns {string[]} Mensajes no vacíos listos para enviar
+ */
+function normalizeReplyParts(reply) {
+  if (reply == null) return [];
+  const list = Array.isArray(reply) ? reply : [reply];
+  return list.filter((p) => typeof p === 'string' && p.trim());
+}
+
+/**
+ * commitBotReplies: Guarda cada bloque en el historial y devuelve string o array para el envío.
+ * index.js y el CLI ya saben enviar un array como varios mensajes de WhatsApp.
+ *
+ * @param {object} session - Sesión actual (se muta el historial)
+ * @param {string} sessionId - ID de sesión para persistir
+ * @param {string|string[]} reply - Uno o varios textos del bot
+ * @returns {string|string[]|null} Lo que debe enviar WhatsApp / CLI
+ */
+function commitBotReplies(session, sessionId, reply) {
+  const parts = normalizeReplyParts(reply);
+  if (parts.length === 0) return null;
+
+  // Cada burbuja queda como un turno aparte en el historial (útil para la IA)
+  for (const part of parts) {
+    session.history.turns.push({ role: 'model', text: part });
+  }
+  saveSession(sessionId, session);
+  return parts.length === 1 ? parts[0] : parts;
+}
+
+/**
+ * resolvePromptQuestion: Obtiene el promptQuestion del estado (string o array).
+ *
+ * @param {object} stateObj - Estado del statesMap
+ * @param {object} session - Sesión actual
+ * @returns {string|string[]|null|undefined}
+ */
+function resolvePromptQuestion(stateObj, session) {
+  if (!stateObj) return null;
+  return typeof stateObj.promptQuestion === 'function'
+    ? stateObj.promptQuestion(session)
+    : stateObj.promptQuestion;
+}
+
+/**
+ * lastPromptPart: Si el prompt es un array (info + pregunta), usa solo la última parte.
+ * Sirve en el fallback para no re-pegar el bloque informativo largo.
+ *
+ * @param {string|string[]|null|undefined} prompt - promptQuestion crudo
+ * @returns {string}
+ */
+function lastPromptPart(prompt) {
+  const parts = normalizeReplyParts(prompt);
+  if (parts.length === 0) return '';
+  return parts[parts.length - 1];
 }
 
 export async function processMessage(sessionId, messageText) {
@@ -214,13 +275,10 @@ export async function processMessage(sessionId, messageText) {
         session.userIntent = switchIntent;
         session.currentState = switchIntent === 'BARRILES' ? 'BARRILES_FILTRO_CANAL' : 'EVENTOS_FILTRO_CANAL';
         session.consecutiveErrors = 0;
-        
+
+        // Puede ser string o array (info + pregunta en burbujas separadas)
         const newState = statesMap[session.currentState];
-        const reply = typeof newState.promptQuestion === 'function' ? newState.promptQuestion(session) : newState.promptQuestion;
-        
-        session.history.turns.push({ role: 'model', text: reply });
-        saveSession(sessionId, session);
-        return reply;
+        return commitBotReplies(session, sessionId, resolvePromptQuestion(newState, session));
       }
     }
   }
@@ -266,13 +324,7 @@ export async function processMessage(sessionId, messageText) {
     // customReplies: varios mensajes separados (ej. carta + pregunta de cotizar)
     // customReply: un solo mensaje (compatibilidad con el resto del flujo)
     if (Array.isArray(processResult.customReplies) && processResult.customReplies.length > 0) {
-      const parts = processResult.customReplies.filter((p) => typeof p === 'string' && p.trim());
-      for (const part of parts) {
-        session.history.turns.push({ role: 'model', text: part });
-      }
-      saveSession(sessionId, session);
-      // Devolvemos array para que index.js / CLI envíen cada bloque por separado
-      return parts.length === 1 ? parts[0] : parts;
+      return commitBotReplies(session, sessionId, processResult.customReplies);
     }
 
     if (processResult.customReply) {
@@ -280,11 +332,12 @@ export async function processMessage(sessionId, messageText) {
     } else if (processResult.nextState) {
       const nextStateObj = statesMap[processResult.nextState];
       if (nextStateObj && !processResult.mute) {
-         reply = typeof nextStateObj.promptQuestion === 'function' ? nextStateObj.promptQuestion(session) : nextStateObj.promptQuestion;
-         
+         // promptQuestion puede ser string o string[] (bloque info + pregunta)
+         reply = resolvePromptQuestion(nextStateObj, session);
+
          // Si el nuevo estado no tiene un prompt estático (retorna vacío), pero tiene aiContextPrompt,
          // generamos el prompt inicial dinámicamente con la IA.
-         if (!reply && nextStateObj.aiContextPrompt) {
+         if (normalizeReplyParts(reply).length === 0 && nextStateObj.aiContextPrompt) {
            let systemInstruction = readPrompt();
            systemInstruction = `${systemInstruction}\n\n${nextStateObj.aiContextPrompt}`;
            systemInstruction = `${systemInstruction}\n\n[DATOS CONOCIDOS DE LA SESIÓN DE WHATSAPP]:
@@ -299,16 +352,15 @@ export async function processMessage(sessionId, messageText) {
            const config = { temperature: 0.7, maxOutputTokens: 300 };
            cliLog('IA: generando respuesta del siguiente estado...');
            const generated = await generateResponse(config, systemInstruction, contents);
-           reply = generated || "";
+           // generateResponse ya limpia jerga interna; defensa extra por si acaso
+           reply = sanitizeCustomerFacingReply(generated) || "";
          }
       }
     }
 
-    if (reply) {
-      session.history.turns.push({ role: 'model', text: reply });
-      saveSession(sessionId, session);
-      return reply;
-    }
+    // Guarda y devuelve (string o array de burbujas)
+    const committed = commitBotReplies(session, sessionId, reply);
+    if (committed != null) return committed;
 
     saveSession(sessionId, session);
     return null;
@@ -319,7 +371,8 @@ export async function processMessage(sessionId, messageText) {
     // ==============================================================================
     session.consecutiveErrors = (session.consecutiveErrors || 0) + 1;
 
-    const questionText = typeof currentState.promptQuestion === 'function' ? currentState.promptQuestion(session) : currentState.promptQuestion;
+    // Si promptQuestion es array (info + pregunta), usamos solo la última parte
+    const questionText = lastPromptPart(resolvePromptQuestion(currentState, session));
     const shortQ = typeof currentState.shortQuestion === 'function' ? currentState.shortQuestion(session) : currentState.shortQuestion;
     // Preferimos la pregunta corta para no re-pegar el prompt largo del estado
     const finalQuestion = shortQ || questionText;
@@ -392,9 +445,9 @@ export async function processMessage(sessionId, messageText) {
     }
 
     if (faqResponse !== "NO_FAQ") {
-      // FAQ respondió: re-preguntamos el paso solo si la FAQ no lo hizo ya
+      // FAQ respondió: sanitizamos jerga interna y re-preguntamos el paso si hace falta
       cliLog('FAQ: match encontrado → respondiendo desde FAQ/datos oficiales');
-      reply = appendStepQuestionIfNeeded(faqResponse, finalQuestion);
+      reply = appendStepQuestionIfNeeded(sanitizeCustomerFacingReply(faqResponse), finalQuestion);
     } else {
       // 4.3 Delegar a la Inteligencia Artificial (LLM Generativo)
       if (!isGreetingOrNoise) {
@@ -407,7 +460,8 @@ export async function processMessage(sessionId, messageText) {
 
       // Misma fuente oficial que el FAQ: evita inventar ingredientes/precios en el fallback
       systemInstruction = `${systemInstruction}\n\n${buildFaqCatalogContext()}
-REGLA FALLBACK: Si hablas de ingredientes, precios o despacho RM, usa SOLO DATOS OFICIALES de arriba. No inventes ni completes fichas.`;
+REGLA FALLBACK: Si hablas de ingredientes, precios o despacho RM, usa SOLO la información oficial de arriba. No inventes ni completes fichas.
+REGLA ANTI-JERGA: NUNCA digas al cliente "DATOS OFICIALES", "FAQ", "datos.json" ni "sección". Habla solo como vendedor.`;
 
       systemInstruction = `${systemInstruction}\n\n[DATOS CONOCIDOS DE LA SESIÓN DE WHATSAPP]:
 - Tipo de compra actual: ${session.userIntent || 'No definido'}
@@ -425,8 +479,8 @@ REGLA FALLBACK: Si hablas de ingredientes, precios o despacho RM, usa SOLO DATOS
       const generated = await generateResponse(config, systemInstruction, contents);
 
       if (generated) {
-         // Si el LLM ya cerró con la pregunta del estado, no la duplicamos
-         reply = appendStepQuestionIfNeeded(generated, finalQuestion);
+         // generateResponse ya sanitiza; re-limpiamos por defensa en profundidad
+         reply = appendStepQuestionIfNeeded(sanitizeCustomerFacingReply(generated), finalQuestion);
       } else {
          reply = buildNoInfoReply();
       }

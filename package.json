@@ -7,8 +7,7 @@
   "scripts": {
     "start": "node src/index.js",
     "test:local": "node src/core/engine.js",
-    "test:wa-echo": "node scripts/wa-echo-test.js",
-    "check": "node --check src/index.js && node --check src/core/engine.js && node --check src/core/config.js && node --check src/core/llm.js && node --check src/core/db.js && node --check src/core/paths.js && node --check src/flows/index.js && node --check src/flows/eventos.js && node --check src/flows/barriles.js && node --check src/flows/cerrado.js && node --check src/logic/order-builder.js && node --check src/logic/utils.js && node --check src/views/templates.js && node --check src/views/prompts.js"
+    "check": "node --check src/index.js && node --check src/core/engine.js && node --check src/core/config.js && node --check src/core/llm.js && node --check src/core/db.js && node --check src/core/paths.js && node --check src/flows/index.js && node --check src/flows/eventos.js && node --check src/flows/barriles.js && node --check src/flows/cerrado.js && node --check src/logic/order-builder.js && node --check src/logic/utils.js && node --check src/logic/decision-intent.js && node --check src/views/templates.js && node --check src/views/prompts.js"
   },
   "engines": {
     "node": ">=20.0.0"
@@ -19,7 +18,6 @@
     "better-sqlite3": "^12.11.1",
     "dotenv": "^16.4.5",
     "openai": "^6.45.0",
-    "pino": "^9.5.0",
-    "qrcode-terminal": "^0.12.0"
+    "pino": "^9.5.0"
   }
 }

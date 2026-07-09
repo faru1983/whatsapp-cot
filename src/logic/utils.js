@@ -14,9 +14,8 @@ export let preciosData = {};
 try {
 	if (fs.existsSync(preciosPath)) {
 		preciosData = JSON.parse(fs.readFileSync(preciosPath, 'utf8'));
-		console.log(`[DATOS] Cargado: ${preciosPath}`);
 	} else {
-		console.error(`[DATOS] No existe: ${preciosPath}`);
+		console.error(`No existe datos.json en: ${preciosPath}`);
 	}
 } catch (err) {
 	console.error('Error cargando datos.json en utils.js:', err.message);
@@ -55,6 +54,59 @@ function formatPriceTable(priceTable) {
 }
 
 /**
+ * sanitizeCustomerFacingReply: Quita jerga interna que a veces filtra el LLM
+ * (nombres de archivos, "DATOS OFICIALES", "FAQ", etc.) antes de mandar el texto al cliente.
+ * No cambia el sentido de la respuesta; solo limpia meta-referencias del prompt.
+ *
+ * @param {string|null|undefined} text - Respuesta cruda de FAQ o IA
+ * @returns {string} Texto listo para WhatsApp (o string vacío si no había texto)
+ */
+export function sanitizeCustomerFacingReply(text) {
+	if (text == null) return '';
+	let out = String(text);
+
+	// Frases típicas de leak → versión natural para el cliente
+	const replacements = [
+		// "consultar nuestra tabla... en la sección DATOS OFICIALES"
+		[/consultar\s+(nuestra\s+)?tabla\s+de\s+despachos\s+en\s+la\s+secci[oó]n\s+["']?DATOS\s+OFICIALES["']?/gi,
+			'decirme tu comuna para indicarte el costo de envío'],
+		[/te\s+recomiendo\s+decirme\s+tu\s+comuna/gi, 'puedes decirme tu comuna'],
+		[/en\s+la\s+secci[oó]n\s+["']?DATOS\s+OFICIALES["']?/gi, ''],
+		[/nuestra\s+tabla\s+de\s+despachos\s+(en\s+)?(DATOS\s+OFICIALES|datos\s+oficiales)/gi,
+			'los costos de envío por comuna'],
+		[/consultar\s+nuestra\s+FAQ\s+sobre\s+env[ií]os\s+a\s+regiones/gi,
+			'coordinar el envío a regiones por encomienda (el costo se confirma al comprar)'],
+		[/nuestra\s+FAQ\s+sobre\s+env[ií]os\s+a\s+regiones/gi,
+			'el envío a regiones por encomienda (el costo se confirma al comprar)'],
+		[/te\s+recomiendo\s+coordinar\s+el\s+env[ií]o/gi, 'podemos coordinar el envío'],
+		[/te\s+recomiendo\s+consultar\s+(nuestra\s+)?FAQ[^.!?]*/gi,
+			'puedo ayudarte a coordinar el detalle'],
+		[/\bDATOS\s+OFICIALES\b/gi, 'información del negocio'],
+		[/\bdatos\.json\b/gi, 'nuestro catálogo'],
+		[/\bfaq\.json\b/gi, 'nuestras respuestas frecuentes'],
+		[/\bla\s+base\s+FAQ\b/gi, 'nuestra información'],
+		[/\bnuestra\s+FAQ\b/gi, 'nuestra información'],
+		[/\bla\s+FAQ\b/gi, 'nuestra información'],
+		[/\bel\s+FAQ\b/gi, 'nuestra información'],
+		[/\b(system\s+prompt|prompt\s+del\s+sistema)\b/gi, ''],
+	];
+
+	for (const [pattern, replacement] of replacements) {
+		out = out.replace(pattern, replacement);
+	}
+
+	// Espacios y puntuación que quedan raros tras borrar frases
+	out = out
+		.replace(/\s{2,}/g, ' ')
+		.replace(/\s+([.,;:!?])/g, '$1')
+		.replace(/([.!?])\s*\1+/g, '$1')
+		.replace(/\n{3,}/g, '\n\n')
+		.trim();
+
+	return out;
+}
+
+/**
  * buildFaqCatalogContext: Arma un resumen compacto de datos.json para el FAQ con IA.
  * Incluye catálogo (barriles / dispensador / muro), extras, rendimientos e instalación,
  * y la tabla de despachos de la Región Metropolitana.
@@ -80,8 +132,9 @@ export function buildFaqCatalogContext(data = preciosData) {
 	lines.push('Nunca digas solo "el precio del Pisco Sour": siempre aclara o pregunta la categoría.');
 	lines.push('');
 	lines.push('- Despacho RM: "desechable" = envío barriles desechables; "evento" = envío dispensador/muro.');
-	lines.push('- Fuera de RM: NO inventar tarifa; usar la FAQ de envíos a regiones.');
-	lines.push('- Si el dato no está aquí ni en las FAQ → NO_FAQ (no adivinar).');
+	lines.push('- Fuera de RM: NO inventar tarifa; di que va por encomienda y el costo se confirma al comprar.');
+	lines.push('- Si el dato no está aquí ni en las respuestas frecuentes → NO_FAQ (no adivinar).');
+	lines.push('- NUNCA digas al cliente "DATOS OFICIALES", "FAQ", "datos.json" ni "sección": habla solo como vendedor.');
 	lines.push('');
 
 	// --- Rendimientos e instalación muro ---
@@ -342,10 +395,23 @@ export function getCartaCocteles(format = 'desechable', options = {}) {
 	text += `\n\n🥃 *COMBINADOS*\n${combinadosStr}`;
 	text += `\n\n🍹 *MOCKTAILS (Sin Alcohol)*\n${mocktailsStr}`;
 
+	// Rendimientos oficiales (datos.json): vaso/copa con hielo ≈ 200ml
+	// Dispensador: 5L/10L | Muro: 10L/20L/30L | Desechable: solo 5L
+	if (format !== 'desechable') {
+		const rend = preciosData.rendimientos_barriles || {};
+		const litrajesOrden = format === 'muro' ? ['10L', '20L', '30L'] : ['5L', '10L'];
+		const partes = litrajesOrden
+			.filter((l) => rend[l] != null)
+			.map((l) => `${l} = ${rend[l]} tragos`);
+		if (partes.length > 0) {
+			text += `\n\n*Rendimientos Aprox.*: ${partes.join(' | ')}\n_(Calculando vaso/copa con hielo ≈ 200ml)_`;
+		}
+	}
+
 	// En barriles la pregunta de cotizar va en BARRILES_OFRECER_COTIZACION (no aquí).
-	// En eventos sí cerramos pidiendo cócteles + litraje.
+	// En eventos, si includeClosingQuestion=true, pedimos cócteles + litraje al final.
 	if (includeClosingQuestion && format !== 'desechable') {
-		text += '\n\n¿Ahora índicame cuáles te gustarían, por ej. 5L Mojito, 10L Aperol Spritz?';
+		text += '\n\n¿Ahora indícame cuáles te gustarían, por ej. 5L Mojito, 10L Aperol Spritz?';
 	}
 	return text;
 }
@@ -384,6 +450,75 @@ export function hasDrinkSelection(text) {
 	const hasNumbers = /\b[1-9]\d*\b/.test(text);
 
 	return dynamicDrinkKeywords.test(normalizedText) || hasNumbers;
+}
+
+// ==============================================================================
+// INTENCIÓN: SOLO MIRANDO vs QUIERE COTIZAR
+// (usado en BARRILES_OFRECER_COTIZACION y despedidas similares)
+// ==============================================================================
+
+/**
+ * isOnlyBrowsing: true si el cliente dice que solo mira / no quiere cotizar ahora.
+ * Cubre frases naturales: "mirando", "solo estoy mirando", "gracias, solo miraba", "no gracias".
+ * Sirve para cerrar con despedida + Instagram en lugar de mandar al fallback FAQ/IA.
+ *
+ * @param {string} messageText - Mensaje del cliente
+ * @returns {boolean}
+ */
+export function isOnlyBrowsing(messageText) {
+	const trimmed = String(messageText || '').trim();
+	if (!trimmed) return false;
+	const lower = trimmed.toLowerCase();
+
+	// Respuestas cortas de rechazo ("no", "nop", "nah")
+	if (/^(no|nop|nope|nah)$/i.test(trimmed)) return true;
+
+	// Mensaje casi solo "mirando" / "consultando" (con o sin "gracias" / "solo" / "estoy")
+	// Ej: "mirando" | "solo mirando" | "gracias, solo estoy mirando"
+	if (/^(gracias[,!.]?\s+)?(solo\s+)?(estoy\s+|estaba\s+|estuve\s+)?(mirando|consultando|viendo|miraba)[.!]?$/i.test(trimmed)) {
+		return true;
+	}
+
+	// Frases de "solo mirar" en cualquier parte del mensaje
+	if (/\b(solo\s+(estoy\s+|estaba\s+|estuve\s+)?(mirando|consultando|viendo|miraba)|estoy\s+mirando|estaba\s+mirando|solo\s+mirando|mirando\s+nom[aá]s|solo\s+consultaba|solo\s+viendo|solo\s+ver)\b/i.test(lower)) {
+		return true;
+	}
+
+	// Rechazo explícito de cotizar / comprar ahora
+	if (/\b(no\s+gracias|no\s+quiero(\s+cotiz)?|no\s+deseo|no\s+me\s+interesa|por\s+ahora\s+no|ahora\s+no|despu[eé]s|luego|en\s+otro\s+momento|nada|cancelar)\b/i.test(lower)) {
+		return true;
+	}
+
+	return false;
+}
+
+/**
+ * wantsInstagramOrSocial: true si pide Instagram / redes / historias.
+ * Se evalúa junto con isOnlyBrowsing para cerrar el chat con la despedida.
+ *
+ * @param {string} messageText - Mensaje del cliente
+ * @returns {boolean}
+ */
+export function wantsInstagramOrSocial(messageText) {
+	return /\b(instagram|insta|\big\b|redes?|segu(ir|irme|irnos)|historia|historias|video|videos)\b/i.test(
+		String(messageText || '').toLowerCase()
+	);
+}
+
+/**
+ * wantsBarrilesQuote: true si acepta armar cotización por chat.
+ * No dispara si el mensaje es claramente "solo mirando" (prioridad al cierre).
+ *
+ * @param {string} messageText - Mensaje del cliente
+ * @returns {boolean}
+ */
+export function wantsBarrilesQuote(messageText) {
+	// Si solo mira, no lo tratamos como "sí, cotiza"
+	if (isOnlyBrowsing(messageText) || wantsInstagramOrSocial(messageText)) return false;
+
+	const lower = String(messageText || '').toLowerCase();
+	// "cotiz" cubre cotizar / cotización / cotizo (sin exigir fin de palabra justo ahí)
+	return /\b(si|sí|claro|ok|okay|dale|vamos|partamos|partimos|cotiz\w*|pedido|armar|empez\w*|comenz\w*|me\s+gustar[ií]a|por\s+favor|porfa|aka|aqui|ac[aá]|por\s+aqu[ií]|quiero)\b/i.test(lower);
 }
 
 // ==============================================================================
@@ -578,19 +713,39 @@ export function parseElimination(text, currentItems, allAvailableItemNames) {
 }
 
 /**
+ * isEventMenuCorrection: true si el cliente corrige un pedido mal entendido
+ * (ej. "me equivoqué, son 10L de mojito no 10x").
+ * Sirve para reemplazar líneas del mismo cóctel en vez de sumar otra.
+ *
+ * @param {string} text - Mensaje del cliente
+ * @returns {boolean}
+ */
+export function isEventMenuCorrection(text) {
+	return /\b(me\s+equivoc|equivoc|correg|en\s+vez|en\s+realidad|no\s+son|no\s+es|no\s+era|mejor\s+(pon|deja|cambia)|reemplaz|cambia(r)?\s+(el|la|a)|no\s+\d+\s*x)\b/i.test(
+		String(text || '')
+	);
+}
+
+/**
  * parseEventElimination: Igual que parseElimination, pero para el carrito de eventos
  * donde cada ítem es { "Mojito::10L": { name, quantity, litrage } }.
  * Si el cliente dice "quita el mojito" y hay varios litrajes, elimina el primero que coincida.
+ * También acepta correcciones tipo "me equivoqué... quita/saca...".
  *
  * @param {string} text - Mensaje del cliente
  * @param {object} currentItems - Carrito de eventos con claves name::litrage
  * @returns {{ key: string, name: string, litrage: string, newQty: number }|null}
  */
 export function parseEventElimination(text, currentItems) {
-	const eliminationWords = text.match(/\b(elimina|borra|quita|saca|quiero quitar|quiero sacar)\b/gi);
-	if (!eliminationWords || Object.keys(currentItems).length === 0) return null;
+	if (!text || Object.keys(currentItems || {}).length === 0) return null;
 
-	const eliminationPattern = /\b(elimina|borra|quita|saca)\s+(\d+)?\s*(?:el\s+|los\s+|las\s+)?([A-Za-záéíóúÁÉÍÓÚñÑ0-9\s]+)/i;
+	// Palabras de quitar + correcciones que implican sacar lo anterior
+	const eliminationWords = text.match(
+		/\b(elimina|borra|quita|saca|quiero quitar|quiero sacar|sacar|quitar)\b/gi
+	);
+	if (!eliminationWords) return null;
+
+	const eliminationPattern = /\b(elimina|borra|quita|saca|sacar|quitar)\s+(\d+)?\s*(?:el\s+|los\s+|las\s+)?([A-Za-záéíóúÁÉÍÓÚñÑ0-9\s]+)/i;
 	const match = text.match(eliminationPattern);
 	if (!match) return null;
 
@@ -620,6 +775,46 @@ export function parseEventElimination(text, currentItems) {
 	}
 
 	return null;
+}
+
+/**
+ * fixEventLitrageShorthand: Corrige el error típico del NLU:
+ * "10 de mojito" → quantity=10 litrage=5L  ❌  →  quantity=1 litrage=10L  ✅
+ * Solo actúa si la "cantidad" es un litraje válido (5/10/20/30) y no dijo "x"/"unidades".
+ *
+ * @param {string} userMessage - Mensaje original del cliente
+ * @param {{ name: string, quantity: number, litrage: string }} product - Producto del NLU
+ * @param {string[]} allowedLitrages - Litrajes del formato (ej. ['5L','10L'])
+ * @param {string} defaultLitrage - Litraje por defecto del formato
+ * @returns {{ name: string, quantity: number, litrage: string }}
+ */
+export function fixEventLitrageShorthand(userMessage, product, allowedLitrages, defaultLitrage) {
+	if (!product?.name || !product.quantity) return product;
+
+	const qty = product.quantity;
+	const qtyAsLitrage = `${qty}L`;
+	// Solo reinterpretamos si la "cantidad" es un tamaño de barril válido
+	if (!allowedLitrages.includes(qtyAsLitrage)) return product;
+	// Si ya trae un litraje distinto al default, confiamos en el NLU
+	if (product.litrage && product.litrage !== defaultLitrage && product.litrage !== qtyAsLitrage) {
+		return product;
+	}
+
+	const msg = String(userMessage || '');
+	// Explicó unidades: "10x", "10 unidades", "10 barriles" → sí es cantidad
+	if (new RegExp(`\\b${qty}\\s*x\\b`, 'i').test(msg)) return product;
+	if (/\b(unidades?|barriles?)\b/i.test(msg) && new RegExp(`\\b${qty}\\b`).test(msg)) return product;
+
+	// Atajo típico: "10 de mojito", "10 mojito", "10L de mojito"
+	const looksLikeLitrage = new RegExp(
+		`\\b${qty}\\s*(l\\b|de\\s+)?[a-záéíóúñ]`,
+		'i'
+	).test(msg);
+
+	if (looksLikeLitrage || product.litrage === defaultLitrage) {
+		return { ...product, quantity: 1, litrage: qtyAsLitrage };
+	}
+	return product;
 }
 
 export function resolveDoubtsProgrammatically(dudas) {

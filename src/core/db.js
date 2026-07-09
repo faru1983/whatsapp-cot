@@ -8,7 +8,6 @@ import { SQLITE_PATH } from './paths.js';
 
 // Ruta fija a la raíz del repo (no depende de process.cwd() / PM2).
 const dbPath = SQLITE_PATH;
-console.log(`[DB] SQLite: ${dbPath}`);
 
 // Abrimos (o creamos, si no existe) el archivo de base de datos SQLite.
 const db = new Database(dbPath);

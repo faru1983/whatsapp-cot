@@ -8,6 +8,10 @@
     "respuesta": "Hacemos envíos a todas las comunas de la Región Metropolitana y para otras Regiones, despachamos por encomienda (Blue Express, Starken o empresas similares)"
   },
   {
+    "pregunta": "¿Dónde entregan? ¿Hacen envíos? ¿A qué comunas o regiones llegan? ¿Cubren despacho?",
+    "respuesta": "Entregamos a todas las comunas de la Región Metropolitana con despacho a domicilio. Si me dices tu comuna, te indico el costo de envío. Para otras regiones de Chile despachamos por encomienda (Blue Express, Starken o similares) y el costo exacto se confirma al procesar la compra."
+  },
+  {
     "pregunta": "¿Cuáles son los métodos de pago?",
     "respuesta": "Por el momento solo aceptamos transferencias bancarias."
   },

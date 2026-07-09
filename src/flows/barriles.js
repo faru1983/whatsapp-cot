@@ -19,10 +19,14 @@ import {
   parseDate,
   findLocationByFuzzyMatch,
   getCartaCocteles,
-  hasDrinkSelection
+  hasDrinkSelection,
+  isOnlyBrowsing,
+  wantsInstagramOrSocial,
+  wantsBarrilesQuote
 } from '../logic/utils.js';
 import { extractProductsWithAI } from '../core/llm.js';
 import { OrderBuilder } from '../logic/order-builder.js';
+import { resolveDecisionIntent } from '../logic/decision-intent.js';
 
 // ============================================================================
 // OBJETIVO: Flujo Barriles Desechables.
@@ -30,9 +34,12 @@ import { OrderBuilder } from '../logic/order-builder.js';
 // filtro canal -> ofrecer catálogo -> ofrecer cotización ->
 // recogida productos -> recogida datos -> revisión -> router modificación.
 // ============================================================================
+
 export const barrilesStates = {
   
   // Paso: filtro de canal (web vs WhatsApp).
+  // promptQuestion viene en 2 bloques (pitch + pregunta) vía getWelcomeBarriles().
+  // Decisión corta → keywords + classifyStepIntent (NO es paso de datos).
   BARRILES_FILTRO_CANAL: {
     id: 'BARRILES_FILTRO_CANAL',
     promptQuestion: () => getWelcomeBarriles(),
@@ -41,15 +48,41 @@ export const barrilesStates = {
     async validateAndProcess(messageText, session) {
       const normalizedMessage = normalizeString(messageText);
 
-      // ¿Quiere ir a la web? (y no dijo que prefiere chat)
-      const wantsWeb = /web|link|pagina|sitio/i.test(normalizedMessage) && !/chat|whatsapp|aqui|por aqui/i.test(normalizedMessage);
-      // ¿Quiere seguir por WhatsApp? Incluye "no" cuando el bot preguntó web vs aquí
-      const wantsWhatsapp = /^no$|aqui|aca|chat|whatsapp|ayuda|ayudar|ayudando|por favor|porfa|dime|muestra|catalogo|quiero|si|sigamos|seguimos|seguir|continuar|precio|valor|cuesta|cuanto/i.test(normalizedMessage);
+      const intent = await resolveDecisionIntent({
+        messageText,
+        session,
+        stepQuestion: barrilesStates.BARRILES_FILTRO_CANAL.shortQuestion,
+        allowedLabels: ['WEB', 'CHAT'],
+        // Pistas claras: "meterme a ver" / "entrar" suele ser la web, no el chat
+        labelHints: {
+          WEB: 'Quiere ir a la página web / link / sitio (comprar o mirar ahí, NO seguir en WhatsApp). Frases: web, link, página, meterme a ver, entrar al sitio, ver directamente en la web.',
+          CHAT: 'Quiere seguir cotizando o que le cuenten POR ESTE CHAT / WhatsApp / aquí.'
+        },
+        keywordGuess: () => {
+          // ¿Quiere ir a la web? Incluye frases naturales sin decir "web"
+          const wantsWeb = (
+            /web|link|pagina|sitio|url|tienda\s*virtual/i.test(normalizedMessage)
+            || /meterme|me\s+meto|entrar|voy\s+a\s+(la\s+)?(pagina|web|sitio|link)/i.test(normalizedMessage)
+            || /ver\s+directamente|prefiero\s+(la\s+)?(web|pagina|link)|mejor\s+(la\s+)?(web|pagina)/i.test(normalizedMessage)
+          ) && !/chat|whatsapp|por\s+aqui|por\s+aca|cuentame|cu[eé]ntame/i.test(normalizedMessage);
+
+          // ¿Quiere seguir por WhatsApp? Incluye "no" cuando el bot preguntó web vs aquí.
+          // "aka" = typo frecuente de "acá" (también está en wantsBarrilesQuote).
+          const wantsWhatsapp = /^(no|nop|nope)$/i.test(messageText.trim())
+            || /\b(aqui|aca|aka|chat|whatsapp|por\s+aqui|por\s+aca|por\s+aka|cuentame|cu[eé]ntame|ayudame|ayúdame|sigamos|seguimos|continuar)\b/i.test(normalizedMessage)
+            || /\b(dime|muestra|catalogo|precio|valor|cuesta|cuanto)\b/i.test(normalizedMessage);
+
+          if (wantsWeb) return 'WEB';
+          if (wantsWhatsapp) return 'CHAT';
+          return null;
+        }
+      });
 
       // Si elige web, cerramos el flujo de chat para evitar mensajes duplicados.
-      if (wantsWeb) {
+      if (intent === 'WEB') {
         return { success: true, nextState: 'CERRADO', customReply: `¡Buenísimo! Te dejo el link: https://cocktailsontap.cl/barriles. Si te surge cualquier duda durante tu compra, me escribes por aquí y te ayudo 🍹`, mute: true };
-      } else if (wantsWhatsapp) {
+      }
+      if (intent === 'CHAT') {
         return { success: true, nextState: 'BARRILES_OFRECER_CATALOGO' };
       }
       return { success: false };
@@ -57,15 +90,14 @@ export const barrilesStates = {
   },
 
   // Paso: ofrecer catálogo / lista de precios.
+  // promptQuestion viene en 2 bloques (beneficios + pregunta) vía getCatalogDesechables().
+  // Decisión corta → keywords + classifyStepIntent (NO es paso de datos).
   BARRILES_OFRECER_CATALOGO: {
     id: 'BARRILES_OFRECER_CATALOGO',
     promptQuestion: () => getCatalogDesechables(),
     shortQuestion: () => `¿Te muestro los barriles disponibles y sus precios o ya sabes qué pedir?`,
     aiContextPrompt: STATE_PROMPTS.BARRILES_OFRECER_CATALOGO,
     async validateAndProcess(messageText, session) {
-      // El cliente pide ver precios / catálogo completo
-      const wantsFullCatalog = /\b(si|sí|claro|ok|okay|dale|mu[eé]strame|precio|precios|valor|por favor|porfa|todos|todas|todo|lista|cat[áa]logo|menu|opciones|cuales|cu[aá]les|ver)\b/i.test(messageText);
-
       // Inicializamos estructura de pedido si todavía no existe en sesión.
       if (!session.orderBuilder || session.orderBuilder.type !== 'desechable') {
         session.orderBuilder = {
@@ -76,8 +108,33 @@ export const barrilesStates = {
         };
       }
 
+      // Si ya nombra cócteles sin ver catálogo, salta a armar pedido (quiere cotizar)
+      // Esto va ANTES del clasificador: es señal fuerte de productos, no de menú sí/no.
+      if (hasDrinkSelection(messageText)) {
+        return barrilesStates.BARRILES_RECOGIDA_PRODUCTOS.validateAndProcess(messageText, session);
+      }
+
+      const intent = await resolveDecisionIntent({
+        messageText,
+        session,
+        stepQuestion: typeof barrilesStates.BARRILES_OFRECER_CATALOGO.shortQuestion === 'function'
+          ? barrilesStates.BARRILES_OFRECER_CATALOGO.shortQuestion()
+          : barrilesStates.BARRILES_OFRECER_CATALOGO.shortQuestion,
+        allowedLabels: ['VER_CATALOGO', 'SOLO_MIRANDO'],
+        labelHints: {
+          VER_CATALOGO: 'Quiere ver la lista/carta/precios de barriles por este chat.',
+          SOLO_MIRANDO: 'No quiere seguir ahora: solo miraba, no gracias, Instagram, después.'
+        },
+        keywordGuess: () => {
+          const wantsFullCatalog = /\b(si|sí|claro|ok|okay|dale|mu[eé]strame|precio|precios|valor|por favor|porfa|todos|todas|todo|lista|cat[áa]logo|menu|opciones|cuales|cu[aá]les|ver)\b/i.test(messageText);
+          if (wantsFullCatalog) return 'VER_CATALOGO';
+          if (isOnlyBrowsing(messageText) || wantsInstagramOrSocial(messageText)) return 'SOLO_MIRANDO';
+          return null;
+        }
+      });
+
       // Carta y pregunta en mensajes separados (más claro en WhatsApp)
-      if (wantsFullCatalog) {
+      if (intent === 'VER_CATALOGO') {
         return {
           success: true,
           nextState: 'BARRILES_OFRECER_COTIZACION',
@@ -88,16 +145,10 @@ export const barrilesStates = {
         };
       }
 
-      // Cliente no quiere catálogo ni comprar ahora → despedida y reset de sesión
-      const refusesCatalog = /\b(no|no\s+gracias|despu[eé]s|luego|en\s+otro\s+momento|nada|cancelar)\b/i.test(messageText.trim());
+      // Cliente no quiere catálogo ni comprar ahora → despedida + Instagram
       // Despedida + silencio. NO usamos shouldReset: borraría el mute y el siguiente mensaje reabriría el bot.
-      if (refusesCatalog) {
+      if (intent === 'SOLO_MIRANDO') {
          return { success: true, nextState: 'CERRADO', customReply: getBrowseOnlyGoodbye(), mute: true };
-      }
-
-      // Si ya nombra cócteles sin ver catálogo, salta a armar pedido (quiere cotizar)
-      if (hasDrinkSelection(messageText)) {
-        return barrilesStates.BARRILES_RECOGIDA_PRODUCTOS.validateAndProcess(messageText, session);
       }
 
       return { success: false };
@@ -107,6 +158,7 @@ export const barrilesStates = {
   // ==============================================================================
   // A2.1 — OFRECER COTIZACIÓN (después de ver precios)
   // No asumimos que quiere pedir: pregunta si cotiza o solo estaba mirando.
+  // Decisión corta → keywords + classifyStepIntent (NO es paso de datos).
   // ==============================================================================
   BARRILES_OFRECER_COTIZACION: {
     id: 'BARRILES_OFRECER_COTIZACION',
@@ -125,15 +177,29 @@ export const barrilesStates = {
         };
       }
 
-      const trimmed = messageText.trim();
-      const lower = messageText.toLowerCase();
+      // Ya nombra cócteles → entra a armar pedido (señal fuerte, sin clasificador)
+      if (hasDrinkSelection(messageText)) {
+        return barrilesStates.BARRILES_RECOGIDA_PRODUCTOS.validateAndProcess(messageText, session);
+      }
 
-      // 1) Instagram / solo mirando PRIMERO (antes que "ok"/"sí", para no confundir "ok dame el instagram")
-      const wantsInstagram = /\b(instagram|insta|ig|redes?|segu(ir|irme|irnos)|historia|historias|video|videos)\b/i.test(lower);
-      const onlyBrowsing = /\b(solo\s+(estaba\s+)?(mirando|consultando|viendo)|solo\s+mirando|solo\s+miraba|estaba\s+mirando|solo\s+consultaba|no\s+gracias|no\s+quiero(\s+cotiz)?|no\s+deseo|no\s+me\s+interesa|despues|despu[eé]s|luego|en\s+otro\s+momento|nada|cancelar|por\s+ahora\s+no|ahora\s+no|solo\s+ver)\b/i.test(lower)
-        || /^(no|nop|nope)$/i.test(trimmed);
+      const intent = await resolveDecisionIntent({
+        messageText,
+        session,
+        stepQuestion: barrilesStates.BARRILES_OFRECER_COTIZACION.shortQuestion,
+        allowedLabels: ['COTIZAR', 'SOLO_MIRANDO'],
+        labelHints: {
+          COTIZAR: 'Quiere armar cotización / pedir / elegir cócteles por este chat.',
+          SOLO_MIRANDO: 'Solo estaba mirando precios, no quiere cotizar ahora, Instagram, no gracias.'
+        },
+        keywordGuess: () => {
+          // Solo mirando / Instagram PRIMERO (antes que "ok"/"sí")
+          if (isOnlyBrowsing(messageText) || wantsInstagramOrSocial(messageText)) return 'SOLO_MIRANDO';
+          if (wantsBarrilesQuote(messageText)) return 'COTIZAR';
+          return null;
+        }
+      });
 
-      if (wantsInstagram || onlyBrowsing) {
+      if (intent === 'SOLO_MIRANDO') {
         return {
           success: true,
           nextState: 'CERRADO',
@@ -142,21 +208,12 @@ export const barrilesStates = {
         };
       }
 
-      // 2) Ya nombra cócteles → entra a armar pedido
-      if (hasDrinkSelection(messageText)) {
-        return barrilesStates.BARRILES_RECOGIDA_PRODUCTOS.validateAndProcess(messageText, session);
-      }
-
-      // 3) Quiere cotizar (keywords sugeridas en la pregunta: sí / cotizar)
-      const wantsQuote = /\b(si|sí|claro|ok|okay|dale|vamos|partamos|partimos|cotiz|pedido|armar|empez|comenz|me\s+gustar[ií]a|por\s+favor|porfa|aqui|ac[aá]|por\s+aqu[ií])\b/i.test(lower)
-        || /\bquiero\b/i.test(lower);
-
-      if (wantsQuote) {
+      if (intent === 'COTIZAR') {
         const reply = `¡Perfecto! 🍸 En unos pasos simples armamos tu cotización.\n\nDime qué cócteles de la lista te gustaron o te interesan (ej: "2 mojitos y 1 aperol").`;
         return { success: true, nextState: 'BARRILES_RECOGIDA_PRODUCTOS', customReply: reply };
       }
 
-      // 4) No entendimos → engine: FAQ → IA → re-pregunta con keywords
+      // No entendimos → engine: FAQ → IA → re-pregunta
       return { success: false };
     }
   },
@@ -285,8 +342,9 @@ export const barrilesStates = {
         return { success: true, nextState: 'BARRILES_RECOGIDA_PRODUCTOS', customReply: reply };
       }
 
-      const refusesCatalog = /\b(no|no\s+gracias|despu[eé]s|luego|en\s+otro\s+momento|nada|cancelar)\b/i.test(messageText.trim());
-      if (refusesCatalog && Object.keys(session.orderBuilder.products).length === 0) {
+      // Carrito vacío y el cliente se baja → despedida + Instagram
+      if ((isOnlyBrowsing(messageText) || wantsInstagramOrSocial(messageText))
+          && Object.keys(session.orderBuilder.products).length === 0) {
           return { success: true, nextState: 'CERRADO', customReply: getBrowseOnlyGoodbye(), mute: true };
       }
 
@@ -299,7 +357,15 @@ export const barrilesStates = {
   // Paso: recogida de datos de despacho (fecha y comuna).
   BARRILES_RECOGIDA_DATOS: {
     id: 'BARRILES_RECOGIDA_DATOS',
-    promptQuestion: () => `¡Excelente elección! 🤩 Ya casi terminamos, solo necesito dos datos finales para calcular tu cotización:\n\n📝 Por favor indícame:\n- Fecha que los necesitas:\n- Comuna o Ciudad de entrega:\n\n_(Ej: "Para este sábado en Providencia")_`,
+    // Info + ejemplo en dos mensajes (más fácil de leer en WhatsApp)
+    promptQuestion: () => [
+      `¡Excelente elección! 🤩 Ya casi terminamos, solo necesito dos datos finales para calcular tu cotización:
+
+📝 Por favor indícame:
+- Fecha que los necesitas
+- Comuna o Ciudad de entrega`,
+      `Puedes escribirlo así: _"Para este sábado en Providencia"_`
+    ],
     shortQuestion: `¿Me pasas la fecha y comuna o revisamos la cotización?`,
     aiContextPrompt: STATE_PROMPTS.BARRILES_RECOGIDA_DATOS_DUDAS,
     async validateAndProcess(messageText, session) {
@@ -340,6 +406,8 @@ export const barrilesStates = {
   },
 
   // Paso: revisión de cotización final.
+  // Decisión corta (confirmar vs modificar) → keywords + classifyStepIntent.
+  // NO es paso de datos: no inventamos fecha/comuna/cócteles aquí.
   BARRILES_REVISION_COTIZACION: {
     id: 'BARRILES_REVISION_COTIZACION',
     promptQuestion: (session) => {
@@ -359,11 +427,23 @@ export const barrilesStates = {
     shortQuestion: `¿Todo bien con la cotización o cambiamos algo?`,
     aiContextPrompt: STATE_PROMPTS.BARRILES_REVISION_COTIZACION,
     async validateAndProcess(messageText, session) {
-      const isConfirming = /(si|sí|ok|perfecto|listo|dale|confirm|esta bien|está bien|todo bien|vamos|súper|super|correcto|excelente|genial|aprob|bueno)/i.test(messageText);
-      const isModifying = /cambiar|sacar|agregar|quitar|modif|ajust|cantidad|litro|cóctel|coctel|producto|extra|otro/i.test(messageText);
+      const intent = await resolveDecisionIntent({
+        messageText,
+        session,
+        stepQuestion: barrilesStates.BARRILES_REVISION_COTIZACION.shortQuestion,
+        allowedLabels: ['CONFIRMAR', 'MODIFICAR'],
+        keywordGuess: () => {
+          const isConfirming = /(si|sí|ok|perfecto|listo|dale|confirm|esta bien|está bien|todo bien|vamos|súper|super|correcto|excelente|genial|aprob|bueno)/i.test(messageText);
+          const isModifying = /cambiar|sacar|agregar|quitar|modif|ajust|cantidad|litro|cóctel|coctel|producto|extra|otro/i.test(messageText);
+          // Si pide cambios, gana MODIFICAR aunque también diga "ok"
+          if (isModifying) return 'MODIFICAR';
+          if (isConfirming) return 'CONFIRMAR';
+          return null;
+        }
+      });
 
       // Cliente confirma sin pedir cambios → venta cerrada, alerta a admins (formato unificado)
-      if (isConfirming && !isModifying) {
+      if (intent === 'CONFIRMAR') {
         const { location, date } = session.orderBuilder.clientData;
         const total = session.orderBuilder.quote?.total;
         const totalStr = total ? formatPrice(total) : 'Revisar chat';
@@ -405,33 +485,55 @@ export const barrilesStates = {
           notifyAdmin: alert,
           customReply: closingReply 
         };
-      } else if (isModifying) {
+      }
+
+      if (intent === 'MODIFICAR') {
         // Si quiere cambios, lo llevamos a un mini-router de modificaciones.
         session.quotationGenerated = false;
         return { success: true, nextState: 'BARRILES_ROUTER_MODIFICACION' };
       }
+
       return { success: false };
     }
   },
 
   // Paso: router de modificación (productos o datos).
+  // Decisión de menú (1 vs 2) → keywords + classifyStepIntent.
   BARRILES_ROUTER_MODIFICACION: {
     id: 'BARRILES_ROUTER_MODIFICACION',
-    promptQuestion: () => `Claro, ¿qué deseas cambiar?\n\n1. *Cambiar cócteles* - ¿cuáles deseas en lugar de los actuales?\n2. *Actualizar datos* - ¿Fecha o ubicación?\n\nResponde con 1 o 2 para saber qué necesitas ajustar 🔧`,
+    // Opciones en un mensaje, instrucción corta en otro
+    promptQuestion: () => [
+      `Claro, ¿qué deseas cambiar?
+
+1. *Cambiar cócteles* - ¿cuáles deseas en lugar de los actuales?
+2. *Actualizar datos* - ¿Fecha o ubicación?`,
+      `Responde con 1 o 2 para saber qué necesitas ajustar 🔧`
+    ],
     shortQuestion: `¿Responde 1 para cócteles o 2 para datos?`,
     aiContextPrompt: STATE_PROMPTS.BARRILES_ROUTER_MODIFICACION,
     async validateAndProcess(messageText, session) {
-      const isProductos = /1|coctel|cóctel|bebida|trago/i.test(messageText);
-      const isDatos = /2|3|dato|fecha|ubicacion|ubicación/i.test(messageText); // Acepta 3 por compatibilidad
+      const intent = await resolveDecisionIntent({
+        messageText,
+        session,
+        stepQuestion: barrilesStates.BARRILES_ROUTER_MODIFICACION.shortQuestion,
+        allowedLabels: ['PRODUCTOS', 'DATOS'],
+        keywordGuess: () => {
+          const isProductos = /1|coctel|cóctel|bebida|trago/i.test(messageText);
+          const isDatos = /2|3|dato|fecha|ubicacion|ubicación/i.test(messageText); // Acepta 3 por compatibilidad
+          if (isProductos) return 'PRODUCTOS';
+          if (isDatos) return 'DATOS';
+          return null;
+        }
+      });
 
       // Opción 1: volver a editar el carrito de cócteles
-      if (isProductos) {
+      if (intent === 'PRODUCTOS') {
         let reply = `Perfecto, volvamos a los cócteles. Actualmente tienes:\n${Object.entries(session.orderBuilder.products).map(([n,q])=>`- ${q}x ${n}`).join('\n')}\n\n¿Qué deseas agregar o eliminar? (ej: "agrega 1 mojito" o "elimina 1 aperol")`;
         return { success: true, nextState: 'BARRILES_RECOGIDA_PRODUCTOS', customReply: reply };
       }
 
       // Opción 2: volver a pedir fecha y ubicación (reseteamos esos campos)
-      if (isDatos) {
+      if (intent === 'DATOS') {
         session.orderBuilder.clientData = { name: null, date: null, location: null };
         return { success: true, nextState: 'BARRILES_RECOGIDA_DATOS' };
       }
