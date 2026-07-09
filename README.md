@@ -166,15 +166,17 @@ NVIDIA_API_KEY=tu_clave_aqui
 NVIDIA_MODEL=meta/llama-3.1-8b-instruct
 ```
 
-#### Red de seguridad (opcional, ya vienen valores por defecto)
+#### Red de seguridad y ritmo de mensajes (opcional, ya vienen valores por defecto)
 
 ```env
 SECURITY_MAX_CONSECUTIVE_ERRORS=3
 SECURITY_MAX_INTENT_SWITCHES=3
+MESSAGE_SEND_DELAY_MS=1500
 ```
 
 - El primero: cuántas veces seguidas el bot “no entiende” antes de callarse y avisar a un admin.
 - El segundo: cuántas veces el cliente puede cambiar de idea entre barriles y eventos al inicio.
+- `MESSAGE_SEND_DELAY_MS`: pausa (en milisegundos) entre mensajes seguidos del bot (por ejemplo carta + pregunta). Ayuda a que se lean natural y reduce el riesgo de que WhatsApp Web detecte envíos demasiado rápidos.
 
 > **Seguridad importante:** nunca subas el archivo `.env` a internet ni lo compartas en capturas. Ahí están tus claves. El proyecto ya está configurado para ignorarlo en Git.
 
@@ -223,15 +225,19 @@ A partir de ahí, si alguien escribe al número vinculado, el bot puede responde
 
 ### Paso 7 — Comandos de administrador por WhatsApp
 
-Desde un número admin (o desde la misma cuenta del bot), puedes escribir:
+Los comandos se escriben **desde tu chat** (la cuenta del bot o un número en `ADMIN_NUMBERS`), **nunca en la ventana del cliente**. El número del cliente es **obligatorio**:
 
-| Comando | Qué hace |
-|---|---|
-| `/detenerbot` | Silencia el bot en ese chat (útil si un humano toma el control) |
-| `/iniciarbot` | Vuelve a activar el bot en ese chat |
-| `/reiniciarbot` | Reinicia la conversación de ese chat |
+| Comando | Ejemplo | Qué hace |
+|---|---|---|
+| `/detenerbot` | `/detenerbot 56912345678` | Silencia el bot para ese cliente |
+| `/iniciarbot` | `/iniciarbot 56912345678` | Reactiva el bot para ese cliente |
+| `/reiniciarbot` | `/reiniciarbot 56912345678` | Borra la sesión y empieza de cero |
 
-Algunos aceptan un número opcional para actuar sobre otro cliente (según cómo esté implementado el comando en `src/index.js`).
+Si escribes el comando sin número, el bot te responde con el formato correcto. Si lo escribes en el chat del cliente, se ignora (así evitamos borrar mensajes ahí y confusiones con el mute automático).
+
+**Mute automático:** si un humano escribe texto o manda multimedia en el chat de un cliente, el bot se silencia solo en ese chat. No cuenta como “intervención humana” activar/desactivar mensajes temporales ni borrar un mensaje (son eventos de sistema de WhatsApp).
+
+**Mensajes temporales:** si el cliente los tiene activos, el bot igual puede leer el texto (los desempaqueta). A veces WhatsApp los desactiva al responder; eso es normal y no debe silenciar el bot.
 
 ---
 
@@ -247,7 +253,7 @@ Algunos aceptan un número opcional para actuar sobre otro cliente (según cómo
 → Lee el error completo. En Windows, `better-sqlite3` suele pedir herramientas de compilación. Asegúrate de tener Node ≥ 18.18.
 
 **El bot no responde**  
-→ ¿Está corriendo `npm start`? ¿El chat está muteado? ¿Es un grupo? (por defecto suele ignorar grupos). ¿El mensaje es solo texto? (este bot trabaja principalmente con texto).
+→ ¿Está corriendo `npm start`? ¿El chat está muteado? (prueba `/iniciarbot 569...` o `/reiniciarbot 569...` desde tu chat). ¿Es un grupo? (por defecto suele ignorar grupos). ¿El cliente tiene mensajes temporales? (ya deberían funcionar; si un chat viejo quedó muteado por error, reactívalo con el comando).
 
 **Quiero verificar que el código no tenga errores de sintaxis**
 
@@ -496,9 +502,20 @@ Así, si la VM de Oracle se reinicia, el bot vuelve solo.
 ### Paso H — Probar que responde
 
 1. Escribe al número de WhatsApp **vinculado** desde **otro celular** (un número de prueba).
-2. **No respondas tú** en ese chat mientras pruebas: si un humano escribe ahí, el bot se silencia solo en ese chat (protección de “intervención humana”).
-3. Si quedó silenciado, desde el WhatsApp del bot (o un admin) escribe en ese chat: `/iniciarbot`  
-   Para empezar de cero: `/reiniciarbot`.
+2. **No respondas tú** en ese chat mientras pruebas: si un humano escribe texto o manda multimedia ahí, el bot se silencia solo en ese chat (protección de “intervención humana”).
+3. Si quedó silenciado, desde **tu chat** (cuenta del bot o un admin), **no** desde la ventana del cliente:
+
+```text
+/iniciarbot 56912345678
+```
+
+Para empezar de cero:
+
+```text
+/reiniciarbot 56912345678
+```
+
+(Usa el número real del cliente de prueba, sin `+`.)
 
 ---
 
@@ -667,7 +684,7 @@ Según el estado, llama a la función de validación de ese paso (en `flows/`).
 
 El motor protege la experiencia:
 
-- **Mute:** si un humano intervino, o el cliente pidió ayuda (SOS / “quiero hablar con alguien”), o hubo demasiados errores seguidos, el bot se calla.
+- **Mute:** si un humano intervino con texto/multimedia en el chat del cliente, o el cliente pidió ayuda (SOS / “quiero hablar con alguien”), o hubo demasiados errores seguidos, el bot se calla. Cambios de mensajes temporales o borrados **no** cuentan como intervención.
 - **Cambio de intención:** si el cliente salta muchas veces entre barriles y eventos al inicio, se corta el loop.
 - **Fallback:** si la validación falla, intenta:
   1. Responder con FAQ (si la duda encaja),
@@ -699,7 +716,7 @@ Los nombres de estado son semánticos (`BARRILES_*`, `EVENTOS_*`), no números m
 ### 6) Se guarda la sesión y se responde
 
 El motor guarda el nuevo estado y arma la respuesta.  
-En WhatsApp, a veces se envían **varios mensajes** seguidos (`customReplies`) para que se lea más natural.
+En WhatsApp, a veces se envían **varios mensajes** seguidos (`customReplies`) para que se lea más natural, con una pausa configurable (`MESSAGE_SEND_DELAY_MS`, por defecto ~1,5 s) entre uno y otro.
 
 ### 7) Cierre
 
