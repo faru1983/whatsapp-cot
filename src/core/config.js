@@ -69,12 +69,24 @@ export function loadBotConfig() {
     ? process.env.ADMIN_NUMBERS.split(',').map(n => n.trim() + '@s.whatsapp.net') // Les añadimos la terminación de WhatsApp
     : [];
 
+  // Etiqueta de WhatsApp Business para chats SOS (asistencia humana).
+  // Por defecto buscamos por nombre "Asistencia" (debe existir en WhatsApp Business).
+  // Si conoces el ID interno, puedes fijarlo con SOS_LABEL_ID y se usa directo.
+  const sosLabelName = (process.env.SOS_LABEL_NAME || 'Asistencia').trim();
+  const sosLabelId = (process.env.SOS_LABEL_ID || '').trim();
+  const sosMarkUnread = String(process.env.SOS_MARK_UNREAD || 'true').toLowerCase() !== 'false';
+
   return {
     triggerPrefix: "", // Si escribes por ejemplo "!bot", el bot solo responderá mensajes que empiecen con "!bot". Vacío responde a todo.
     allowGroups: false, // Si es 'false', el bot ignorará los mensajes de chats grupales y solo responderá privados.
     temperature: 0.8, // Regula la creatividad del bot (0.0 es muy robótico/fijo, 1.0 es muy creativo/diverso)
     maxOutputTokens: 400, // Limita el largo de las respuestas del bot para evitar que responda textos gigantescos.
     numeros_notificar: adminNumbers, // Lista de números administradores que recibirán alertas de SOS o conversiones
+
+    // Acciones en el chat del cliente cuando hay SOS (etiqueta Business + no leído)
+    sosLabelName,
+    sosLabelId: sosLabelId || null,
+    sosMarkUnread,
 
     // Umbrales de la red de seguridad (engine.js). Ver sección SECURITY_* en .env
     security: {

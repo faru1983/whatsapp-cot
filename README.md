@@ -237,6 +237,10 @@ Si escribes el comando sin número, el bot te responde con el formato correcto. 
 
 **Mensajes temporales:** si el cliente los tiene activos, el bot igual puede leer el texto (los desempaqueta). A veces WhatsApp los desactiva al responder; eso es normal y no debe silenciar el bot.
 
+**SOS + WhatsApp Business:** cuando un cliente pide ayuda humana, además del mensaje a los admins el bot intenta:
+1. Etiquetar el chat con la etiqueta *Asistencia* (`SOS_LABEL_NAME` en `.env`; créala antes en Business; opcional `SOS_LABEL_ID` si conoces el ID).
+2. Marcar ese chat como **no leído** (`SOS_MARK_UNREAD=true`) para que destaque en la lista.
+
 ---
 
 ### Problemas frecuentes al instalar
