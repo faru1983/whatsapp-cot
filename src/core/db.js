@@ -114,3 +114,32 @@ export function saveSession(sessionId, session) {
 export function resetSession(sessionId = 'default') {
   saveSession(sessionId, createSession());
 }
+
+/**
+ * listSessionIds: Lista todos los IDs de sesión guardados en SQLite.
+ * Sirve para comandos admin que deben actuar sobre PN y también sobre @lid.
+ *
+ * @returns {string[]} IDs de sesión (JIDs)
+ */
+export function listSessionIds() {
+  const rows = db.prepare('SELECT id FROM sessions').all();
+  return rows.map((row) => row.id);
+}
+
+/**
+ * findSessionIdsForPhone: Busca sesiones cuyo ID contenga el número de teléfono.
+ * WhatsApp a veces guarda el chat como 569...@s.whatsapp.net y otras como ...@lid;
+ * el comando admin usa el número público, así que buscamos coincidencias.
+ *
+ * @param {string} phoneDigits - Solo dígitos (ej. "56929672978")
+ * @returns {string[]} IDs de sesión que coinciden
+ */
+export function findSessionIdsForPhone(phoneDigits) {
+  const digits = String(phoneDigits || '').replace(/\D/g, '');
+  if (!digits) return [];
+  return listSessionIds().filter((id) => {
+    const idDigits = String(id).replace(/\D/g, '');
+    // Coincidencia exacta de dígitos del usuario (sin device) o el número aparece en el id PN
+    return id === `${digits}@s.whatsapp.net` || id.startsWith(`${digits}@`) || idDigits === digits;
+  });
+}

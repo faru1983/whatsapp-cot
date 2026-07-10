@@ -225,7 +225,7 @@ A partir de ahí, si alguien escribe al número vinculado, el bot puede responde
 
 ### Paso 7 — Comandos de administrador por WhatsApp
 
-Los comandos se escriben **desde tu chat** (la cuenta del bot o un número en `ADMIN_NUMBERS`), **nunca en la ventana del cliente**. El número del cliente es **obligatorio**:
+Los comandos se escriben desde **Mensaje para ti mismo** (chat contigo) o desde un número en `ADMIN_NUMBERS`, **nunca en la ventana del cliente**. El número del cliente es **obligatorio**:
 
 | Comando | Ejemplo | Qué hace |
 |---|---|---|

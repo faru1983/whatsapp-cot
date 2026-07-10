@@ -9,11 +9,29 @@ import makeWASocket, {
 import pino from 'pino';
 import { processMessage, setAdminAlertFunction } from './core/engine.js';
 import { shouldHandleMessage, stripTriggerPrefix } from './logic/utils.js';
-import { getSession, saveSession, resetSession } from './core/db.js';
+import { getSession, saveSession, resetSession, findSessionIdsForPhone } from './core/db.js';
 import { loadBotConfig } from './core/config.js';
 import { composeAdminAlertMessage } from './views/templates.js';
 import { AUTH_DIR, PROJECT_ROOT } from './core/paths.js';
 import process from 'node:process';
+import fs from 'node:fs';
+import path from 'node:path';
+
+// #region agent log
+/** agentDebugLog: telemetría de debug (HTTP + archivo + consola para PM2). */
+function agentDebugLog(payload) {
+  const body = { sessionId: 'bbbe74', timestamp: Date.now(), ...payload };
+  console.log(`[DBG ${body.location}] ${body.message}`, JSON.stringify(body.data || {}));
+  fetch('http://127.0.0.1:7503/ingest/f154410c-1ed0-4e1d-96fb-18f42be4b6a7', {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json', 'X-Debug-Session-Id': 'bbbe74' },
+    body: JSON.stringify(body)
+  }).catch(() => {});
+  try {
+    fs.appendFileSync(path.join(PROJECT_ROOT, 'debug-bbbe74.log'), `${JSON.stringify(body)}\n`);
+  } catch (_) { /* ignore */ }
+}
+// #endregion
 
 // ==============================================================================
 // OBJETIVO: Punto de entrada del bot de WhatsApp.
@@ -51,16 +69,6 @@ function rememberMessage(id, content) {
     const oldestKey = recentMessages.keys().next().value;
     recentMessages.delete(oldestKey);
   }
-}
-
-/**
- * sleep: Pausa asíncrona (ms). Se usa entre mensajes seguidos para no spamear WhatsApp.
- *
- * @param {number} ms - Milisegundos a esperar
- * @returns {Promise<void>}
- */
-function sleep(ms) {
-  return new Promise((resolve) => setTimeout(resolve, ms));
 }
 
 /**
@@ -158,18 +166,109 @@ function toClientJid(rawTarget) {
 }
 
 /**
- * isClientCustomerChat: true si el chat es de un cliente (no admin ni grupo).
+ * extractPhoneDigits: Saca solo los dígitos de un número o JID.
+ *
+ * @param {string} raw - Número o JID
+ * @returns {string} Solo dígitos
+ */
+function extractPhoneDigits(raw) {
+  return String(raw || '').replace(/\D/g, '');
+}
+
+/**
+ * jidUserPart: Parte de usuario de un JID (sin device ni dominio).
+ * Ej: "569123:12@s.whatsapp.net" → "569123"
+ *
+ * @param {string} jid
+ * @returns {string}
+ */
+function jidUserPart(jid) {
+  if (!jid) return '';
+  return String(jid).split('@')[0].split(':')[0];
+}
+
+/**
+ * isSelfChat: Detecta el chat "Mensaje para ti mismo" (Message Yourself).
+ * Ahí remoteJid suele ser el propio número del bot; no es un cliente.
+ *
+ * @param {string} remoteJid
+ * @param {object|null} sock - Socket Baileys (para leer sock.user.id)
+ * @returns {boolean}
+ */
+function isSelfChat(remoteJid, sock) {
+  if (!remoteJid || !sock?.user?.id) return false;
+  const meUser = jidUserPart(sock.user.id);
+  const remoteUser = jidUserPart(remoteJid);
+  if (meUser && remoteUser && meUser === remoteUser) return true;
+  // A veces el self-chat llega como LID propio
+  const meLid = sock.user.lid ? jidUserPart(sock.user.lid) : '';
+  if (meLid && remoteUser && meLid === remoteUser) return true;
+  return false;
+}
+
+/**
+ * isClientCustomerChat: true si el chat es de un cliente (no admin, no self, no grupo).
  * Ahí NO deben ejecutarse comandos admin; solo mute por intervención humana real.
  *
  * @param {string} remoteJid - Chat donde llegó el evento
  * @param {string[]} adminList - JIDs de ADMIN_NUMBERS
+ * @param {object|null} sock - Socket Baileys
  * @returns {boolean}
  */
-function isClientCustomerChat(remoteJid, adminList) {
+function isClientCustomerChat(remoteJid, adminList, sock = null) {
   if (!remoteJid) return false;
   if (remoteJid.endsWith('@g.us') || remoteJid === 'status@broadcast') return false;
   if (adminList.includes(remoteJid)) return false;
+  // "Mensaje para ti mismo" = consola admin, no cliente
+  if (isSelfChat(remoteJid, sock)) return false;
   return remoteJid.endsWith('@s.whatsapp.net') || remoteJid.endsWith('@lid');
+}
+
+/**
+ * resolveSessionIdsForCommand: IDs de sesión a tocar con un comando admin.
+ * Incluye el PN (569...@s.whatsapp.net) y, si Baileys tiene mapping, el @lid.
+ *
+ * @param {object} sock - Socket Baileys
+ * @param {string} phoneOrJid - Número o JID del cliente
+ * @returns {Promise<string[]>}
+ */
+async function resolveSessionIdsForCommand(sock, phoneOrJid) {
+  const digits = extractPhoneDigits(phoneOrJid.includes('@') ? jidUserPart(phoneOrJid) : phoneOrJid);
+  const ids = new Set();
+  if (!digits) return [];
+
+  const pnJid = `${digits}@s.whatsapp.net`;
+  ids.add(pnJid);
+
+  // Sesiones ya guardadas que coincidan con el número
+  for (const id of findSessionIdsForPhone(digits)) {
+    ids.add(id);
+  }
+
+  // Mapping PN ↔ LID de Baileys (si existe)
+  try {
+    const lid = await sock.signalRepository?.lidMapping?.getLIDForPN?.(pnJid);
+    if (lid) ids.add(lid);
+  } catch (_) { /* ignore */ }
+
+  return [...ids];
+}
+
+/**
+ * getPreferredSessionId: Elige el ID de sesión más estable para un mensaje entrante.
+ * Prefiere el número público (@s.whatsapp.net) sobre @lid cuando WhatsApp lo envía
+ * en remoteJidAlt / senderPn.
+ *
+ * @param {object} message - Mensaje Baileys
+ * @returns {string} JID a usar como sessionId
+ */
+function getPreferredSessionId(message) {
+  const remoteJid = message.key?.remoteJid || '';
+  const alt = message.key?.remoteJidAlt || message.key?.senderPn || '';
+  if (remoteJid.endsWith('@lid') && typeof alt === 'string' && alt.endsWith('@s.whatsapp.net')) {
+    return alt;
+  }
+  return remoteJid;
 }
 
 /**
@@ -336,7 +435,6 @@ async function startBot() {
 
       const botConfig = loadBotConfig();
       const adminList = botConfig.numeros_notificar || [];
-      const sendDelayMs = botConfig.messageSendDelayMs || 1500;
 
       const isFromMe = message.key.fromMe;
       const remoteJid = message.key.remoteJid;
@@ -346,6 +444,36 @@ async function startBot() {
       if (!isFromAdmin && message.key.participant) {
         isFromAdmin = adminList.includes(message.key.participant);
       }
+
+      const selfChat = isSelfChat(remoteJid, sock);
+
+      // #region agent log
+      const looksLikeAdminCmd = /^\s*\/(detenerbot|iniciarbot|reiniciarbot)\b/i.test(text || '');
+      if (looksLikeAdminCmd || (!isFromMe && (text || '').trim().length > 0)) {
+        agentDebugLog({
+          runId: 'post-fix',
+          hypothesisId: 'A,B,D',
+          location: 'index.js:upsert-entry',
+          message: 'msg received',
+          data: {
+            textPreview: (text || '').slice(0, 80),
+            remoteJid,
+            remoteJidAlt: message.key.remoteJidAlt || null,
+            fromMe: !!isFromMe,
+            isFromAdmin,
+            selfChat,
+            meUser: sock.user?.id ? jidUserPart(sock.user.id) : null,
+            participant: message.key.participant || null,
+            hasProtocol: !!content?.protocolMessage,
+            stubType: message.messageStubType || null,
+            contentKeys: content ? Object.keys(content).slice(0, 8) : [],
+            isSystem: isProtocolOrSystemMessage(message, content),
+            isBotEcho: !!(isFromMe && botSentMessageIds.has(message.key.id)),
+            looksLikeAdminCmd
+          }
+        });
+      }
+      // #endregion
 
       // Eventos de sistema (mensajes temporales on/off, borrados, stubs):
       // NO son intervención humana ni comandos. Si el bot desactiva temporales
@@ -359,21 +487,35 @@ async function startBot() {
         return;
       }
 
-      const isAuthorized = isFromMe || isFromAdmin;
+      // fromMe (incluye "Mensaje para ti mismo") o chat de ADMIN_NUMBERS
+      const isAuthorized = isFromMe || isFromAdmin || selfChat;
 
       // --------------------------------------------------------------------------
-      // 2.1 Comandos admin: SOLO desde chat propio/admin + número de cliente
+      // 2.1 Comandos admin: desde chat propio / Message Yourself / admin + número
       // Formato: /detenerbot 56912345678  (nunca desde la ventana del cliente)
-      // Así evitamos borrar mensajes en el chat del cliente y falsos mutes.
       // --------------------------------------------------------------------------
       if (isAuthorized) {
         const parts = text.trim().split(/\s+/).filter(Boolean);
         const command = (parts[0] || '').toLowerCase();
 
         if (ADMIN_COMMANDS.includes(command)) {
+          const inClientChat = isClientCustomerChat(remoteJid, adminList, sock);
+          // #region agent log
+          agentDebugLog({
+            runId: 'post-fix',
+            hypothesisId: 'A',
+            location: 'index.js:admin-cmd',
+            message: 'admin command branch',
+            data: { command, parts, remoteJid, inClientChat, selfChat, isFromMe, isFromAdmin, adminListTail: adminList.map((a) => a.slice(-8)) }
+          });
+          // #endregion
+
           // En el chat del cliente no aceptamos comandos (aunque sea fromMe)
-          if (isClientCustomerChat(remoteJid, adminList)) {
-            console.log(`⚠️ Comando ${command} ignorado en chat de cliente. Usa: ${command} <número> desde tu chat.`);
+          if (inClientChat) {
+            console.log(`⚠️ Comando ${command} ignorado en chat de cliente. Usa: ${command} <número> desde Mensaje para ti mismo.`);
+            // #region agent log
+            agentDebugLog({ runId: 'post-fix', hypothesisId: 'A', location: 'index.js:cmd-ignored-client', message: 'command ignored in client chat', data: { command, remoteJid } });
+            // #endregion
             return;
           }
 
@@ -392,44 +534,89 @@ async function startBot() {
             return;
           }
 
-          const commandTargetJid = toClientJid(parts[1]);
-          const tgtSession = getSession(commandTargetJid);
+          // Resolvemos PN + posibles @lid para no dejar sesiones huérfanas muteadas
+          const targetIds = await resolveSessionIdsForCommand(sock, parts[1]);
+          const primaryTarget = toClientJid(parts[1]);
+          // #region agent log
+          agentDebugLog({
+            runId: 'post-fix',
+            hypothesisId: 'C,E',
+            location: 'index.js:cmd-target',
+            message: 'command target resolved',
+            data: { command, primaryTarget, targetIds, ackTo: remoteJid }
+          });
+          // #endregion
 
           if (command === '/detenerbot') {
-            tgtSession.isMuted = true;
-            tgtSession.silenciado_timestamp = Date.now();
-            saveSession(commandTargetJid, tgtSession);
-            console.log(`🔇 Bot DETENIDO manualmente para: ${commandTargetJid}`);
+            for (const id of targetIds) {
+              const tgtSession = getSession(id);
+              tgtSession.isMuted = true;
+              tgtSession.silenciado_timestamp = Date.now();
+              saveSession(id, tgtSession);
+            }
+            console.log(`🔇 Bot DETENIDO manualmente para: ${targetIds.join(', ')}`);
             const ack = `🔇 Cliente ${parts[1]} silenciado.`;
-            const sent = await sock.sendMessage(remoteJid, { text: ack });
-            if (sent?.key?.id) {
-              botSentMessageIds.add(sent.key.id);
-              rememberMessage(sent.key.id, sent.message || { conversation: ack });
+            try {
+              const sent = await sock.sendMessage(remoteJid, { text: ack });
+              // #region agent log
+              agentDebugLog({ runId: 'post-fix', hypothesisId: 'E', location: 'index.js:ack-detener', message: 'ack sent', data: { ackTo: remoteJid, sentId: sent?.key?.id || null, targetIds } });
+              // #endregion
+              if (sent?.key?.id) {
+                botSentMessageIds.add(sent.key.id);
+                rememberMessage(sent.key.id, sent.message || { conversation: ack });
+              }
+            } catch (e) {
+              // #region agent log
+              agentDebugLog({ runId: 'post-fix', hypothesisId: 'E', location: 'index.js:ack-detener-err', message: 'ack failed', data: { error: String(e.message || e), ackTo: remoteJid } });
+              // #endregion
             }
             return;
           }
 
           if (command === '/iniciarbot') {
-            tgtSession.isMuted = false;
-            saveSession(commandTargetJid, tgtSession);
-            console.log(`🤖 Bot INICIADO manualmente para: ${commandTargetJid}`);
+            for (const id of targetIds) {
+              const tgtSession = getSession(id);
+              tgtSession.isMuted = false;
+              saveSession(id, tgtSession);
+            }
+            console.log(`🤖 Bot INICIADO manualmente para: ${targetIds.join(', ')}`);
             const ack = `🤖 Cliente ${parts[1]} iniciado.`;
-            const sent = await sock.sendMessage(remoteJid, { text: ack });
-            if (sent?.key?.id) {
-              botSentMessageIds.add(sent.key.id);
-              rememberMessage(sent.key.id, sent.message || { conversation: ack });
+            try {
+              const sent = await sock.sendMessage(remoteJid, { text: ack });
+              // #region agent log
+              agentDebugLog({ runId: 'post-fix', hypothesisId: 'E', location: 'index.js:ack-iniciar', message: 'ack sent', data: { ackTo: remoteJid, sentId: sent?.key?.id || null, targetIds } });
+              // #endregion
+              if (sent?.key?.id) {
+                botSentMessageIds.add(sent.key.id);
+                rememberMessage(sent.key.id, sent.message || { conversation: ack });
+              }
+            } catch (e) {
+              // #region agent log
+              agentDebugLog({ runId: 'post-fix', hypothesisId: 'E', location: 'index.js:ack-iniciar-err', message: 'ack failed', data: { error: String(e.message || e), ackTo: remoteJid } });
+              // #endregion
             }
             return;
           }
 
           if (command === '/reiniciarbot') {
-            resetSession(commandTargetJid);
-            console.log(`🔄 Sesión REINICIADA para: ${commandTargetJid}`);
+            for (const id of targetIds) {
+              resetSession(id);
+            }
+            console.log(`🔄 Sesión REINICIADA para: ${targetIds.join(', ')}`);
             const ack = `✅ Sesión de ${parts[1]} reiniciada.`;
-            const sent = await sock.sendMessage(remoteJid, { text: ack });
-            if (sent?.key?.id) {
-              botSentMessageIds.add(sent.key.id);
-              rememberMessage(sent.key.id, sent.message || { conversation: ack });
+            try {
+              const sent = await sock.sendMessage(remoteJid, { text: ack });
+              // #region agent log
+              agentDebugLog({ runId: 'post-fix', hypothesisId: 'C,E', location: 'index.js:ack-reiniciar', message: 'reset+ack', data: { primaryTarget, targetIds, ackTo: remoteJid, sentId: sent?.key?.id || null } });
+              // #endregion
+              if (sent?.key?.id) {
+                botSentMessageIds.add(sent.key.id);
+                rememberMessage(sent.key.id, sent.message || { conversation: ack });
+              }
+            } catch (e) {
+              // #region agent log
+              agentDebugLog({ runId: 'post-fix', hypothesisId: 'E', location: 'index.js:ack-reiniciar-err', message: 'ack failed', data: { error: String(e.message || e), ackTo: remoteJid, primaryTarget } });
+              // #endregion
             }
             return;
           }
@@ -439,19 +626,30 @@ async function startBot() {
         // 2.2 Intervención humana real en chat de cliente → mute automático
         // Solo si hay texto/multimedia. Borrados y cambios de temporales ya se filtraron.
         // --------------------------------------------------------------------------
-        if (isClientCustomerChat(remoteJid, adminList) && hasHumanChatContent(content)) {
-          const session = getSession(remoteJid);
+        if (isClientCustomerChat(remoteJid, adminList, sock) && hasHumanChatContent(content)) {
+          const sessionId = getPreferredSessionId(message);
+          const session = getSession(sessionId);
           if (!session.isMuted) {
             session.isMuted = true;
             session.silenciado_timestamp = Date.now();
-            saveSession(remoteJid, session);
-            console.log(`🔇 Bot SILENCIADO automáticamente (Intervención humana en ${remoteJid})`);
+            saveSession(sessionId, session);
+            // Si llegó como @lid, muteamos también el PN (y viceversa) para no dejar huecos
+            if (sessionId !== remoteJid) {
+              const altSession = getSession(remoteJid);
+              altSession.isMuted = true;
+              altSession.silenciado_timestamp = Date.now();
+              saveSession(remoteJid, altSession);
+            }
+            console.log(`🔇 Bot SILENCIADO automáticamente (Intervención humana en ${sessionId})`);
+            // #region agent log
+            agentDebugLog({ runId: 'post-fix', hypothesisId: 'F', location: 'index.js:human-mute', message: 'auto muted by human intervention', data: { remoteJid, sessionId, textPreview: (text || '').slice(0, 40) } });
+            // #endregion
           }
           return;
         }
 
-        // fromMe / admin en chat que no es cliente (o sin contenido humano): no seguir al flujo
-        if (isFromMe) {
+        // fromMe / admin / self-chat sin comando: no seguir al flujo de cliente
+        if (isFromMe || selfChat) {
           return;
         }
       }
@@ -459,7 +657,26 @@ async function startBot() {
       // --------------------------------------------------------------------------
       // 2.3 Flujo normal para clientes
       // --------------------------------------------------------------------------
-      const session = getSession(message.key.remoteJid);
+      const sessionId = getPreferredSessionId(message);
+      const session = getSession(sessionId);
+      // #region agent log
+      if (!isFromMe) {
+        agentDebugLog({
+          runId: 'post-fix',
+          hypothesisId: 'C,F',
+          location: 'index.js:client-flow',
+          message: 'client message gate',
+          data: {
+            remoteJid: message.key.remoteJid,
+            sessionId,
+            isMuted: !!session.isMuted,
+            state: session.currentState || null,
+            textPreview: (text || '').slice(0, 60),
+            isAuthorized
+          }
+        });
+      }
+      // #endregion
       if (session.isMuted) {
         return;
       }
@@ -483,9 +700,12 @@ async function startBot() {
         // Formato unificado: cabecera (tipo + cliente) + cuerpo (pedido o motivo).
         // alertData = { type: 'SUCCESS'|'SOS', title: string, body: string }
         const sendAdminAlert = async (alertData) => {
-          // Identificamos al cliente con el JID real de WhatsApp + nombre de perfil (pushName)
-          const realId = message.key.participant || message.key.remoteJid;
-          let displayId = realId.replace('@s.whatsapp.net', '').replace('@c.us', '');
+          // Preferimos el número público si WhatsApp lo mandó en remoteJidAlt
+          const realId = message.key.remoteJidAlt
+            || message.key.senderPn
+            || message.key.participant
+            || message.key.remoteJid;
+          let displayId = String(realId).replace('@s.whatsapp.net', '').replace('@c.us', '');
           const nombrePerfil = message.pushName ? ` (${message.pushName})` : '';
 
           // Algunos chats usan @lid (ID oculto): no tenemos el número público
@@ -519,7 +739,7 @@ async function startBot() {
 
         setAdminAlertFunction(sendAdminAlert);
 
-        const reply = await processMessage(message.key.remoteJid, cleanText);
+        const reply = await processMessage(sessionId, cleanText);
 
         if (!reply) {
           return;
@@ -527,6 +747,7 @@ async function startBot() {
 
         // El engine puede devolver un string o un array de mensajes (bloques separados)
         const replies = Array.isArray(reply) ? reply : [reply];
+        // Responder al JID con el que llegó el mensaje (puede ser @lid); la sesión usa sessionId
         const targetJid = message.key.remoteJid;
 
         // Asegura sesión Signal con el destinatario antes del primer envío
@@ -536,15 +757,10 @@ async function startBot() {
           console.warn(`assertSessions falló para ${targetJid}:`, e.message);
         }
 
-        // Enviamos con pausa entre mensajes seguidos (anti-spam WhatsApp Web + lectura natural)
-        for (let i = 0; i < replies.length; i++) {
-          const textPart = replies[i];
+        // Envío inmediato de cada bloque (sin delay entre customReplies:
+        // un delay aquí hacía que el cliente escribiera "entre medio" de dos mensajes).
+        for (const textPart of replies) {
           if (!textPart) continue;
-
-          if (i > 0 && sendDelayMs > 0) {
-            await sleep(sendDelayMs);
-          }
-
           // Sin quoted: en algunos celulares el quote rompe el descifrado
           const sentMsg = await sock.sendMessage(targetJid, { text: textPart });
           if (sentMsg?.key?.id) {
