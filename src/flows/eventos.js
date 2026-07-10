@@ -819,6 +819,7 @@ Allí puedes elegir el formato, los cócteles y los litros que necesitas, y ver 
         const alert = {
           type: 'SUCCESS',
           title: 'EVENTOS',
+          labelKey: 'cotizacionEventos',
           body: buildAdminEventosOrderBody({
             eventoFormato,
             celebrationType,

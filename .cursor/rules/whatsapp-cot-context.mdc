@@ -15,17 +15,20 @@ Bot de WhatsApp para **Cocktails on Tap** (Chile). Guía cotizaciones de **Barri
 index.js → engine.js → statesMap (flows/) → utils.js + order-builder.js
                       ↘ llm.js (fallback/NLU/FAQ)
                       ↘ db.js (sesiones SQLite)
+                      ↘ whatsapp-send.js + business-labels.js (envío + etiquetas Business)
                       ↘ views/ (templates + prompts)
                       ↘ db/datos.json + db/faq.json
 ```
 
 | Archivo | Rol |
 |---------|-----|
-| `src/index.js` | WhatsApp: QR, reconexión, filtros, comandos admin, alertas |
+| `src/index.js` | WhatsApp: QR, reconexión, filtros, comandos admin |
 | `src/core/engine.js` | Máquina de estados + red de seguridad + CLI (`npm run test:local`) |
 | `src/core/llm.js` | `generateResponse`, `extractProductsWithAI`, `extractEventProductsWithAI`, `responderFAQ` |
 | `src/core/db.js` | Sesiones en `conversation-memory.sqlite` |
-| `src/core/config.js` | `.env`: LLM provider, API keys, `ADMIN_NUMBERS` |
+| `src/core/config.js` | `.env`: LLM provider, API keys, `ADMIN_NUMBERS`, `LABEL_*` |
+| `src/core/whatsapp-send.js` | Envío con tracking (`sendTracked`) + alertas a admins (`notifyAdmins`) |
+| `src/core/business-labels.js` | Etiquetas WhatsApp Business (ensure + apply al chat) |
 | `src/flows/router.js` | Estado inicial `ESPERANDO_INTENCION` |
 | `src/flows/barriles.js` | Flujo barriles (`BARRILES_*`) |
 | `src/flows/eventos.js` | Flujo eventos (`EVENTOS_*`) |
@@ -60,19 +63,19 @@ Los IDs de estado son **semánticos** (`BARRILES_*` / `EVENTOS_*`); no llevan nu
 ## Red de seguridad (engine.js + index.js)
 
 - **Mute:** intervención humana real (`index.js`), SOS (`NO`/`SOS`/pedir humano), anti-loop (≥2 errores), cierre de venta.
-- **Mute por intervención humana:** solo si llega texto o multimedia real del vendedor en el chat del cliente (`fromMe` / admin). **No** silenciar por eventos de sistema: `protocolMessage` (mensajes temporales on/off, borrado/REVOKE), stubs, reacciones, ni ecos de mensajes del bot (`botSentMessageIds`).
+- **Mute por intervención humana:** solo si llega texto o multimedia real del vendedor en el chat del cliente (`fromMe` / admin). **No** silenciar por eventos de sistema: `protocolMessage` (mensajes temporales on/off, borrado/REVOKE), stubs, reacciones, ni ecos de mensajes del bot (`wasSentByBot` en `whatsapp-send.js`).
 - **Mensajes temporales (ephemeral):** desempaquetar con `normalizeMessageContent` antes de leer el texto; si no, el chat “no inicia” (texto vacío). WhatsApp puede auto-desactivar temporales al responder; ese evento llega con `fromMe` y **no** es intervención humana.
 - **Cambio de intención:** máx. 2 switches barriles↔eventos en estados tempranos.
 - **Fallback en `success: false`:** FAQ → LLM con contexto del estado → re-pregunta del paso actual.
 - **Comandos admin WhatsApp:** desde **Mensaje para ti mismo** o chat admin, con número **obligatorio**: `/detenerbot 569...`, `/iniciarbot 569...`, `/reiniciarbot 569...`. Nunca desde la ventana del cliente. Actúan sobre PN y `@lid` si existe mapping.
-- **SOS en WhatsApp Business:** además de la alerta al admin, etiqueta el chat del cliente (`SOS_LABEL_NAME`, default `Asistencia`; debe existir en Business) y lo marca como no leído (`SOS_MARK_UNREAD=true`).
+- **Etiquetas WhatsApp Business:** `notifyAdmins` (whatsapp-send) + `applyChatLabel` (business-labels). SOS → `LABEL_ASISTENCIA_*` (id 99, mark unread); cierre barriles/eventos → `labelKey` cotizacionBarriles/cotizacionEventos (ids 98/97, mark unread false por defecto).
 - **Comandos CLI:** `/reset`, `/mute`, `/unmute`, `/exit`.
 
 ## Datos y config
 
 - `db/datos.json`: precios cócteles (desechable/dispensador/muro), extras, comunas RM, regiones.
 - `db/faq.json`: 8 FAQs; respondidas vía LLM estricto (`NO_FAQ` si no aplica).
-- `.env`: `LLM_PROVIDER` (gemini|nvidia), `GEMINI_API_KEY`, `NVIDIA_API_KEY`, `ADMIN_NUMBERS`, `SOS_LABEL_NAME`, `SOS_LABEL_ID` (opcional), `SOS_MARK_UNREAD`.
+- `.env`: `LLM_PROVIDER` (gemini|nvidia), `GEMINI_API_KEY`, `NVIDIA_API_KEY`, `ADMIN_NUMBERS`, `LABEL_ASISTENCIA_*`, `LABEL_COTIZACION_BARRILES_*`, `LABEL_COTIZACION_EVENTOS_*` (alias legacy `SOS_LABEL_*` / `SOS_MARK_UNREAD` para asistencia).
 - Seguridad: `SECURITY_MAX_CONSECUTIVE_ERRORS` (anti-loop), `SECURITY_MAX_INTENT_SWITCHES` (barriles↔eventos).
 
 ## Convenciones al editar

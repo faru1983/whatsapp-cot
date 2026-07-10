@@ -57,6 +57,72 @@ function parsePositiveInt(value, defaultValue) {
 }
 
 /**
+ * parseEnvBool: Lee true/false desde .env. Solo "false" (cualquier mayúscula) es falso.
+ *
+ * @param {string|undefined} value - Texto del .env
+ * @param {boolean} defaultValue - Si la variable no existe
+ * @returns {boolean}
+ */
+function parseEnvBool(value, defaultValue) {
+  if (value === undefined || value === null || String(value).trim() === '') {
+    return defaultValue;
+  }
+  return String(value).toLowerCase() !== 'false';
+}
+
+/**
+ * resolveLabelConfig: Arma { name, id, markUnread } para una etiqueta Business.
+ * Prioriza LABEL_* ; para asistencia también acepta alias legacy SOS_LABEL_*.
+ *
+ * @param {object} opts
+ * @param {string} opts.envNameKey - Ej. LABEL_ASISTENCIA_NAME
+ * @param {string} opts.envIdKey - Ej. LABEL_ASISTENCIA_ID
+ * @param {string} opts.envMarkKey - Ej. LABEL_ASISTENCIA_MARK_UNREAD
+ * @param {string} opts.defaultName
+ * @param {string} opts.defaultId
+ * @param {boolean} opts.defaultMarkUnread
+ * @param {string} [opts.legacyNameKey] - Alias opcional (SOS_LABEL_NAME)
+ * @param {string} [opts.legacyIdKey]
+ * @param {string} [opts.legacyMarkKey]
+ * @returns {{ name: string, id: string, markUnread: boolean }}
+ */
+function resolveLabelConfig({
+  envNameKey,
+  envIdKey,
+  envMarkKey,
+  defaultName,
+  defaultId,
+  defaultMarkUnread,
+  legacyNameKey,
+  legacyIdKey,
+  legacyMarkKey
+}) {
+  // Nombre: LABEL_* primero; si vacío, alias SOS_* (solo asistencia); si no, default
+  const name = (
+    process.env[envNameKey]
+    || (legacyNameKey ? process.env[legacyNameKey] : undefined)
+    || defaultName
+  ).trim() || defaultName;
+
+  const id = (
+    process.env[envIdKey]
+    || (legacyIdKey ? process.env[legacyIdKey] : undefined)
+    || defaultId
+  ).trim() || defaultId;
+
+  // Mark unread: si existe LABEL_*_MARK_UNREAD úsalo; si no, alias legacy; si no, default
+  let markUnread = defaultMarkUnread;
+  if (process.env[envMarkKey] !== undefined && String(process.env[envMarkKey]).trim() !== '') {
+    markUnread = parseEnvBool(process.env[envMarkKey], defaultMarkUnread);
+  } else if (legacyMarkKey && process.env[legacyMarkKey] !== undefined
+    && String(process.env[legacyMarkKey]).trim() !== '') {
+    markUnread = parseEnvBool(process.env[legacyMarkKey], defaultMarkUnread);
+  }
+
+  return { name, id, markUnread };
+}
+
+/**
  * loadBotConfig: Retorna la configuración básica del bot, su comportamiento en chat
  * y la lista de teléfonos de administradores.
  * 
@@ -69,12 +135,37 @@ export function loadBotConfig() {
     ? process.env.ADMIN_NUMBERS.split(',').map(n => n.trim() + '@s.whatsapp.net') // Les añadimos la terminación de WhatsApp
     : [];
 
-  // Etiqueta de WhatsApp Business para chats SOS (asistencia humana).
-  // Nombre visible + ID estable. Si la etiqueta del celular no sincroniza,
-  // el bot la crea/asegura con SOS_LABEL_ID (default 99).
-  const sosLabelName = (process.env.SOS_LABEL_NAME || 'Asistencia').trim();
-  const sosLabelId = (process.env.SOS_LABEL_ID || '99').trim();
-  const sosMarkUnread = String(process.env.SOS_MARK_UNREAD || 'true').toLowerCase() !== 'false';
+  // Etiquetas Business: IDs estables que el bot crea/asegura (el celular a menudo no sincroniza).
+  // Asistencia acepta alias legacy SOS_LABEL_* / SOS_MARK_UNREAD.
+  const labels = {
+    asistencia: resolveLabelConfig({
+      envNameKey: 'LABEL_ASISTENCIA_NAME',
+      envIdKey: 'LABEL_ASISTENCIA_ID',
+      envMarkKey: 'LABEL_ASISTENCIA_MARK_UNREAD',
+      defaultName: 'Asistencia',
+      defaultId: '99',
+      defaultMarkUnread: true,
+      legacyNameKey: 'SOS_LABEL_NAME',
+      legacyIdKey: 'SOS_LABEL_ID',
+      legacyMarkKey: 'SOS_MARK_UNREAD'
+    }),
+    cotizacionBarriles: resolveLabelConfig({
+      envNameKey: 'LABEL_COTIZACION_BARRILES_NAME',
+      envIdKey: 'LABEL_COTIZACION_BARRILES_ID',
+      envMarkKey: 'LABEL_COTIZACION_BARRILES_MARK_UNREAD',
+      defaultName: 'Cotizacion Barriles',
+      defaultId: '98',
+      defaultMarkUnread: false
+    }),
+    cotizacionEventos: resolveLabelConfig({
+      envNameKey: 'LABEL_COTIZACION_EVENTOS_NAME',
+      envIdKey: 'LABEL_COTIZACION_EVENTOS_ID',
+      envMarkKey: 'LABEL_COTIZACION_EVENTOS_MARK_UNREAD',
+      defaultName: 'Cotizacion Eventos',
+      defaultId: '97',
+      defaultMarkUnread: false
+    })
+  };
 
   return {
     triggerPrefix: "", // Si escribes por ejemplo "!bot", el bot solo responderá mensajes que empiecen con "!bot". Vacío responde a todo.
@@ -83,10 +174,8 @@ export function loadBotConfig() {
     maxOutputTokens: 400, // Limita el largo de las respuestas del bot para evitar que responda textos gigantescos.
     numeros_notificar: adminNumbers, // Lista de números administradores que recibirán alertas de SOS o conversiones
 
-    // Acciones en el chat del cliente cuando hay SOS (etiqueta Business + no leído)
-    sosLabelName,
-    sosLabelId: sosLabelId || null,
-    sosMarkUnread,
+    // Etiquetas WhatsApp Business (SOS + cierres de cotización). Ver LABEL_* en .env
+    labels,
 
     // Umbrales de la red de seguridad (engine.js). Ver sección SECURITY_* en .env
     security: {

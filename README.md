@@ -237,11 +237,19 @@ Si escribes el comando sin número, el bot te responde con el formato correcto. 
 
 **Mensajes temporales:** si el cliente los tiene activos, el bot igual puede leer el texto (los desempaqueta). A veces WhatsApp los desactiva al responder; eso es normal y no debe silenciar el bot.
 
-**SOS + WhatsApp Business:** cuando un cliente pide ayuda humana, además del mensaje a los admins el bot intenta:
-1. Asegurar/crear la etiqueta *Asistencia* (`SOS_LABEL_NAME` + `SOS_LABEL_ID`) y aplicarla al chat (prioriza `@lid`).
-2. Marcar ese chat como **no leído** (`SOS_MARK_UNREAD=true`) para que destaque en la lista.
+**Etiquetas WhatsApp Business:** el bot etiqueta el chat del cliente al avisar a los admins. Config en `.env` (`LABEL_*`):
+
+| Uso | Nombre (default) | ID | Marcar no leído |
+|---|---|---|---|
+| SOS / asistencia | `Asistencia` | `99` | `true` |
+| Cierre cotización barriles | `Cotizacion Barriles` | `98` | `false` |
+| Cierre cotización eventos | `Cotizacion Eventos` | `97` | `false` |
+
+El bot crea/asegura la etiqueta con ese ID (las del celular a menudo no sincronizan a Baileys) y la aplica al chat (prioriza `@lid`).
 
 > Nota: a veces la etiqueta se ve primero en WhatsApp Web / dispositivo vinculado y tarda o no aparece en el celular principal (limitación conocida de sync de etiquetas en Baileys).
+
+Alias legacy (solo asistencia): si no defines `LABEL_ASISTENCIA_*`, aún funcionan `SOS_LABEL_NAME`, `SOS_LABEL_ID` y `SOS_MARK_UNREAD`.
 
 ---
 

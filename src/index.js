@@ -11,9 +11,17 @@ import { processMessage, setAdminAlertFunction } from './core/engine.js';
 import { shouldHandleMessage, stripTriggerPrefix } from './logic/utils.js';
 import { getSession, saveSession, resetSession, findSessionIdsForPhone } from './core/db.js';
 import { loadBotConfig } from './core/config.js';
-import { composeAdminAlertMessage } from './views/templates.js';
 import { AUTH_DIR, PROJECT_ROOT } from './core/paths.js';
 import { isImagePart, assertImageExists } from './logic/media.js';
+import { rememberLabel } from './core/business-labels.js';
+import {
+  sendTracked,
+  rememberMessage,
+  wasSentByBot,
+  getCachedMessage,
+  notifyAdmins,
+  logLabelReadyStatus
+} from './core/whatsapp-send.js';
 import process from 'node:process';
 import fs from 'node:fs';
 
@@ -21,15 +29,8 @@ import fs from 'node:fs';
 // OBJETIVO: Punto de entrada del bot de WhatsApp.
 // Este archivo conecta WhatsApp, escucha mensajes y los envía al motor de lógica
 // (engine) para decidir qué responder.
+// Envío y etiquetas viven en core/whatsapp-send.js y core/business-labels.js.
 // ==============================================================================
-
-// Guarda IDs de mensajes enviados por el bot para evitar procesarlos como si fueran del cliente.
-const botSentMessageIds = new Set();
-
-// Caché en memoria de mensajes recientes (id → contenido).
-// Baileys la usa en getMessage cuando el celular pide reintento de descifrado.
-const recentMessages = new Map();
-const RECENT_MESSAGES_MAX = 200;
 
 // Comandos que solo se usan desde el chat propio/admin, siempre con número de cliente.
 const ADMIN_COMMANDS = ['/detenerbot', '/iniciarbot', '/reiniciarbot'];
@@ -37,26 +38,6 @@ const ADMIN_COMMANDS = ['/detenerbot', '/iniciarbot', '/reiniciarbot'];
 // Evita abrir varios sockets a la vez (causa típica de "Esperando mensaje" y auth corrupta).
 let isConnecting = false;
 let reconnectTimer = null;
-
-// Caché de etiquetas de WhatsApp Business (id → nombre), llenada con labels.edit.
-const businessLabelsById = new Map();
-
-/**
- * rememberMessage: Guarda un mensaje enviado/recibido para reintentos de WhatsApp.
- * Si el celular no pudo descifrar, Baileys llama getMessage y reenvía este contenido.
- *
- * @param {string|undefined} id - ID del mensaje (message.key.id)
- * @param {object|undefined} content - Contenido proto del mensaje (message.message)
- */
-function rememberMessage(id, content) {
-  if (!id || !content) return;
-  recentMessages.set(id, content);
-  // Evitamos que la Map crezca sin límite en un servidor 24/7
-  if (recentMessages.size > RECENT_MESSAGES_MAX) {
-    const oldestKey = recentMessages.keys().next().value;
-    recentMessages.delete(oldestKey);
-  }
-}
 
 /**
  * unwrapMessageContent: Saca el contenido real de un mensaje.
@@ -266,7 +247,7 @@ function getPreferredSessionId(message) {
  * @param {object} message - Mensaje Baileys
  * @param {object} sock - Socket Baileys
  * @param {string} sessionId - ID de sesión ya preferido (puede ser PN)
- * @returns {Promise<string>} Etiqueta lista para composeAdminAlertMessage
+ * @returns {Promise<string>} Etiqueta lista para alertas admin ("+569... (Nombre)")
  */
 async function resolveClientPhoneLabel(message, sock, sessionId) {
   const key = message.key || {};
@@ -300,188 +281,6 @@ async function resolveClientPhoneLabel(message, sock, sessionId) {
 
   const nombrePerfil = message.pushName ? ` (${message.pushName})` : '';
   return `+${displayId}${nombrePerfil}`;
-}
-
-/**
- * rememberBusinessLabel: Guarda una etiqueta Business en caché (id + nombre).
- * Baileys las emite en el evento labels.edit al sincronizar o editar.
- *
- * @param {{ id?: string, name?: string, deleted?: boolean }} label
- */
-function rememberBusinessLabel(label) {
-  if (!label?.id) return;
-  if (label.deleted) {
-    businessLabelsById.delete(String(label.id));
-    return;
-  }
-  businessLabelsById.set(String(label.id), String(label.name || '').trim());
-}
-
-/**
- * findLabelIdByName: Busca en caché una etiqueta por nombre (sin acentos / case).
- *
- * @param {string} name
- * @returns {string|null}
- */
-function findLabelIdByName(name) {
-  const wanted = String(name || '').trim().toLowerCase();
-  if (!wanted) return null;
-  for (const [id, labelName] of businessLabelsById.entries()) {
-    if (String(labelName).trim().toLowerCase() === wanted) return id;
-  }
-  return null;
-}
-
-/**
- * resolveSosLabelId: Obtiene el ID de la etiqueta a usar en SOS (solo lectura de caché/.env).
- *
- * @param {object} botConfig - loadBotConfig()
- * @returns {string|null}
- */
-function resolveSosLabelId(botConfig) {
-  if (botConfig.sosLabelId) return String(botConfig.sosLabelId);
-  return findLabelIdByName(botConfig.sosLabelName || 'Asistencia');
-}
-
-/**
- * ensureSosLabelId: Asegura que exista un labelId usable y que la etiqueta
- * esté creada desde Baileys (las del celular a menudo NO sincronizan al bot).
- *
- * @param {object} sock
- * @param {object} botConfig
- * @returns {Promise<string|null>}
- */
-async function ensureSosLabelId(sock, botConfig) {
-  const name = String(botConfig.sosLabelName || 'Asistencia').trim() || 'Asistencia';
-  // Preferimos ID del .env; si no, el de caché por nombre; si no, 99 estable
-  const createId = String(
-    botConfig.sosLabelId
-    || findLabelIdByName(name)
-    || '99'
-  );
-
-  // Siempre re-aseguramos con addLabel: es idempotente (mismo id) y evita
-  // addChatLabel sobre un ID que el dispositivo vinculado nunca vio.
-  try {
-    await sock.addLabel('', {
-      id: createId,
-      name,
-      color: 6,
-      deleted: false
-    });
-    rememberBusinessLabel({ id: createId, name, deleted: false });
-    console.log(`🏷️ Etiqueta Business asegurada: id=${createId} name="${name}"`);
-  } catch (e) {
-    console.warn(`No se pudo asegurar etiqueta "${name}" (id=${createId}):`, e.message);
-  }
-
-  return createId;
-}
-
-/**
- * resolveLabelTargetJids: JIDs a etiquetar. Prioriza @lid (WhatsApp Web/Business
- * suele asociar etiquetas por LID; el PN solo a veces se refleja en el celular).
- *
- * @param {object} sock
- * @param {object} message
- * @param {string} sessionId
- * @returns {Promise<string[]>} Orden: LID primero, luego PN
- */
-async function resolveLabelTargetJids(sock, message, sessionId) {
-  const remoteJid = message.key?.remoteJid || '';
-  const pnCandidates = new Set();
-  const lidCandidates = new Set();
-
-  const classify = (jid) => {
-    if (!jid) return;
-    if (jid.endsWith('@lid')) lidCandidates.add(jid);
-    else if (jid.endsWith('@s.whatsapp.net')) pnCandidates.add(jid);
-  };
-
-  classify(remoteJid);
-  classify(sessionId);
-  classify(message.key?.remoteJidAlt);
-
-  try {
-    for (const pn of [...pnCandidates]) {
-      const lid = await sock.signalRepository?.lidMapping?.getLIDForPN?.(pn);
-      if (lid) lidCandidates.add(lid);
-    }
-    for (const lid of [...lidCandidates]) {
-      const pn = await sock.signalRepository?.lidMapping?.getPNForLID?.(lid);
-      if (pn) pnCandidates.add(pn);
-    }
-  } catch (_) { /* ignore */ }
-
-  // LID primero (más fiable en Baileys 7), luego PN (dual-write)
-  return [...lidCandidates, ...pnCandidates];
-}
-
-/**
- * markChatUnread: Marca el chat como no leído (punto verde / badge).
- * Así el vendedor ve que hay un SOS pendiente aunque el bot ya haya respondido.
- *
- * @param {object} sock
- * @param {object} message - Mensaje del cliente (para lastMessages)
- * @param {string} chatJid - Chat a marcar
- */
-async function markChatUnread(sock, message, chatJid) {
-  const lastMsg = {
-    key: message.key,
-    messageTimestamp: message.messageTimestamp
-  };
-  await sock.chatModify(
-    { markRead: false, lastMessages: [lastMsg] },
-    chatJid
-  );
-}
-
-/**
- * flagChatForAssistance: Tras un SOS, etiqueta el chat (ej. "Asistencia")
- * y lo marca como no leído para que el admin lo vea fácil en WhatsApp Business.
- *
- * @param {object} sock
- * @param {object} message
- * @param {string} sessionId
- * @param {object} botConfig
- */
-async function flagChatForAssistance(sock, message, sessionId, botConfig) {
-  const targetJids = await resolveLabelTargetJids(sock, message, sessionId);
-  const labelId = await ensureSosLabelId(sock, botConfig);
-
-  if (labelId && targetJids.length > 0) {
-    let labeledOk = 0;
-    for (const jid of targetJids) {
-      try {
-        await sock.addChatLabel(jid, labelId);
-        labeledOk += 1;
-        console.log(`🏷️ Etiqueta SOS id=${labelId} ("${botConfig.sosLabelName}") aplicada a ${jid}`);
-      } catch (e) {
-        console.warn(`No se pudo etiquetar ${jid}:`, e.message);
-      }
-    }
-    if (labeledOk === 0) {
-      console.warn('⚠️ addChatLabel no aplicó a ningún JID. Revisa sync de etiquetas Business.');
-    }
-  } else if (!labelId) {
-    console.warn(
-      `⚠️ Etiqueta SOS no disponible (nombre="${botConfig.sosLabelName}"). `
-      + 'Define SOS_LABEL_ID en .env o revisa permisos de etiquetas en WhatsApp Business.'
-    );
-  }
-
-  if (botConfig.sosMarkUnread) {
-    // Preferimos el remoteJid con el que llegó el mensaje (el chat visible)
-    const unreadJid = message.key?.remoteJid || sessionId;
-    if (unreadJid) {
-      try {
-        await markChatUnread(sock, message, unreadJid);
-        console.log(`📩 Chat marcado como no leído: ${unreadJid}`);
-      } catch (e) {
-        console.warn(`No se pudo marcar no leído ${unreadJid}:`, e.message);
-      }
-    }
-  }
 }
 
 /**
@@ -573,16 +372,15 @@ async function startBot() {
       enableRecentMessageCache: true,
       enableAutoSessionRecreation: true,
       getMessage: async (key) => {
-        const cached = key?.id ? recentMessages.get(key.id) : undefined;
-        return cached || undefined;
+        return getCachedMessage(key?.id) || undefined;
       }
     });
 
     sock.ev.on('creds.update', saveCreds);
 
-    // Sincroniza etiquetas de WhatsApp Business (para resolver "Asistencia" → labelId)
+    // Sincroniza etiquetas de WhatsApp Business (caché id → nombre)
     sock.ev.on('labels.edit', (label) => {
-      rememberBusinessLabel(label);
+      rememberLabel(label);
       if (label?.id && label?.name && !label.deleted) {
         console.log(`🏷️ Etiqueta Business sync: id=${label.id} name="${label.name}"`);
       }
@@ -606,17 +404,9 @@ async function startBot() {
         clearTimeout(connectingWatchdog);
         releaseConnecting();
         console.log('WhatsApp conectado. El bot está listo para trabajar.');
-        // Tras sync de etiquetas Business, conviene ver si ya resolvemos "Asistencia"
+        // Tras sync de etiquetas Business, logueamos si ya resolvemos "Asistencia"
         setTimeout(() => {
-          const sosId = resolveSosLabelId(config);
-          if (sosId) {
-            console.log(`🏷️ SOS usará etiqueta id=${sosId} (nombre="${config.sosLabelName}")`);
-          } else {
-            console.log(
-              `🏷️ SOS: aún no hay etiqueta "${config.sosLabelName}" en caché. `
-              + 'Créala en WhatsApp Business o define SOS_LABEL_ID en .env.'
-            );
-          }
+          logLabelReadyStatus(config.labels?.asistencia);
         }, 5000);
       }
 
@@ -689,7 +479,7 @@ async function startBot() {
       }
 
       // Eco de lo que el bot acaba de enviar: ignorar siempre
-      if (isFromMe && botSentMessageIds.has(message.key.id)) {
+      if (isFromMe && wasSentByBot(message.key.id)) {
         return;
       }
 
@@ -716,15 +506,7 @@ async function startBot() {
           // Obligatorio: /comando + número (o JID)
           if (parts.length < 2) {
             const help = `⚠️ Uso: ${command} <número>\nEjemplo: ${command} 56912345678`;
-            try {
-              const sent = await sock.sendMessage(remoteJid, { text: help });
-              if (sent?.key?.id) {
-                botSentMessageIds.add(sent.key.id);
-                rememberMessage(sent.key.id, sent.message || { conversation: help });
-              }
-            } catch (e) {
-              console.error('Error enviando ayuda de comando:', e.message);
-            }
+            await sendTracked(sock, remoteJid, { text: help });
             return;
           }
 
@@ -739,16 +521,7 @@ async function startBot() {
               saveSession(id, tgtSession);
             }
             console.log(`🔇 Bot DETENIDO manualmente para: ${targetIds.join(', ')}`);
-            const ack = `🔇 Cliente ${parts[1]} silenciado.`;
-            try {
-              const sent = await sock.sendMessage(remoteJid, { text: ack });
-              if (sent?.key?.id) {
-                botSentMessageIds.add(sent.key.id);
-                rememberMessage(sent.key.id, sent.message || { conversation: ack });
-              }
-            } catch (e) {
-              console.error('Error enviando ACK de /detenerbot:', e.message);
-            }
+            await sendTracked(sock, remoteJid, { text: `🔇 Cliente ${parts[1]} silenciado.` });
             return;
           }
 
@@ -759,16 +532,7 @@ async function startBot() {
               saveSession(id, tgtSession);
             }
             console.log(`🤖 Bot INICIADO manualmente para: ${targetIds.join(', ')}`);
-            const ack = `🤖 Cliente ${parts[1]} iniciado.`;
-            try {
-              const sent = await sock.sendMessage(remoteJid, { text: ack });
-              if (sent?.key?.id) {
-                botSentMessageIds.add(sent.key.id);
-                rememberMessage(sent.key.id, sent.message || { conversation: ack });
-              }
-            } catch (e) {
-              console.error('Error enviando ACK de /iniciarbot:', e.message);
-            }
+            await sendTracked(sock, remoteJid, { text: `🤖 Cliente ${parts[1]} iniciado.` });
             return;
           }
 
@@ -777,16 +541,7 @@ async function startBot() {
               resetSession(id);
             }
             console.log(`🔄 Sesión REINICIADA para: ${targetIds.join(', ')}`);
-            const ack = `✅ Sesión de ${parts[1]} reiniciada.`;
-            try {
-              const sent = await sock.sendMessage(remoteJid, { text: ack });
-              if (sent?.key?.id) {
-                botSentMessageIds.add(sent.key.id);
-                rememberMessage(sent.key.id, sent.message || { conversation: ack });
-              }
-            } catch (e) {
-              console.error('Error enviando ACK de /reiniciarbot:', e.message);
-            }
+            await sendTracked(sock, remoteJid, { text: `✅ Sesión de ${parts[1]} reiniciada.` });
             return;
           }
         }
@@ -844,43 +599,18 @@ async function startBot() {
       }
 
       try {
-        // Función que engine usará para avisar eventos importantes (SOS / cierre de venta) a admins.
-        // Formato unificado: cabecera (tipo + cliente) + cuerpo (pedido o motivo).
-        // alertData = { type: 'SUCCESS'|'SOS', title: string, body: string }
+        // Función que engine usará para avisar eventos importantes (SOS / cierre de venta).
+        // alertData = { type: 'SUCCESS'|'SOS', title, body, labelKey? }
         const sendAdminAlert = async (alertData) => {
-          // Número real del cliente (no el @lid largo) + nombre de perfil
-          const clientLabel = await resolveClientPhoneLabel(message, sock, sessionId);
-          const alertType = alertData.type || 'SOS';
-
-          // Armamos el mensaje con la misma cabecera para SOS y cotizaciones
-          const mensajeFinal = composeAdminAlertMessage({
-            type: alertType,
-            title: alertData.title || '',
-            clientLabel,
-            body: alertData.body || alertData.message || ''
+          await notifyAdmins({
+            sock,
+            message,
+            sessionId,
+            adminList,
+            alertData,
+            labels: botConfig.labels,
+            resolveClientPhoneLabel
           });
-
-          // Una copia idéntica a cada administrador de ADMIN_NUMBERS
-          for (const adminNum of adminList) {
-            try {
-              const sent = await sock.sendMessage(adminNum, { text: mensajeFinal });
-              if (sent?.key?.id) {
-                botSentMessageIds.add(sent.key.id);
-                rememberMessage(sent.key.id, sent.message || { conversation: mensajeFinal });
-              }
-            } catch (e) {
-              console.error(`Error enviando alerta a ${adminNum}:`, e.message);
-            }
-          }
-
-          // SOS: etiqueta "Asistencia" + marcar chat no leído (WhatsApp Business)
-          if (alertType === 'SOS') {
-            try {
-              await flagChatForAssistance(sock, message, sessionId, botConfig);
-            } catch (e) {
-              console.warn('No se pudo marcar chat para asistencia:', e.message);
-            }
-          }
         };
 
         setAdminAlertFunction(sendAdminAlert);
@@ -908,15 +638,8 @@ async function startBot() {
         for (const part of replies) {
           if (!part) continue;
 
-          let sentMsg = null;
-
           if (typeof part === 'string') {
-            // Texto normal (como siempre)
-            sentMsg = await sock.sendMessage(targetJid, { text: part });
-            if (sentMsg?.key?.id) {
-              botSentMessageIds.add(sentMsg.key.id);
-              rememberMessage(sentMsg.key.id, sentMsg.message || { conversation: part });
-            }
+            await sendTracked(sock, targetJid, { text: part });
             continue;
           }
 
@@ -930,11 +653,7 @@ async function startBot() {
             const imageBuffer = fs.readFileSync(check.absolutePath);
             const payload = { image: imageBuffer };
             if (part.caption) payload.caption = part.caption;
-            sentMsg = await sock.sendMessage(targetJid, payload);
-            if (sentMsg?.key?.id) {
-              botSentMessageIds.add(sentMsg.key.id);
-              rememberMessage(sentMsg.key.id, sentMsg.message || payload);
-            }
+            await sendTracked(sock, targetJid, payload);
           }
         }
 

@@ -468,6 +468,7 @@ export const barrilesStates = {
         const alert = {
           type: 'SUCCESS',
           title: 'BARRILES DESECHABLES',
+          labelKey: 'cotizacionBarriles',
           body: buildAdminBarrilesOrderBody({
             location,
             date,
