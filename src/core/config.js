@@ -70,10 +70,10 @@ export function loadBotConfig() {
     : [];
 
   // Etiqueta de WhatsApp Business para chats SOS (asistencia humana).
-  // Por defecto buscamos por nombre "Asistencia" (debe existir en WhatsApp Business).
-  // Si conoces el ID interno, puedes fijarlo con SOS_LABEL_ID y se usa directo.
+  // Nombre visible + ID estable. Si la etiqueta del celular no sincroniza,
+  // el bot la crea/asegura con SOS_LABEL_ID (default 99).
   const sosLabelName = (process.env.SOS_LABEL_NAME || 'Asistencia').trim();
-  const sosLabelId = (process.env.SOS_LABEL_ID || '').trim();
+  const sosLabelId = (process.env.SOS_LABEL_ID || '99').trim();
   const sosMarkUnread = String(process.env.SOS_MARK_UNREAD || 'true').toLowerCase() !== 'false';
 
   return {

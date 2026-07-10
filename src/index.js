@@ -316,49 +316,103 @@ function rememberBusinessLabel(label) {
 }
 
 /**
- * resolveSosLabelId: Obtiene el ID de la etiqueta a usar en SOS.
- * Prioridad: SOS_LABEL_ID del .env → buscar por nombre (ej. "Asistencia") en caché.
+ * findLabelIdByName: Busca en caché una etiqueta por nombre (sin acentos / case).
+ *
+ * @param {string} name
+ * @returns {string|null}
+ */
+function findLabelIdByName(name) {
+  const wanted = String(name || '').trim().toLowerCase();
+  if (!wanted) return null;
+  for (const [id, labelName] of businessLabelsById.entries()) {
+    if (String(labelName).trim().toLowerCase() === wanted) return id;
+  }
+  return null;
+}
+
+/**
+ * resolveSosLabelId: Obtiene el ID de la etiqueta a usar en SOS (solo lectura de caché/.env).
  *
  * @param {object} botConfig - loadBotConfig()
  * @returns {string|null}
  */
 function resolveSosLabelId(botConfig) {
   if (botConfig.sosLabelId) return String(botConfig.sosLabelId);
-  const wanted = String(botConfig.sosLabelName || 'Asistencia').trim().toLowerCase();
-  if (!wanted) return null;
-  for (const [id, name] of businessLabelsById.entries()) {
-    if (String(name).trim().toLowerCase() === wanted) return id;
-  }
-  return null;
+  return findLabelIdByName(botConfig.sosLabelName || 'Asistencia');
 }
 
 /**
- * resolveLabelTargetJids: JIDs a etiquetar (PN y/o LID).
- * En Baileys 7 a veces la etiqueta solo se ve si se aplica al @lid.
+ * ensureSosLabelId: Asegura que exista un labelId usable y que la etiqueta
+ * esté creada desde Baileys (las del celular a menudo NO sincronizan al bot).
+ *
+ * @param {object} sock
+ * @param {object} botConfig
+ * @returns {Promise<string|null>}
+ */
+async function ensureSosLabelId(sock, botConfig) {
+  const name = String(botConfig.sosLabelName || 'Asistencia').trim() || 'Asistencia';
+  // Preferimos ID del .env; si no, el de caché por nombre; si no, 99 estable
+  const createId = String(
+    botConfig.sosLabelId
+    || findLabelIdByName(name)
+    || '99'
+  );
+
+  // Siempre re-aseguramos con addLabel: es idempotente (mismo id) y evita
+  // addChatLabel sobre un ID que el dispositivo vinculado nunca vio.
+  try {
+    await sock.addLabel('', {
+      id: createId,
+      name,
+      color: 6,
+      deleted: false
+    });
+    rememberBusinessLabel({ id: createId, name, deleted: false });
+    console.log(`🏷️ Etiqueta Business asegurada: id=${createId} name="${name}"`);
+  } catch (e) {
+    console.warn(`No se pudo asegurar etiqueta "${name}" (id=${createId}):`, e.message);
+  }
+
+  return createId;
+}
+
+/**
+ * resolveLabelTargetJids: JIDs a etiquetar. Prioriza @lid (WhatsApp Web/Business
+ * suele asociar etiquetas por LID; el PN solo a veces se refleja en el celular).
  *
  * @param {object} sock
  * @param {object} message
  * @param {string} sessionId
- * @returns {Promise<string[]>}
+ * @returns {Promise<string[]>} Orden: LID primero, luego PN
  */
 async function resolveLabelTargetJids(sock, message, sessionId) {
   const remoteJid = message.key?.remoteJid || '';
-  const ids = new Set();
-  if (remoteJid) ids.add(remoteJid);
-  if (sessionId) ids.add(sessionId);
-  if (message.key?.remoteJidAlt) ids.add(message.key.remoteJidAlt);
+  const pnCandidates = new Set();
+  const lidCandidates = new Set();
+
+  const classify = (jid) => {
+    if (!jid) return;
+    if (jid.endsWith('@lid')) lidCandidates.add(jid);
+    else if (jid.endsWith('@s.whatsapp.net')) pnCandidates.add(jid);
+  };
+
+  classify(remoteJid);
+  classify(sessionId);
+  classify(message.key?.remoteJidAlt);
 
   try {
-    if (remoteJid.endsWith('@s.whatsapp.net')) {
-      const lid = await sock.signalRepository?.lidMapping?.getLIDForPN?.(remoteJid);
-      if (lid) ids.add(lid);
-    } else if (remoteJid.endsWith('@lid')) {
-      const pn = await sock.signalRepository?.lidMapping?.getPNForLID?.(remoteJid);
-      if (pn) ids.add(pn);
+    for (const pn of [...pnCandidates]) {
+      const lid = await sock.signalRepository?.lidMapping?.getLIDForPN?.(pn);
+      if (lid) lidCandidates.add(lid);
+    }
+    for (const lid of [...lidCandidates]) {
+      const pn = await sock.signalRepository?.lidMapping?.getPNForLID?.(lid);
+      if (pn) pnCandidates.add(pn);
     }
   } catch (_) { /* ignore */ }
 
-  return [...ids].filter(Boolean);
+  // LID primero (más fiable en Baileys 7), luego PN (dual-write)
+  return [...lidCandidates, ...pnCandidates];
 }
 
 /**
@@ -391,21 +445,26 @@ async function markChatUnread(sock, message, chatJid) {
  */
 async function flagChatForAssistance(sock, message, sessionId, botConfig) {
   const targetJids = await resolveLabelTargetJids(sock, message, sessionId);
-  const labelId = resolveSosLabelId(botConfig);
+  const labelId = await ensureSosLabelId(sock, botConfig);
 
-  if (labelId) {
+  if (labelId && targetJids.length > 0) {
+    let labeledOk = 0;
     for (const jid of targetJids) {
       try {
         await sock.addChatLabel(jid, labelId);
-        console.log(`🏷️ Etiqueta SOS (${botConfig.sosLabelName || labelId}) aplicada a ${jid}`);
+        labeledOk += 1;
+        console.log(`🏷️ Etiqueta SOS id=${labelId} ("${botConfig.sosLabelName}") aplicada a ${jid}`);
       } catch (e) {
         console.warn(`No se pudo etiquetar ${jid}:`, e.message);
       }
     }
-  } else {
+    if (labeledOk === 0) {
+      console.warn('⚠️ addChatLabel no aplicó a ningún JID. Revisa sync de etiquetas Business.');
+    }
+  } else if (!labelId) {
     console.warn(
-      `⚠️ Etiqueta SOS no encontrada (nombre="${botConfig.sosLabelName}", id=${botConfig.sosLabelId || 'auto'}). `
-      + 'Crea la etiqueta en WhatsApp Business o define SOS_LABEL_ID en .env.'
+      `⚠️ Etiqueta SOS no disponible (nombre="${botConfig.sosLabelName}"). `
+      + 'Define SOS_LABEL_ID en .env o revisa permisos de etiquetas en WhatsApp Business.'
     );
   }
 
