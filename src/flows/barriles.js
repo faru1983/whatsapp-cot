@@ -49,7 +49,7 @@ export const barrilesStates = {
   BARRILES_FILTRO_CANAL: {
     id: 'BARRILES_FILTRO_CANAL',
     promptQuestion: () => getWelcomeBarriles(),
-    shortQuestion: `¿Quieres ver los sabores en *nuestra web*, que te ayude por *WhatsApp*, o por ahora *solo estás mirando*?`,
+    shortQuestion: `¿Quieres ver todos los sabores y precios en *nuestra web* o prefieres que te ayude por *WhatsApp*?`,
     aiContextPrompt: STATE_PROMPTS.BARRILES_FILTRO_CANAL,
     async validateAndProcess(messageText, session) {
       // Si ya nombra cócteles, salta a armar pedido (señal fuerte, sin clasificador)
@@ -109,13 +109,13 @@ export const barrilesStates = {
             clientData: { name: null, date: null, location: null },
           };
         }
-        const [intro, pregunta] = getBarrilesChatCatalogReplies();
+        const { intro, pregunta } = getBarrilesChatCatalogReplies();
         return {
           success: true,
           nextState: 'BARRILES_RECOGIDA_PRODUCTOS',
+          // Foto con el intro como caption; la pregunta va en burbuja aparte
           customReplies: [
-            img('barril_desechable_precios.webp'),
-            intro,
+            img('barril_desechable_precios.webp', intro),
             pregunta
           ]
         };

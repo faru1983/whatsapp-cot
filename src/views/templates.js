@@ -18,10 +18,8 @@ import { formatPrice } from '../logic/utils.js';
  * @returns {string[]} [bloque informativo, pregunta]
  */
 export function getWelcomeBarriles(isSwitch = false) {
-  // Pregunta final: siempre en su propio mensaje (3 salidas: web, WhatsApp, solo mirando)
-  const question = `¿Quieres ver todos los sabores y precios en *nuestra web* o prefieres que te ayude por *WhatsApp*?
-
-Si por ahora *solo estás mirando*, también está bien 😊`;
+  // Pregunta final: web vs WhatsApp (SOLO_MIRANDO sigue existiendo por keywords, sin anunciarlo aquí)
+  const question = `¿Quieres ver todos los sabores y precios en *nuestra web* o prefieres que te ayude por *WhatsApp*?`;
 
   if (isSwitch) {
     return [
@@ -59,17 +57,19 @@ En la página encontrarás todas las variedades, precios, fotografías y podrás
 
 /**
  * getBarrilesChatCatalogReplies: Tras elegir WhatsApp, enviamos la carta y pedimos pedido.
- * El flujo arma customReplies: [imagen, texto intro, pregunta de sabores].
+ * El flujo arma customReplies: [imagen+caption intro, pregunta de sabores].
  *
- * @returns {string[]} [intro tras la imagen, pregunta de sabor/cantidad]
+ * @returns {{ intro: string, pregunta: string }} intro va de caption en la foto; pregunta es burbuja aparte
  */
 export function getBarrilesChatCatalogReplies() {
-  return [
-    `Aquí tienes nuestra lista de variedades y precios para que puedas revisarla con calma.
+  return {
+    intro: `Aquí tienes nuestra lista de variedades y precios para que puedas revisarla con calma.
+
 *Cuando la revises, cuéntame:*`,
-    `¿Qué sabor te interesa y cuántos barriles necesitas?
+    pregunta: `¿Qué sabor te interesa y cuántos barriles necesitas?
+
 (Puedes escribir por ej. *1 mojito y 1 sangría*)`
-  ];
+  };
 }
 
 /**
@@ -139,11 +139,13 @@ export const MENSAJE_AMBAS = [
 
 🛢️ *Barriles Desechables*
 Barriles de 5 litros que rinden aproximadamente 25 cócteles, listos para servir en segundos. Disponibles en sabores clásicos como Mojito, Caipiriña, Sangría y otros. Son ideales para disfrutar en casa, celebraciones o regalar.
+
 Puedes adquirilos en nuestra tienda virtual: https://cocktailsontap.cl/barriles`,
 
   // (2/3) Servicio para Eventos
   `🎉 *Servicio para Eventos*
 Montamos una *Estacion de Coctelería Autoservicio* con todo lo necesario para que tus invitados disfruten cócteles listos en segundos. Ideal para matrimonios, cumpleaños, empresas y celebraciones de todo tipo.
+
 Puedes cotizar facilmente aquí: https://cocktailsontap.cl/eventos`,
 
   // (3/3) Pregunta: web o que le cuenten de un producto

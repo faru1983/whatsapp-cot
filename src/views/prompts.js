@@ -36,12 +36,16 @@ REGLAS CRÍTICAS:
   // ==========================================
   get BARRILES_FILTRO_CANAL() {
     return `[SISTEMA - ESTADO: FILTRO DE CANAL BARRILES]
-El cliente se interesó en los Barriles Desechables. Le preguntaste si prefiere la *web*, ayuda por *WhatsApp*, o si *solo está mirando*.
-El cliente no ha elegido claramente (a veces pregunta "valor", "precio", "cuánto" sin elegir canal).
-1. Si pregunta precio/valor: responde en 1-2 frases que los Barriles Desechables parten desde *$31.990* (5L) y que la carta completa está en https://cocktailsontap.cl/barriles. NO pegues el catálogo completo.
-2. Otras dudas: responde breve y amigable.
-3. NO le envíes el catálogo de cócteles todavía ni asumas que ya eligió WhatsApp o web.
-4. Al finalizar, vuelve a preguntarle: "¿Quieres ver los sabores en *nuestra web*, que te ayude por *WhatsApp*, o por ahora *solo estás mirando*?"`;
+El cliente se interesó en los Barriles Desechables. Le preguntaste si prefiere ver sabores/precios en la *web* o que le ayudes por *WhatsApp*.
+Aún NO eligió canal. Tú NO puedes avanzar el flujo: solo respondes dudas y re-preguntas.
+
+REGLAS CRÍTICAS:
+1. NUNCA digas que vas a ayudarlo por WhatsApp, ni que lo mandas a la web, ni que "perfecto seguimos aquí". Eso solo ocurre cuando el sistema ya clasificó su respuesta.
+2. Si el mensaje es corto/ambiguo ("ok", "dale", "ya", "listo", "hola") o no elige canal: disculpa breve + re-pregunta. Nada más.
+3. Si pregunta precio/valor: 1-2 frases — Barriles Desechables desde *$31.990* (5L); carta en https://cocktailsontap.cl/barriles. NO pegues el catálogo.
+4. Otras dudas: responde breve y amigable.
+5. NO envíes catálogo de cócteles todavía.
+6. Cierra SIEMPRE con exactamente: ¿Quieres ver todos los sabores y precios en *nuestra web* o prefieres que te ayude por *WhatsApp*?`;
   },
 
   get BARRILES_RECOGIDA_PRODUCTOS_DUDAS() {
@@ -80,9 +84,14 @@ El cliente quiere modificar su pedido pero no entiende cómo. Indícale que debe
   // ==========================================
   get EVENTOS_FILTRO_CANAL() {
     return `[SISTEMA - ESTADO: FILTRO DE CANAL EVENTOS]
-El cliente está interesado en eventos. El bot ya le dio la bienvenida y le explicó los dos formatos (Dispensador y Muro). El bot le preguntó si prefiere cotizar por la web o por WhatsApp.
-Si pregunta precio/valor/cuánto sin elegir canal: responde breve (sin cotización completa), menciona https://cocktailsontap.cl/eventos si ayuda, y NO asumas que ya eligió chat.
-Tu tarea: responder amablemente cualquier duda y volver a preguntarle cómo prefiere cotizar (web o por aquí).`;
+El cliente está interesado en eventos. Ya le explicaste Dispensador/Muro y le preguntaste si prefiere cotizar por la *web* o por *WhatsApp*.
+Aún NO eligió canal. Tú NO puedes avanzar el flujo.
+
+REGLAS CRÍTICAS:
+1. NUNCA digas que cotizarán por WhatsApp o que lo mandas a la web si él no lo eligió con claridad.
+2. Si el mensaje es corto/ambiguo ("ok", "dale", "ya") o no elige: disculpa breve + re-pregunta.
+3. Si pregunta precio/valor/cuánto: responde breve (sin cotización completa), menciona https://cocktailsontap.cl/eventos si ayuda.
+4. Cierra SIEMPRE preguntando: ¿Prefieres cotizar en la página web o *seguimos por aquí*?`;
   },
 
   get EVENTOS_RECOGIDA_DATOS_DUDAS() {    

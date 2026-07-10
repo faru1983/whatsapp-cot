@@ -497,8 +497,18 @@ export async function processMessage(sessionId, messageText) {
     }
 
     // 4.2 Buscar en faq.json (también usa IA para decidir si aplica y redactar)
-    // Saludos / ruido corto no son FAQ: vamos directo al LLM del estado (más natural)
+    // Saludos / ruido corto no son FAQ.
+    // Fuera del router inicial: no inventamos con IA (ej. "ok" → fingir WhatsApp).
+    // Solo disculpa + re-pregunta del paso.
     const isGreetingOrNoise = /^(hola|holi|buenas|buen\s*d[ií]a|buenas\s*tardes|buenas\s*noches|hey|hi|hello|ok|okay|dale|gracias|thank(s)?|ya|listo)[\s!.?]*$/i.test(trimmedMessage);
+
+    if (isGreetingOrNoise && currentStateId !== 'ESPERANDO_INTENCION') {
+      cliLog('ruido/cortesía → re-pregunta fija (sin IA, evita inventar avance)');
+      reply = `Disculpa, no te entendí bien 😊\n\n${finalQuestion}`;
+      session.history.turns.push({ role: 'model', text: reply });
+      saveSession(sessionId, session);
+      return reply;
+    }
 
     let faqResponse = "NO_FAQ";
     if (isGreetingOrNoise) {
