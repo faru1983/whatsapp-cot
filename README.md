@@ -166,17 +166,15 @@ NVIDIA_API_KEY=tu_clave_aqui
 NVIDIA_MODEL=meta/llama-3.1-8b-instruct
 ```
 
-#### Red de seguridad y ritmo de mensajes (opcional, ya vienen valores por defecto)
+#### Red de seguridad (opcional, ya vienen valores por defecto)
 
 ```env
 SECURITY_MAX_CONSECUTIVE_ERRORS=3
 SECURITY_MAX_INTENT_SWITCHES=3
-MESSAGE_SEND_DELAY_MS=1500
 ```
 
 - El primero: cuántas veces seguidas el bot “no entiende” antes de callarse y avisar a un admin.
 - El segundo: cuántas veces el cliente puede cambiar de idea entre barriles y eventos al inicio.
-- `MESSAGE_SEND_DELAY_MS`: pausa (en milisegundos) entre mensajes seguidos del bot (por ejemplo carta + pregunta). Ayuda a que se lean natural y reduce el riesgo de que WhatsApp Web detecte envíos demasiado rápidos.
 
 > **Seguridad importante:** nunca subas el archivo `.env` a internet ni lo compartas en capturas. Ahí están tus claves. El proyecto ya está configurado para ignorarlo en Git.
 
@@ -716,7 +714,7 @@ Los nombres de estado son semánticos (`BARRILES_*`, `EVENTOS_*`), no números m
 ### 6) Se guarda la sesión y se responde
 
 El motor guarda el nuevo estado y arma la respuesta.  
-En WhatsApp, a veces se envían **varios mensajes** seguidos (`customReplies`) para que se lea más natural, con una pausa configurable (`MESSAGE_SEND_DELAY_MS`, por defecto ~1,5 s) entre uno y otro.
+En WhatsApp, a veces se envían **varios mensajes** seguidos (`customReplies`) para que se lea más natural.
 
 ### 7) Cierre
 

@@ -76,9 +76,6 @@ export function loadBotConfig() {
     maxOutputTokens: 400, // Limita el largo de las respuestas del bot para evitar que responda textos gigantescos.
     numeros_notificar: adminNumbers, // Lista de números administradores que recibirán alertas de SOS o conversiones
 
-    // Pausa entre mensajes seguidos (customReplies). Evita bloqueos de WhatsApp Web por envío demasiado rápido.
-    messageSendDelayMs: parsePositiveInt(process.env.MESSAGE_SEND_DELAY_MS, 1500),
-
     // Umbrales de la red de seguridad (engine.js). Ver sección SECURITY_* en .env
     security: {
       // Anti-loop: cuántas respuestas "no entendidas" seguidas antes de silenciar y avisar al admin

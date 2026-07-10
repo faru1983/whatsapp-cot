@@ -64,15 +64,14 @@ Los IDs de estado son **semánticos** (`BARRILES_*` / `EVENTOS_*`); no llevan nu
 - **Mensajes temporales (ephemeral):** desempaquetar con `normalizeMessageContent` antes de leer el texto; si no, el chat “no inicia” (texto vacío). WhatsApp puede auto-desactivar temporales al responder; ese evento llega con `fromMe` y **no** es intervención humana.
 - **Cambio de intención:** máx. 2 switches barriles↔eventos en estados tempranos.
 - **Fallback en `success: false`:** FAQ → LLM con contexto del estado → re-pregunta del paso actual.
-- **Comandos admin WhatsApp:** solo desde chat propio/admin, con número **obligatorio**: `/detenerbot 569...`, `/iniciarbot 569...`, `/reiniciarbot 569...`. Nunca desde la ventana del cliente (evita borrar mensajes ahí y falsos mutes).
-- **Delay entre mensajes:** `MESSAGE_SEND_DELAY_MS` (default 1500) entre ítems de `customReplies` — lectura natural + anti-spam WhatsApp Web.
+- **Comandos admin WhatsApp:** desde **Mensaje para ti mismo** o chat admin, con número **obligatorio**: `/detenerbot 569...`, `/iniciarbot 569...`, `/reiniciarbot 569...`. Nunca desde la ventana del cliente. Actúan sobre PN y `@lid` si existe mapping.
 - **Comandos CLI:** `/reset`, `/mute`, `/unmute`, `/exit`.
 
 ## Datos y config
 
 - `db/datos.json`: precios cócteles (desechable/dispensador/muro), extras, comunas RM, regiones.
 - `db/faq.json`: 8 FAQs; respondidas vía LLM estricto (`NO_FAQ` si no aplica).
-- `.env`: `LLM_PROVIDER` (gemini|nvidia), `GEMINI_API_KEY`, `NVIDIA_API_KEY`, `ADMIN_NUMBERS`, `MESSAGE_SEND_DELAY_MS`.
+- `.env`: `LLM_PROVIDER` (gemini|nvidia), `GEMINI_API_KEY`, `NVIDIA_API_KEY`, `ADMIN_NUMBERS`.
 - Seguridad: `SECURITY_MAX_CONSECUTIVE_ERRORS` (anti-loop), `SECURITY_MAX_INTENT_SWITCHES` (barriles↔eventos).
 
 ## Convenciones al editar
