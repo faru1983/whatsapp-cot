@@ -19,7 +19,7 @@ import { formatPrice } from '../logic/utils.js';
  */
 export function getWelcomeBarriles(isSwitch = false) {
   // Pregunta final: web vs WhatsApp (SOLO_MIRANDO sigue existiendo por keywords, sin anunciarlo aquí)
-  const question = `¿Quieres ver todos los sabores y precios en *nuestra web* o prefieres que te ayude por *WhatsApp*?`;
+  const question = `¿Quieres ver todos los sabores y precios en *nuestra web* o prefieres que te ayude por *aquí*?`;
 
   if (isSwitch) {
     return [
@@ -31,9 +31,9 @@ export function getWelcomeBarriles(isSwitch = false) {
   return [
     `👋 ¡Gracias por tu interés en nuestros *Barriles Desechables*!
 
-Cada barril viene listo para servir, contiene *5 litros* y rinde aproximadamente *25 cócteles*. Solo debes mantenerlo refrigerado y servir. Ideal para cumpleaños, asados, reuniones y celebraciones.
+Cada barril viene listo para servir, contiene *5 litros* y rinde aproximadamente *25 cócteles*. Solo debes mantenerlo refrigerado y servir. Solución ideal para juntas y celebraciones de cualquier tipo.
 
-🍸 Cada barril cuesta desde aproximadamente *$1.600 por cóctel*, muy por debajo del valor de un trago preparado en un bar.
+💰 Están disponibles desde los *$39.990*, lo que equivale a aproximadamente *$1.600 por cóctel*. 🍸
 
 📍 Estamos en *Santiago*. Realizamos entregas en todas las comunas de la *Región Metropolitana* y también enviamos a todo Chile por *Blue Express* o empresa de tu preferencia.
 
