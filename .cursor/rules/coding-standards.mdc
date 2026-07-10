@@ -97,7 +97,7 @@ Respetar las capas existentes; no mezclar responsabilidades:
 | `src/core/llm.js` | Solo llamadas a IA |
 | `src/core/db.js` | Solo persistencia de sesiones |
 | `src/flows/` | Solo lógica de cada estado (`validateAndProcess`) |
-| `src/logic/` | Lógica de negocio reutilizable (parsing, precios, pedidos) |
+| `src/logic/` | Lógica de negocio reutilizable (parsing, precios, pedidos, keywords, NLU de decisión) |
 | `src/views/` | Solo textos y prompts (sin lógica de negocio) |
 | `db/` | Solo datos estáticos (JSON) |
 

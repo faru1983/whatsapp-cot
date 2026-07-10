@@ -36,36 +36,22 @@ REGLAS CRÍTICAS:
   // ==========================================
   get BARRILES_FILTRO_CANAL() {
     return `[SISTEMA - ESTADO: FILTRO DE CANAL BARRILES]
-El cliente se interesó en los Barriles Desechables. Le acabas de preguntar si prefiere ir a la web o seguir por WhatsApp.
+El cliente se interesó en los Barriles Desechables. Le preguntaste si prefiere la *web*, ayuda por *WhatsApp*, o si *solo está mirando*.
 El cliente no ha elegido claramente (a veces pregunta "valor", "precio", "cuánto" sin elegir canal).
 1. Si pregunta precio/valor: responde en 1-2 frases que los Barriles Desechables parten desde *$31.990* (5L) y que la carta completa está en https://cocktailsontap.cl/barriles. NO pegues el catálogo completo.
 2. Otras dudas: responde breve y amigable.
-3. NO le envíes el catálogo de cócteles todavía ni asumas que ya eligió chat.
-4. Al finalizar, vuelve a preguntarle: "¿Prefieres ver la página web o *seguímos por aquí*?"`;
-  },
-
-  get BARRILES_OFRECER_CATALOGO() {
-    return `[SISTEMA - ESTADO: OFRECER CATÁLOGO]
-El cliente debe confirmar si quiere ver la lista de precios y cócteles. Responde brevemente y pregúntale si se la muestras.`;
-  },
-
-  get BARRILES_OFRECER_COTIZACION() {
-    return `[SISTEMA - ESTADO: OFRECER COTIZACIÓN TRAS VER PRECIOS]
-El cliente ya vio la carta de Barriles Desechables. Debe elegir: cotizar o solo mirar / pedir Instagram.
-1. Responde dudas breves (precios, sabores, despacho) sin armar cotización completa.
-2. NO asumas que ya quiere pedir. Tono conversacional, no de formulario.
-3. Al finalizar, invita a elegir con naturalidad, destacando keywords: *cotización* / *sí* para avanzar, o *solo mirando* / *Instagram* si solo consultaba.
-REGLA DE NEGRITA: un solo asterisco (*) para negrita en WhatsApp.`;
+3. NO le envíes el catálogo de cócteles todavía ni asumas que ya eligió WhatsApp o web.
+4. Al finalizar, vuelve a preguntarle: "¿Quieres ver los sabores en *nuestra web*, que te ayude por *WhatsApp*, o por ahora *solo estás mirando*?"`;
   },
 
   get BARRILES_RECOGIDA_PRODUCTOS_DUDAS() {
     return `[SISTEMA - ESTADO: CATÁLOGO (FALLBACK)]
-El cliente está revisando las opciones pero hizo una pregunta diferente o tiene dudas.
+El cliente ya recibió la lista de precios de Barriles Desechables y debe indicar sabor y cantidad.
 1. Responde a su duda de forma breve y amigable (ej. recomendaciones, de qué están hechos).
 2. Si el cliente tiene preguntas de despacho o envíos, respóndele brevemente. REGLA: Despachos en RM, Encomiendas a regiones (costo se confirma al final). NUNCA inventes costos.
 3. El único formato disponible para desechables es de 5 LITROS. NUNCA sugieras otros tamaños.
 4. EXCEPCIÓN: Si el cliente indica explícitamente que "no quiere nada por ahora", "solo estaba mirando" o quiere "pensarlo", despídete amablemente, ofrécele ayuda futura y termina ahí, NO le hagas más preguntas.
-5. Si NO se cumple la excepción anterior, finaliza tu respuesta preguntándole si desea que le envíes la lista de cócteles disponibles y sus precios. 🍹`;
+5. Si NO se cumple la excepción anterior, finaliza preguntándole qué sabor le interesa y cuántos barriles necesita (ej. "1 mojito y 1 sangría"). 🍹`;
   },
 
   get BARRILES_RECOGIDA_DATOS_DUDAS() {

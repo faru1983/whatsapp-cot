@@ -24,12 +24,14 @@ db.prepare('CREATE TABLE IF NOT EXISTS sessions (id TEXT PRIMARY KEY, data TEXT)
 
 /**
  * createSession: Genera una estructura de datos vacía y limpia para clientes nuevos.
- * 
+ * Arranca en ESPERANDO_INTENCION para que el debug/CLI no muestre "(sin estado)".
+ *
  * @returns {object} Una sesión vacía inicializada.
  */
 function createSession() {
   return {
     history: { turns: [] }, // Aquí se guardará la conversación de WhatsApp en formato [{role, text}]
+    currentState: 'ESPERANDO_INTENCION', // Primer paso del embudo (barriles vs eventos)
     errores_paso: 0, // Contador de errores en el paso actual
     silenciado_timestamp: null, // Marca de tiempo (milisegundos) de cuándo se silenciò al bot
     isMuted: false // Si es 'true', el bot no responde automáticamente en este chat
@@ -61,6 +63,7 @@ function migrateSession(session) {
   // Rellenamos variables que falten con valores por defecto para evitar errores de tipo "undefined" (indefinido)
   if (!session.history) session.history = { turns: [] };
   if (!session.history.turns) session.history.turns = [];
+  if (!session.currentState) session.currentState = 'ESPERANDO_INTENCION';
   if (session.errores_paso === undefined) session.errores_paso = 0;
   if (session.silenciado_timestamp === undefined) session.silenciado_timestamp = null;
   if (session.isMuted === undefined) session.isMuted = false;

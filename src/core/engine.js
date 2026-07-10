@@ -19,8 +19,12 @@ import { buildFaqCatalogContext, sanitizeCustomerFacingReply } from '../logic/ut
 import { isImagePart, assertImageExists } from '../logic/media.js';
 import { buildAdminSosBody } from '../views/templates.js';
 import { FAQ_JSON_PATH } from './paths.js';
+import { enableTestDebug, testLog } from './debug-log.js';
 
 const isMainModule = process.argv[1] === fileURLToPath(import.meta.url);
+
+// En el simulador CLI activamos logs [TEST] para todo el proceso (keywords, NLU, FAQ…)
+if (isMainModule) enableTestDebug();
 
 // Configuración cargada una vez al arrancar (incluye umbrales SECURITY_* del .env)
 const botConfig = loadBotConfig();
@@ -39,10 +43,7 @@ export function setAdminAlertFunction(fn) {
  * @param {string} message - Texto del aviso (puede ser multilínea)
  */
 function cliLog(message) {
-  if (!isMainModule) return;
-  for (const line of String(message).split('\n')) {
-    console.log(`[TEST] ${line}`);
-  }
+  testLog(message);
 }
 
 /**
@@ -269,6 +270,7 @@ export async function processMessage(sessionId, messageText) {
 
   const currentStateId = session.currentState;
   let currentState = statesMap[currentStateId];
+  cliLog(`paso actual: ${currentStateId}`);
 
   if (!currentState) {
     const fallbackState =
@@ -295,8 +297,6 @@ export async function processMessage(sessionId, messageText) {
   if (currentStateId !== 'ESPERANDO_INTENCION' && currentStateId !== 'CERRADO') {
     const earlyStates = [
       'BARRILES_FILTRO_CANAL',
-      'BARRILES_OFRECER_CATALOGO',
-      'BARRILES_OFRECER_COTIZACION',
       'BARRILES_RECOGIDA_PRODUCTOS',
       'EVENTOS_FILTRO_CANAL',
       'EVENTOS_RECOGIDA_DATOS'
@@ -361,6 +361,7 @@ export async function processMessage(sessionId, messageText) {
 
   if (processResult.success) {
     session.consecutiveErrors = 0; // Se resetean los strikes
+    cliLog(`paso OK (success)`);
     
     if (processResult.shouldReset) {
       resetSession(sessionId);
@@ -432,6 +433,7 @@ export async function processMessage(sessionId, messageText) {
     // ==============================================================================
     // 4. RED DE SEGURIDAD GLOBAL: SOPORTE Y FAQS
     // ==============================================================================
+    cliLog(`paso sin match → red de seguridad (FAQ → IA → re-pregunta)`);
     session.consecutiveErrors = (session.consecutiveErrors || 0) + 1;
 
     // Si promptQuestion es array (info + pregunta), usamos solo la última parte
@@ -610,7 +612,13 @@ function cliChat() {
     // --- Feedback [TEST] siempre, mismo formato ---
     console.log(''); // línea en blanco antes del bloque de debug
 
-    if (!wasMuted && isMutedNow) {
+    const cmd = message.trim().toLowerCase();
+
+    // /reset: mensaje explícito para no confundir "estado viejo → limpio" con un salto de flujo
+    if (cmd === '/reset') {
+      cliLog(`/reset: memoria borrada (antes: ${stateBefore})`);
+      cliLog(`Estado actual: ${stateAfter}`);
+    } else if (!wasMuted && isMutedNow) {
       cliLog(`MUTE activado → estado: ${stateAfter}`);
       cliLog(`Los siguientes mensajes se ignoran. Usa /unmute o /reset.`);
     } else if (wasMuted && isMutedNow) {

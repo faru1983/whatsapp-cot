@@ -3,6 +3,7 @@
 // ==============================================================================
 import fs from 'node:fs';
 import { DATOS_JSON_PATH } from '../core/paths.js';
+import { testLog } from '../core/debug-log.js';
 
 // ==============================================================================
 // BASE DE DATOS GENERAL (datos.json)
@@ -412,7 +413,6 @@ export function getCartaCocteles(format = 'desechable', options = {}) {
 		}
 	}
 
-	// En barriles la pregunta de cotizar va en BARRILES_OFRECER_COTIZACION (no aquí).
 	// En eventos, si includeClosingQuestion=true, pedimos cócteles + litraje al final.
 	if (includeClosingQuestion && format !== 'desechable') {
 		text += '\n\n¿Ahora indícame cuáles te gustarían, por ej. 5L Mojito, 10L Aperol Spritz?';
@@ -457,14 +457,14 @@ export function hasDrinkSelection(text) {
 }
 
 // ==============================================================================
-// INTENCIÓN: SOLO MIRANDO vs QUIERE COTIZAR
-// (usado en BARRILES_OFRECER_COTIZACION y despedidas similares)
+// INTENCIÓN: SOLO MIRANDO
+// (usado en filtro de canal de barriles y despedidas similares)
 // ==============================================================================
 
 /**
  * isOnlyBrowsing: true si el cliente dice que solo mira / no quiere cotizar ahora.
  * Cubre frases naturales: "mirando", "solo estoy mirando", "gracias, solo miraba", "no gracias".
- * Sirve para cerrar con despedida + Instagram en lugar de mandar al fallback FAQ/IA.
+ * Sirve para cerrar con despedida suave en lugar de mandar al fallback FAQ/IA.
  *
  * @param {string} messageText - Mensaje del cliente
  * @returns {boolean}
@@ -507,22 +507,6 @@ export function wantsInstagramOrSocial(messageText) {
 	return /\b(instagram|insta|\big\b|redes?|segu(ir|irme|irnos)|historia|historias|video|videos)\b/i.test(
 		String(messageText || '').toLowerCase()
 	);
-}
-
-/**
- * wantsBarrilesQuote: true si acepta armar cotización por chat.
- * No dispara si el mensaje es claramente "solo mirando" (prioridad al cierre).
- *
- * @param {string} messageText - Mensaje del cliente
- * @returns {boolean}
- */
-export function wantsBarrilesQuote(messageText) {
-	// Si solo mira, no lo tratamos como "sí, cotiza"
-	if (isOnlyBrowsing(messageText) || wantsInstagramOrSocial(messageText)) return false;
-
-	const lower = String(messageText || '').toLowerCase();
-	// "cotiz" cubre cotizar / cotización / cotizo (sin exigir fin de palabra justo ahí)
-	return /\b(si|sí|claro|ok|okay|dale|vamos|partamos|partimos|cotiz\w*|pedido|armar|empez\w*|comenz\w*|me\s+gustar[ií]a|por\s+favor|porfa|aka|aqui|ac[aá]|por\s+aqu[ií]|quiero)\b/i.test(lower);
 }
 
 // ==============================================================================
@@ -870,7 +854,7 @@ export function resolveDoubtsProgrammatically(dudas) {
 		});
 
 		if (resolvedOption) {
-			console.log(`[DEBUG-DOUBT] Resolviendo duda "${mencionado}" programáticamente a: "${resolvedOption.opcion}"`);
+			testLog(`duda resuelta: "${mencionado}" → "${resolvedOption.opcion}"`);
 			resolved.push({ name: resolvedOption.opcion, quantity: 1 });
 		} else {
 			remaining.push(duda);

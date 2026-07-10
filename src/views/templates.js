@@ -12,31 +12,63 @@ import { formatPrice } from '../logic/utils.js';
 
 /**
  * getWelcomeBarriles: Mensaje cuando el cliente elige barriles desechables.
- * Devuelve dos bloques: pitch + link, y la pregunta web vs chat (burbujas separadas).
+ * Devuelve dos bloques: pitch + link, y la pregunta web / WhatsApp / solo mirando.
  *
  * @param {boolean} isSwitch - true si el cliente cambió de eventos a barriles a mitad de conversación
  * @returns {string[]} [bloque informativo, pregunta]
  */
 export function getWelcomeBarriles(isSwitch = false) {
-  // Pregunta final: siempre en su propio mensaje para que se lea con calma
-  const question = `¿Dime si prefieres ver la página web o te cuento más *por aquí*?`;
+  // Pregunta final: siempre en su propio mensaje (3 salidas: web, WhatsApp, solo mirando)
+  const question = `¿Quieres ver todos los sabores y precios en *nuestra web* o prefieres que te ayude por *WhatsApp*?
+
+Si por ahora *solo estás mirando*, también está bien 😊`;
 
   if (isSwitch) {
     return [
-      `¡Buenísimo! Te cuento: la forma más rápida de comprar nuestros barriles desechables, ver fotos y conocer todos los precios es directamente en *nuestra web*: https://cocktailsontap.cl/barriles`,
+      `¡Buenísimo! Te cuento: la forma más rápida de conocer todas las variedades, fotos y precios es directamente en *nuestra web*: https://cocktailsontap.cl/barriles`,
       question
     ];
   }
 
   return [
-    `👋 Gracias por tu interés en nuestros *Barriles Desechables*.
+    `👋 ¡Gracias por tu interés en nuestros *Barriles Desechables*!
 
-Cada barril contiene *5 litros* que rinden aprox. *25 cócteles*, lo maravilloso es que vienen listo para servir en segundos y directo a tu copa. 🍸
+Cada barril viene listo para servir, contiene *5 litros* y rinde aproximadamente *25 cócteles*. Solo debes mantenerlo refrigerado y servir. Ideal para cumpleaños, asados, reuniones y celebraciones.
 
-Tenemos reparto en *Santiago* y por *Blue Express* a todo Chile.
+🍸 Cada barril cuesta desde aproximadamente *$1.600 por cóctel*, muy por debajo del valor de un trago preparado en un bar.
 
-La forma más rápida de comprar, ver fotos y conocer todos los precios es directamente en *nuestra web*: https://cocktailsontap.cl/barriles`,
+📍 Estamos en *Santiago*. Realizamos entregas en todas las comunas de la *Región Metropolitana* y también enviamos a todo Chile por *Blue Express* o empresa de tu preferencia.
+
+La forma más rápida de conocer todas las variedades, fotos y precios es directamente en *nuestra web*.
+👉 https://cocktailsontap.cl/barriles`,
     question
+  ];
+}
+
+/**
+ * getWebChannelGoodbye: Despedida cuando el cliente elige ir a la página web.
+ * Cierra el chat (mute) para no duplicar la venta mientras navega.
+ *
+ * @returns {string}
+ */
+export function getWebChannelGoodbye() {
+  return `Perfecto 😊
+En la página encontrarás todas las variedades, precios, fotografías y podrás comprar cuando quieras.
+¡Muchas gracias por tu interés!`;
+}
+
+/**
+ * getBarrilesChatCatalogReplies: Tras elegir WhatsApp, enviamos la carta y pedimos pedido.
+ * El flujo arma customReplies: [imagen, texto intro, pregunta de sabores].
+ *
+ * @returns {string[]} [intro tras la imagen, pregunta de sabor/cantidad]
+ */
+export function getBarrilesChatCatalogReplies() {
+  return [
+    `Aquí tienes nuestra lista de variedades y precios para que puedas revisarla con calma.
+*Cuando la revises, cuéntame:*`,
+    `¿Qué sabor te interesa y cuántos barriles necesitas?
+(Puedes escribir por ej. *1 mojito y 1 sangría*)`
   ];
 }
 
@@ -86,25 +118,15 @@ export const WELCOME_SECONDARY_FILTER = `¡Hola! Somos *Cocktails on Tap* 🍸
 export const SHORT_INTENT_QUESTION = `¿Buscas *Barriles Desechables* o *Servicio para Eventos*?`;
 
 /**
- * getOfferQuoteAfterCatalog: Pregunta tras mostrar la carta de barriles.
- * Tono conversacional; keywords en *negrita* para que el cliente elija con naturalidad.
- *
- * @returns {string}
- */
-export function getOfferQuoteAfterCatalog() {
-  return `¿Te armo una cotización por aquí? Es fácil: me dices qué cócteles de la lista te gustaron y partimos 🍸
-
-Si por ahora solo estabas *mirando*, no hay problema.`;
-}
-
-/**
- * getBrowseOnlyGoodbye: Despedida cuando el cliente solo consultaba precios.
- * Invita a Instagram y el flujo cierra con mute.
+ * getBrowseOnlyGoodbye: Despedida cuando el cliente solo está mirando opciones.
+ * Tono suave; el flujo cierra con mute para no insistir.
  *
  * @returns {string}
  */
 export function getBrowseOnlyGoodbye() {
-  return `¡Ningún problema! Gracias por escribirnos. 🙌\n\nSi quieres conocernos un poco mejor, síguenos en Instagram: https://instagram.com/cocktailsontap.chile\nAhí verás videos e historias destacadas de nuestros cócteles.\n\nCuando quieras cotizar, nos escribes por aquí y te ayudamos con gusto. ¡Hasta pronto! 🍹`;
+  return `Sin problema 😊
+Muchas personas comienzan mirando opciones antes de decidir.
+Si más adelante necesitas ayuda para elegir sabores, cantidades o tiempos de despacho, aquí estaré.`;
 }
 
 /** Respuesta cuando el cliente dice que le interesan ambas opciones */
@@ -123,25 +145,6 @@ Puedes cotizar facilmente aquí: https://cocktailsontap.cl/eventos
 // ==============================================================================
 // 2. CATÁLOGO Y COTIZACIÓN
 // ==============================================================================
-
-/**
- * getCatalogDesechables: Pitch de venta antes de mostrar la carta de cócteles.
- * Devuelve dos bloques: beneficios, y la pregunta de si quiere ver precios.
- *
- * @param {boolean} isSwitch - Mensaje más corto si viene de otro flujo
- * @returns {string[]} [bloque informativo, pregunta]
- */
-export function getCatalogDesechables(isSwitch = false) {
-  const intro = isSwitch ? '¡Buenísimo! 🤩' : '¡Excelente elección! 🤩';
-  return [
-    `${intro} Te cuento por qué nuestros barriles desechables son los favoritos:
-
-✅ Rinden aprox. *25 tragos* (5 Litros).
-❄️ Conservan su sabor fresco hasta por *3 semanas* refrigerados (¡puedes servirte un trago y volver a guardarlo!).
-💰 El precio parte desde los *$31.990* (cada trago te queda a solo *$1.280* aprox. 🤯).`,
-    `¿Quieres conocer los barriles disponibles y sus precios?`
-  ];
-}
 
 /**
  * getQuotationTemplate: Arma el mensaje de cotización final para barriles desechables.

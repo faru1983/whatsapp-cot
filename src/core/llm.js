@@ -7,6 +7,7 @@ import OpenAI from 'openai'; // Importamos la librería OpenAI. Aunque usemos Nv
 import { GoogleGenerativeAI } from '@google/generative-ai'; // Importamos la librería oficial de Google para usar Gemini.
 import { getEnv } from './config.js'; // Función para cargar las claves API Keys y configuraciones de proveedor.
 import { buildFaqCatalogContext, sanitizeCustomerFacingReply } from '../logic/utils.js'; // Catálogo/despachos + limpieza de jerga interna.
+import { testLog } from './debug-log.js';
 
 /**
  * generateResponse: Función que se conecta con la IA (Gemini o Nvidia)
@@ -153,7 +154,6 @@ ${catalogNames.join('\n')}`;
         }
       });
       rawText = result.response?.text?.().trim() || "[]";
-      console.log(`[DEBUG-NLU] rawText Gemini:`, rawText);
     }
 
     if (provider === 'nvidia') {
@@ -172,7 +172,7 @@ ${catalogNames.join('\n')}`;
       rawText = completion.choices?.[0]?.message?.content?.trim() || "[]";
     }
 
-    console.log(`[DEBUG-NLU] Provider: ${provider}, rawText:`, rawText);
+    testLog(`NLU productos (barriles) provider=${provider}: ${rawText}`);
 
     let parsed = JSON.parse(rawText);
     
@@ -265,7 +265,6 @@ ${catalogNames.join('\n')}`;
         }
       });
       rawText = result.response?.text?.().trim() || "[]";
-      console.log(`[DEBUG-NLU-EVENTOS] rawText Gemini:`, rawText);
     }
 
     if (provider === 'nvidia') {
@@ -284,7 +283,7 @@ ${catalogNames.join('\n')}`;
       rawText = completion.choices?.[0]?.message?.content?.trim() || "[]";
     }
 
-    console.log(`[DEBUG-NLU-EVENTOS] Provider: ${provider}, rawText:`, rawText);
+    testLog(`NLU productos (eventos) provider=${provider}: ${rawText}`);
 
     let parsed = JSON.parse(rawText);
 
@@ -336,11 +335,12 @@ function normalizeFaqResult(textResult) {
 
 /**
  * classifyStepIntent: Clasificador NLU para pasos de DECISIÓN (menú corto / sí-no).
- * Cuando las keywords no alcanzan, la IA elige UNA etiqueta de la lista permitida
- * según el contexto del paso (typos, sinónimos, frases naturales).
+ * Cajita 2: cuando las keywords fallan, la IA elige UNA etiqueta permitida
+ * (typos, sinónimos, frases naturales). NO busca FAQ ni genera respuesta al cliente.
  *
+ * Preferir importar desde logic/nlu-intent.js (puerta clara de NLU).
+ * Orquestación keywords→IA: logic/decision-intent.js.
  * IMPORTANTE: NO usar en pasos de datos (fecha, comuna, cócteles, litraje).
- * Ahí el riesgo de inventar valores es alto; este filtro solo avanza decisiones.
  *
  * @param {object} opts
  * @param {string} opts.userMessage - Lo que escribió el cliente
@@ -394,8 +394,10 @@ REGLAS:
 4. Si el mensaje es una pregunta de otra cosa, saludo vacío, o no responde al paso → UNCLEAR + low.
 5. PROHIBIDO inventar etiquetas nuevas. PROHIBIDO devolver texto fuera del JSON.
 6. No clasifiques datos concretos (fechas, comunas, nombres de cócteles) como decisión: eso es UNCLEAR.
-7. Lee bien las pistas de cada etiqueta. Ej.: si WEB = ir al sitio y CHAT = seguir en WhatsApp, "voy a meterme a ver / entrar a la página / prefiero el link" es WEB, NO CHAT.
+7. Lee bien las pistas de cada etiqueta. Ej.: si WEB = ir al sitio y CHAT = seguir en WhatsApp, "voy a meterme a ver / entrar a la página / prefiero el link / lo veré / lo veo / lo reviso" es WEB, NO CHAT.
 8. Si el paso es web vs chat y el cliente solo dice "precio", "valor", "cuánto", "cuánto cuestan" SIN elegir canal → UNCLEAR (es duda, no decisión).
+9. Cortesía sola SIN elegir opción → UNCLEAR + low. Ej.: "gracias", "ok", "dale", "ya", "listo", "hola" (sin más texto). NUNCA elijas WEB/BARRILES/EVENTOS/CHAT solo porque el último mensaje del bot mencionó esa opción.
+10. No adivines por el orden del menú ni por la última opción citada. Si el cliente no eligió de forma explícita o con sinónimo claro → UNCLEAR.
 
 Ejemplo: {"intent":"${labels[0]}","confidence":"high"}`;
 
@@ -440,11 +442,17 @@ Ejemplo: {"intent":"${labels[0]}","confidence":"high"}`;
     const intent = String(parsed?.intent || '').trim().toUpperCase();
     const confidence = String(parsed?.confidence || '').trim().toLowerCase();
 
-    console.log(`[NLU-INTENT] labels=[${labelsList}] → intent=${intent} confidence=${confidence}`);
+    testLog(`NLU decisión: labels=[${labelsList}] → intent=${intent} confidence=${confidence}`);
 
     // Solo aceptamos etiqueta permitida con confianza alta (evita avances dudosos)
-    if (confidence !== 'high') return null;
-    if (!labels.includes(intent)) return null;
+    if (confidence !== 'high') {
+      testLog(`NLU decisión: descartado (confidence≠high)`);
+      return null;
+    }
+    if (!labels.includes(intent)) {
+      testLog(`NLU decisión: descartado (etiqueta no permitida)`);
+      return null;
+    }
     return intent;
   } catch (err) {
     console.error(`[bot] Error en classifyStepIntent:`, err.message);

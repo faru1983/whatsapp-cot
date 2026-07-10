@@ -25,6 +25,13 @@ import {
 import { extractEventProductsWithAI } from '../core/llm.js';
 import { OrderBuilder } from '../logic/order-builder.js';
 import { resolveDecisionIntent } from '../logic/decision-intent.js';
+import {
+  rulesWebVsChat,
+  rulesConfirmarOCorregirDatos,
+  rulesDispensadorOMuro,
+  rulesConfirmarFormatoEvento,
+  rulesConfirmarOModificar
+} from '../logic/keyword-intent.js';
 
 // ==============================================================================
 // OBJETIVO: Flujo Eventos (Servicio para Eventos).
@@ -32,6 +39,7 @@ import { resolveDecisionIntent } from '../logic/decision-intent.js';
 // Pasos (orden típico; las transiciones reales van en nextState):
 // filtro canal -> recogida datos -> confirmar datos (ok) -> elección formato ->
 // confirmar formato (pitch) -> elección menú (carta + NLU + carrito) -> cotización.
+// Decisiones cortas: keywords (keyword-intent) → IA (nlu-intent) vía resolveDecisionIntent.
 // ==============================================================================
 
 /**
@@ -235,18 +243,20 @@ export const eventosStates = {
     aiContextPrompt: STATE_PROMPTS.EVENTOS_FILTRO_CANAL,
 
     async validateAndProcess(messageText, session) {
-      const normalizedMessage = messageText.toLowerCase();
+      // Misma cajita keywords→IA que barriles (canal web vs chat)
+      const intent = await resolveDecisionIntent({
+        messageText,
+        session,
+        stepQuestion: eventosStates.EVENTOS_FILTRO_CANAL.shortQuestion,
+        allowedLabels: ['WEB', 'CHAT'],
+        keywordRules: rulesWebVsChat(),
+        labelHints: {
+          WEB: 'Quiere ir a la página web / link / sitio (cotizar ahí, NO seguir en WhatsApp). Frases: web, link, página, lo veré, lo veo, lo reviso.',
+          CHAT: 'Quiere seguir cotizando POR ESTE CHAT / WhatsApp / aquí. NO uses CHAT si solo pregunta precio/valor/cuánto sin elegir canal: eso es UNCLEAR.'
+        }
+      });
 
-      // Detectar si quiere ir a la web (y NO quiere seguir por chat)
-      const wantsWeb = /web|link|pagina|sitio/i.test(normalizedMessage)
-        && !/chat|whatsapp|aqui|por aqui/i.test(normalizedMessage);
-
-      // Palabras que indican "sigamos por aquí" (incluye "no" cuando el bot preguntó web vs chat).
-      // "aka" = typo frecuente de "acá" (mismo criterio que en barriles).
-      // NO incluir precio/valor/cuánto: eso es duda → FAQ/IA, no avance de canal.
-      const wantsWhatsapp = /^no$|aqui|aca|aka|chat|whatsapp|ayuda|ayudar|ayudando|por favor|porfa|dime|muestra|catalogo|quiero|si|sigamos|seguimos|seguir|continuar/i.test(normalizedMessage);
-
-      if (wantsWeb) {
+      if (intent === 'WEB') {
         return {
           success: true,
           nextState: 'CERRADO',
@@ -255,7 +265,7 @@ export const eventosStates = {
         };
       }
 
-      if (wantsWhatsapp) {
+      if (intent === 'CHAT') {
         return { success: true, nextState: 'EVENTOS_RECOGIDA_DATOS' };
       }
 
@@ -345,7 +355,7 @@ Allí puedes elegir el formato, los cócteles y los litros que necesitas, y ver 
   // ==============================================================================
   // CONFIRMAR DATOS DEL EVENTO (resumen + ok / corregir)
   // Solo invitados es obligatorio; el resto puede quedar "Por confirmar".
-  // Decisión corta → keywords + classifyStepIntent.
+  // Decisión corta → keywords + NLU.
   // ==============================================================================
   EVENTOS_CONFIRMAR_DATOS: {
     id: 'EVENTOS_CONFIRMAR_DATOS',
@@ -381,21 +391,10 @@ Allí puedes elegir el formato, los cócteles y los litros que necesitas, y ver 
         session,
         stepQuestion: eventosStates.EVENTOS_CONFIRMAR_DATOS.shortQuestion,
         allowedLabels: ['CONFIRMAR', 'CORREGIR'],
+        keywordRules: rulesConfirmarOCorregirDatos(),
         labelHints: {
           CONFIRMAR: 'Los datos están bien; quiere seguir (ok, sí, dale, correcto, perfecto).',
           CORREGIR: 'Quiere cambiar algún dato pero aún no dijo el valor nuevo (cambiar, modificar, mal).'
-        },
-        keywordGuess: () => {
-          const lower = messageText.toLowerCase().trim();
-          if (/^(ok|okay|si|sí|dale|listo|perfecto|correcto|esta bien|está bien|todo bien|vamos|claro)$/i.test(lower)) {
-            return 'CONFIRMAR';
-          }
-          if (/\b(ok|okay|correcto|esta bien|está bien|todo bien|perfecto|dale|listo)\b/i.test(lower)
-              && !/\b(no|mal|cambi|modific|equivoc)\b/i.test(lower)) {
-            return 'CONFIRMAR';
-          }
-          if (/\b(cambi|modific|equivoc|mal|correg)\b/i.test(lower)) return 'CORREGIR';
-          return null;
         }
       });
 
@@ -437,23 +436,10 @@ Allí puedes elegir el formato, los cócteles y los litros que necesitas, y ver 
         session,
         stepQuestion: eventosStates.EVENTOS_ELECCION_FORMATO.shortQuestion,
         allowedLabels: ['DISPENSADOR', 'MURO'],
+        keywordRules: rulesDispensadorOMuro(),
         labelHints: {
           DISPENSADOR: 'Elige opción 1 / Dispensador Portátil (instalación gratis, mínimo 10L). También: "1", "uno", "primera".',
           MURO: 'Elige opción 2 / Muro de Coctelería (instalación con costo, mínimo 30L). También: "2", "dos", "segunda".'
-        },
-        keywordGuess: () => {
-          const trimmed = messageText.trim();
-          // Números y palabras: "1" / "uno" / "primera" → Dispensador; "2" / "dos" / "segunda" → Muro
-          if (/^(1|uno|primera?|opci[oó]n\s*1)$/i.test(trimmed)) return 'DISPENSADOR';
-          if (/^(2|dos|segunda?|opci[oó]n\s*2)$/i.test(trimmed)) return 'MURO';
-
-          const isMuro = /\bmuro\b/i.test(messageText);
-          const isDispensador = /\b(dispensador|portatil|portátil)\b/i.test(messageText);
-          if (isMuro && !isDispensador) return 'MURO';
-          if (isDispensador && !isMuro) return 'DISPENSADOR';
-          if (isMuro) return 'MURO';
-          if (isDispensador) return 'DISPENSADOR';
-          return null;
         }
       });
 
@@ -476,7 +462,7 @@ Allí puedes elegir el formato, los cócteles y los litros que necesitas, y ver 
 
   // ==============================================================================
   // CONFIRMAR FORMATO (pitch + ok / cambiar a otro formato)
-  // Decisión corta → keywords + classifyStepIntent. NO es paso de datos.
+  // Decisión corta → keywords + NLU. NO es paso de datos.
   // ==============================================================================
   EVENTOS_CONFIRMAR_FORMATO: {
     id: 'EVENTOS_CONFIRMAR_FORMATO',
@@ -492,25 +478,11 @@ Allí puedes elegir el formato, los cócteles y los litros que necesitas, y ver 
         session,
         stepQuestion: eventosStates.EVENTOS_CONFIRMAR_FORMATO.shortQuestion,
         allowedLabels: ['CONTINUAR', 'CAMBIAR_MURO', 'CAMBIAR_DISPENSADOR'],
+        keywordRules: rulesConfirmarFormatoEvento(currentKey),
         labelHints: {
           CONTINUAR: 'Confirma el formato actual y quiere ver la carta de cócteles (ok, sí, dale, adelante).',
           CAMBIAR_MURO: 'Quiere cambiar al Muro de Coctelería en lugar del Dispensador.',
           CAMBIAR_DISPENSADOR: 'Quiere cambiar al Dispensador Portátil en lugar del Muro.'
-        },
-        keywordGuess: () => {
-          const lower = messageText.toLowerCase();
-          const wantsMuro = /\bmuro\b/i.test(lower);
-          const wantsDisp = /\b(dispensador|portatil|portátil)\b/i.test(lower);
-          const wantsOk = /\b(ok|okay|si|sí|dale|vamos|listo|perfecto|continuar|continuemos|adelante|claro|por\s+favor|porfa)\b/i.test(lower);
-
-          // Cambio explícito de formato (antes que "ok")
-          if (wantsMuro && currentKey !== 'muro') return 'CAMBIAR_MURO';
-          if (wantsDisp && currentKey !== 'dispensador') return 'CAMBIAR_DISPENSADOR';
-          // Si nombra el mismo formato o dice ok → continuar
-          if (wantsOk || (wantsMuro && currentKey === 'muro') || (wantsDisp && currentKey === 'dispensador')) {
-            return 'CONTINUAR';
-          }
-          return null;
         }
       });
 
@@ -789,11 +761,20 @@ Allí puedes elegir el formato, los cócteles y los litros que necesitas, y ver 
     aiContextPrompt: STATE_PROMPTS.EVENTOS_COTIZACION_DUDAS,
 
     async validateAndProcess(messageText, session) {
-      const isRequestingChanges = /cambi|sacar|agrega|modific|ajust|litro|litraje|quita|elimina/i.test(messageText);
-      const isConfirming = /(si|sí|ok|perfecto|listo|dale|confirm|esta bien|está bien|todo bien|vamos|súper|super|correcto|excelente|genial|aprob|bueno)/i.test(messageText);
+      const intent = await resolveDecisionIntent({
+        messageText,
+        session,
+        stepQuestion: eventosStates.EVENTOS_COTIZACION.shortQuestion,
+        allowedLabels: ['CONFIRMAR', 'MODIFICAR'],
+        keywordRules: rulesConfirmarOModificar(),
+        labelHints: {
+          CONFIRMAR: 'Aprueba la cotización y quiere datos de reserva / transferencia.',
+          MODIFICAR: 'Quiere cambiar cócteles, litros o algo del menú.'
+        }
+      });
 
       // Cliente quiere modificar → volvemos a elección de menú con el carrito actual
-      if (isRequestingChanges) {
+      if (intent === 'MODIFICAR') {
         session.quotationGenerated = false;
         const formatKey = getEventFormatKey(session.eventoFormato);
         const cart = formatEventCartSummary(session.orderBuilder?.products || {}, formatKey);
@@ -802,7 +783,7 @@ Allí puedes elegir el formato, los cócteles y los litros que necesitas, y ver 
       }
 
       // Cliente aprueba la cotización → cerramos, silenciamos bot y avisamos al equipo
-      if (isConfirming) {
+      if (intent === 'CONFIRMAR') {
         const { location, date, guests, eventoFormato, celebrationType } = session;
         const quote = session.orderBuilder?.quote;
         const totalStr = quote?.total != null ? formatPrice(quote.total) : 'Revisar chat';
