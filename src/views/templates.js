@@ -33,6 +33,8 @@ export function getWelcomeBarriles(isSwitch = false) {
 
 Cada barril contiene *5 litros* que rinden aprox. *25 cócteles*, lo maravilloso es que vienen listo para servir en segundos y directo a tu copa. 🍸
 
+Tenemos reparto en *Santiago* y por *Blue Express* a todo Chile.
+
 La forma más rápida de comprar, ver fotos y conocer todos los precios es directamente en *nuestra web*: https://cocktailsontap.cl/barriles`,
     question
   ];

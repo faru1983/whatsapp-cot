@@ -4,15 +4,15 @@
     "respuesta": "Nos puedes escribir 24/7."
   },
   {
-    "pregunta": "¿Hacen envíos a regiones o solo en Santiago?",
-    "respuesta": "Hacemos envíos a todas las comunas de la Región Metropolitana y para otras Regiones, despachamos por encomienda (Blue Express, Starken o empresas similares)"
+    "pregunta": "¿De dónde son? ¿De qué parte son? ¿Dónde son ustedes? ¿De qué ciudad son?",
+    "respuesta": "Somos de Santiago."
   },
   {
-    "pregunta": "¿Dónde entregan? ¿Hacen envíos? ¿A qué comunas o regiones llegan? ¿Cubren despacho?",
-    "respuesta": "Entregamos a todas las comunas de la Región Metropolitana con despacho a domicilio. Si me dices tu comuna, te indico el costo de envío. Para otras regiones de Chile despachamos por encomienda (Blue Express, Starken o similares) y el costo exacto se confirma al procesar la compra."
+    "pregunta": "¿Dónde entregan? ¿Hacen envíos? ¿A qué comunas o regiones llegan? ¿Cubren despacho? ¿Envían a regiones o provincias? ¿Solo en Santiago?",
+    "respuesta": "Repartimos en todas las comunas de la Región Metropolitana. A otras regiones enviamos por Blue Express o empresas similares de encomiendas; el costo exacto se confirma al procesar la compra. Si me dices tu comuna de la RM, te indico el costo de despacho."
   },
   {
-    "pregunta": "¿Cuáles son los métodos de pago?",
+    "pregunta": "¿Cuáles son los métodos, formas o tipos de pago?",
     "respuesta": "Por el momento solo aceptamos transferencias bancarias."
   },
   {
@@ -32,11 +32,11 @@
     "respuesta": "Nuestro WhatsApp es: +569-29672978"
   },
   {
-    "pregunta": "¿Cuánto rinden los barriles? (Rendimiento en cócteles)",
-    "respuesta": "El rendimiento es válido para todos nuestros formatos (barriles desechables, dispensadores y muro):\n- 5 Litros rinden 25 cócteles aprox.\n- 10 Litros rinden 50 cócteles aprox.\n- 20 Litros rinden 100 cócteles aprox.\n- 30 Litros rinden 150 cócteles aprox."
+    "pregunta": "¿Cuánto rinden los barriles? ¿Cuántos tragos / cócteles salen? (Rendimiento)",
+    "respuesta": "Responde SOLO según el contexto del chat (ver CONTEXTO DE SESIÓN). Calculando vaso/copa con hielo ≈ 200ml.\n- Si el cliente está en Barriles Desechables: un barril de 5L rinde aprox. 25 cócteles. No menciones 10L/20L/30L ni formatos de evento.\n- Si está en Eventos (Dispensador): 5L ≈ 25 tragos | 10L ≈ 50 tragos. No menciones 20L/30L ni barriles desechables salvo que pregunte.\n- Si está en Eventos (Muro): 10L ≈ 50 | 20L ≈ 100 | 30L ≈ 150 tragos. No menciones 5L ni desechables salvo que pregunte.\n- Si aún no eligió formato: di que el rendimiento depende del tamaño (5L≈25, 10L≈50, etc.) y pregunta si cotiza desechable o evento."
   },
   {
-    "pregunta": "¿Cuáles son los precios, valores, o dónde veo el catálogo y la carta?",
-    "respuesta": "Todos nuestros cócteles van en barril, pero hay 3 categorías con precios distintos: (1) Barril desechable 5L, (2) Barril para eventos con Dispensador Portátil, (3) Barril para eventos con Muro de Coctelería. Puedes ver la carta en https://cocktailsontap.cl/cotizar. Si me dices el cóctel y el formato, te indico el valor."
+    "pregunta": "¿Cuáles son los precios, valores, o dónde veo el catálogo y la carta? ¿Cuánto cuestan? ¿Valor?",
+    "respuesta": "Los Barriles Desechables (5L) parten desde $31.990. También tenemos servicio para eventos (Dispensador y Muro) con otros precios. Puedes ver la carta completa en https://cocktailsontap.cl/cotizar. Si me dices el formato que te interesa, te oriento mejor."
   }
 ]

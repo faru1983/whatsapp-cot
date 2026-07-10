@@ -243,7 +243,8 @@ export const eventosStates = {
 
       // Palabras que indican "sigamos por aquí" (incluye "no" cuando el bot preguntó web vs chat).
       // "aka" = typo frecuente de "acá" (mismo criterio que en barriles).
-      const wantsWhatsapp = /^no$|aqui|aca|aka|chat|whatsapp|ayuda|ayudar|ayudando|por favor|porfa|dime|muestra|catalogo|quiero|si|sigamos|seguimos|seguir|continuar|precio|valor|cuesta|cuanto/i.test(normalizedMessage);
+      // NO incluir precio/valor/cuánto: eso es duda → FAQ/IA, no avance de canal.
+      const wantsWhatsapp = /^no$|aqui|aca|aka|chat|whatsapp|ayuda|ayudar|ayudando|por favor|porfa|dime|muestra|catalogo|quiero|si|sigamos|seguimos|seguir|continuar/i.test(normalizedMessage);
 
       if (wantsWeb) {
         return {

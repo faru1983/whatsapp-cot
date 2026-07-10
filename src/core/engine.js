@@ -441,7 +441,11 @@ export async function processMessage(sessionId, messageText) {
     } else {
       cliLog('FAQ: consultando faq.json + catálogo/despachos (datos.json) con IA...');
       const faqData = JSON.parse(fs.readFileSync(FAQ_JSON_PATH, 'utf8'));
-      faqResponse = await responderFAQ(messageText, faqData);
+      // Pasamos intención/formato para adaptar respuestas (ej. rendimiento solo 5L en desechables)
+      faqResponse = await responderFAQ(messageText, faqData, {
+        userIntent: session.userIntent,
+        eventoFormato: session.eventoFormato
+      });
     }
 
     if (faqResponse !== "NO_FAQ") {

@@ -56,7 +56,7 @@ export const barrilesStates = {
         // Pistas claras: "meterme a ver" / "entrar" suele ser la web, no el chat
         labelHints: {
           WEB: 'Quiere ir a la página web / link / sitio (comprar o mirar ahí, NO seguir en WhatsApp). Frases: web, link, página, meterme a ver, entrar al sitio, ver directamente en la web.',
-          CHAT: 'Quiere seguir cotizando o que le cuenten POR ESTE CHAT / WhatsApp / aquí.'
+          CHAT: 'Quiere seguir cotizando o que le cuenten POR ESTE CHAT / WhatsApp / aquí (acá, por aquí, cuéntame, sigamos). NO uses CHAT si solo pregunta precio/valor/cuánto sin elegir canal: eso es UNCLEAR.'
         },
         keywordGuess: () => {
           // ¿Quiere ir a la web? Incluye frases naturales sin decir "web"
@@ -67,10 +67,10 @@ export const barrilesStates = {
           ) && !/chat|whatsapp|por\s+aqui|por\s+aca|cuentame|cu[eé]ntame/i.test(normalizedMessage);
 
           // ¿Quiere seguir por WhatsApp? Incluye "no" cuando el bot preguntó web vs aquí.
-          // "aka" = typo frecuente de "acá" (también está en wantsBarrilesQuote).
+          // "aka" = typo frecuente de "acá".
+          // NO incluir precio/valor/cuánto: eso es duda → FAQ/IA, no avance de canal.
           const wantsWhatsapp = /^(no|nop|nope)$/i.test(messageText.trim())
-            || /\b(aqui|aca|aka|chat|whatsapp|por\s+aqui|por\s+aca|por\s+aka|cuentame|cu[eé]ntame|ayudame|ayúdame|sigamos|seguimos|continuar)\b/i.test(normalizedMessage)
-            || /\b(dime|muestra|catalogo|precio|valor|cuesta|cuanto)\b/i.test(normalizedMessage);
+            || /\b(aqui|aca|aka|chat|whatsapp|por\s+aqui|por\s+aca|por\s+aka|cuentame|cu[eé]ntame|ayudame|ayúdame|sigamos|seguimos|continuar)\b/i.test(normalizedMessage);
 
           if (wantsWeb) return 'WEB';
           if (wantsWhatsapp) return 'CHAT';

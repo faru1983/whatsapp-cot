@@ -138,9 +138,13 @@ export function buildFaqCatalogContext(data = preciosData) {
 	lines.push('');
 
 	// --- Rendimientos e instalación muro ---
+	// Misma tabla para todos; al responder al cliente filtrar según contexto (desechable solo 5L, etc.)
 	const rendimientos = data.rendimientos_barriles || {};
 	if (Object.keys(rendimientos).length > 0) {
-		lines.push('Rendimiento aprox. (válido para todos los formatos):');
+		lines.push('Rendimiento aprox. (vaso/copa con hielo ≈ 200ml). Filtrar al cliente según contexto:');
+		lines.push('- Barriles desechables: solo 5L.');
+		lines.push('- Eventos Dispensador: 5L y 10L.');
+		lines.push('- Eventos Muro: 10L, 20L y 30L.');
 		for (const [litraje, tragos] of Object.entries(rendimientos)) {
 			lines.push(`- ${litraje} → ~${tragos} cócteles`);
 		}

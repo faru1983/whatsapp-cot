@@ -395,6 +395,7 @@ REGLAS:
 5. PROHIBIDO inventar etiquetas nuevas. PROHIBIDO devolver texto fuera del JSON.
 6. No clasifiques datos concretos (fechas, comunas, nombres de cócteles) como decisión: eso es UNCLEAR.
 7. Lee bien las pistas de cada etiqueta. Ej.: si WEB = ir al sitio y CHAT = seguir en WhatsApp, "voy a meterme a ver / entrar a la página / prefiero el link" es WEB, NO CHAT.
+8. Si el paso es web vs chat y el cliente solo dice "precio", "valor", "cuánto", "cuánto cuestan" SIN elegir canal → UNCLEAR (es duda, no decisión).
 
 Ejemplo: {"intent":"${labels[0]}","confidence":"high"}`;
 
@@ -458,9 +459,12 @@ Ejemplo: {"intent":"${labels[0]}","confidence":"high"}`;
  *
  * @param {string} userMessage - El mensaje que escribió el cliente.
  * @param {Array} faqData - Arreglo de objetos {pregunta, respuesta}
+ * @param {object} [sessionContext] - Contexto del chat para adaptar respuestas (ej. rendimiento)
+ * @param {string} [sessionContext.userIntent] - 'BARRILES' | 'EVENTOS' | undefined
+ * @param {string} [sessionContext.eventoFormato] - 'Dispensador Portátil' | 'Muro de Coctelería' | undefined
  * @returns {Promise<string>} Devuelve la respuesta redactada o "NO_FAQ".
  */
-export async function responderFAQ(userMessage, faqData) {
+export async function responderFAQ(userMessage, faqData, sessionContext = {}) {
   const env = getEnv();
   const { provider, apiKey, model } = env;
   // Un poco más de tokens: respuestas de precio/despacho pueden listar 1–3 ítems
@@ -468,6 +472,13 @@ export async function responderFAQ(userMessage, faqData) {
 
   // Catálogo + despachos RM compactos (misma fuente que usa OrderBuilder / carta)
   const catalogContext = buildFaqCatalogContext();
+
+  // Contexto del flujo: sirve para no listar litrajes de evento si está en desechables
+  const intent = sessionContext.userIntent || 'No definido';
+  const eventoFormato = sessionContext.eventoFormato || 'No elegido';
+  const sessionBlock = `=== CONTEXTO DE SESIÓN ===
+- Intención actual: ${intent} (BARRILES = desechables 5L; EVENTOS = dispensador/muro)
+- Formato de evento elegido: ${eventoFormato}`;
 
   const systemInstruction = `Eres un clasificador + redactor de FAQ estricto.
 El usuario escribió: "${userMessage}"
@@ -477,9 +488,11 @@ ${JSON.stringify(faqData, null, 2)}
 
 === ${catalogContext} ===
 
+${sessionBlock}
+
 REGLAS:
 1. Responde SOLO si el mensaje es claramente una pregunta sobre:
-   - Una FAQ de la lista (horarios, envíos/regiones, dónde entregan, pago, web, Instagram, correo, teléfono, rendimiento), O
+   - Una FAQ de la lista (horarios, envíos/regiones, dónde entregan, de dónde son / de qué parte son, pago, web, Instagram, correo, teléfono, rendimiento), O
    - Precios / catálogo / carta / valor de un cóctel o extra (usar la información oficial de arriba), O
    - Ingredientes / de qué está hecho un cóctel del catálogo (usar SOLO el campo "Ingredientes" de la información oficial), O
    - Costo de despacho a una comuna de la RM (usar tabla DESPACHOS; distinguir desechable vs evento).
@@ -495,11 +508,20 @@ REGLAS:
    - Si preguntan el precio de un cóctel SIN indicar categoría (ej. "¿cuánto vale el Pisco Sour?"): NO listes los 3 precios. Aclara brevemente que hay 3 formatos de barril y PREGUNTA cuál quiere cotizar (desechable 5L / Dispensador / Muro).
    - Solo da el precio numérico cuando el cliente ya eligió la categoría (o la dejó inequívoca). Entonces responde SOLO ese canal, con litraje si aplica.
    - PROHIBIDO pegar la tabla completa desechable+dispensador+muro en una sola respuesta.
-7. Cobertura / "dónde entregan" / envíos (sin comuna concreta): usa la respuesta FAQ de cobertura. Di que entregamos en toda la RM y a regiones por encomienda. Si preguntan costo a una comuna de RM: usa la tabla DESPACHOS. Fuera de RM: no inventes monto; di encomienda y que el costo se confirma al comprar. En RM: si no dicen si es barril desechable o evento, pregunta antes de cotizar el envío.
-8. Si preguntan "precios" o "carta" de forma general: explica las 3 categorías de barril en 1–2 líneas, menciona la web https://cocktailsontap.cl/cotizar y ofrece cotizar un cóctel concreto cuando digan formato. No pegues el catálogo completo.
-9. Extras o comuna concreta (con categoría clara): responde solo ese dato, amable y breve, en pesos chilenos.
-10. PROHIBIDO decir "no tengo respuesta" o disculparte cuando no hay match. En ese caso SOLO: NO_FAQ
-11. ANTI-JERGA INTERNA (crítica): NUNCA escribas al cliente palabras como "DATOS OFICIALES", "FAQ", "faq.json", "datos.json", "sección", "base de datos" ni "consultar la tabla en...". Habla solo como vendedor: da la info útil en español chileno cordial.`;
+7. Origen / cobertura / envíos:
+   - "¿De dónde son?": Somos de Santiago (FAQ de origen).
+   - Cobertura: repartimos en todas las comunas de la RM; a otras regiones por Blue Express o empresas similares de encomiendas (FAQ de envíos).
+   - Si preguntan costo a una comuna de RM: usa la tabla DESPACHOS. Fuera de RM: no inventes monto; di encomienda y que el costo se confirma al comprar. En RM: si no dicen si es barril desechable o evento, pregunta antes de cotizar el envío.
+8. RENDIMIENTO DE BARRILES (según CONTEXTO DE SESIÓN; vaso/copa con hielo ≈ 200ml):
+   - Si intención = BARRILES: responde SOLO que el barril desechable de 5L rinde aprox. 25 cócteles. NO menciones 10L, 20L, 30L ni formatos de evento.
+   - Si intención = EVENTOS y formato = Dispensador Portátil: solo 5L≈25 y 10L≈50 tragos.
+   - Si intención = EVENTOS y formato = Muro de Coctelería: solo 10L≈50, 20L≈100, 30L≈150 tragos.
+   - Si intención = EVENTOS sin formato aún: puedes dar 5L/10L (dispensador) y mencionar que el Muro usa 10L/20L/30L, o preguntar el formato.
+   - Si intención no definida: resumen breve y pregunta si cotiza desechable o evento. NO pegues la tabla completa si el contexto ya es claro.
+9. Si preguntan "precios" o "carta" de forma general: explica las 3 categorías de barril en 1–2 líneas, menciona la web https://cocktailsontap.cl/cotizar y ofrece cotizar un cóctel concreto cuando digan formato. No pegues el catálogo completo.
+10. Extras o comuna concreta (con categoría clara): responde solo ese dato, amable y breve, en pesos chilenos.
+11. PROHIBIDO decir "no tengo respuesta" o disculparte cuando no hay match. En ese caso SOLO: NO_FAQ
+12. ANTI-JERGA INTERNA (crítica): NUNCA escribas al cliente palabras como "DATOS OFICIALES", "FAQ", "faq.json", "datos.json", "sección", "base de datos", "CONTEXTO DE SESIÓN" ni "consultar la tabla en...". Habla solo como vendedor: da la info útil en español chileno cordial.`;
 
   try {
     let textResult = "NO_FAQ";
