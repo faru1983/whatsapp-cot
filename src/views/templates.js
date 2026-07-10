@@ -129,18 +129,26 @@ Muchas personas comienzan mirando opciones antes de decidir.
 Si más adelante necesitas ayuda para elegir sabores, cantidades o tiempos de despacho, aquí estaré.`;
 }
 
-/** Respuesta cuando el cliente dice que le interesan ambas opciones */
-export const MENSAJE_AMBAS = `🍸 ¡Perfecto! Te doy un resumen de ambos:
+/**
+ * MENSAJE_AMBAS: Resumen cuando el cliente pide ambas opciones.
+ * Tres burbujas de WhatsApp: (1) barriles, (2) eventos, (3) pregunta.
+ */
+export const MENSAJE_AMBAS = [
+  // (1/3) Barriles Desechables
+  `🍸 ¡Perfecto! Te doy un resumen de ambos:
 
 🛢️ *Barriles Desechables*
 Barriles de 5 litros que rinden aproximadamente 25 cócteles, listos para servir en segundos. Disponibles en sabores clásicos como Mojito, Caipiriña, Sangría y otros. Son ideales para disfrutar en casa, celebraciones o regalar.
-Puedes adquirilos en nuestra tienda virtual: https://cocktailsontap.cl/barriles
+Puedes adquirilos en nuestra tienda virtual: https://cocktailsontap.cl/barriles`,
 
-🎉 *Servicio para Eventos*
+  // (2/3) Servicio para Eventos
+  `🎉 *Servicio para Eventos*
 Montamos una *Estacion de Coctelería Autoservicio* con todo lo necesario para que tus invitados disfruten cócteles listos en segundos. Ideal para matrimonios, cumpleaños, empresas y celebraciones de todo tipo.
-Puedes cotizar facilmente aquí: https://cocktailsontap.cl/eventos
+Puedes cotizar facilmente aquí: https://cocktailsontap.cl/eventos`,
 
-¿Prefieres revisar la *pagina web* o quieres que te cuente más sobre nuestros *Barriles Desechables* o el *Servicio para Eventos*? 🍹`;
+  // (3/3) Pregunta: web o que le cuenten de un producto
+  `¿Prefieres revisar la *pagina web* o quieres que te cuente más sobre nuestros *Barriles Desechables* o el *Servicio para Eventos*? 🍹`
+];
 
 // ==============================================================================
 // 2. CATÁLOGO Y COTIZACIÓN

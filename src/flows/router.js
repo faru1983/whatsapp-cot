@@ -85,7 +85,8 @@ export const ESPERANDO_INTENCION = {
       return {
         success: true,
         nextState: 'ESPERANDO_INTENCION', // Nos quedamos aquí para que elija una sola opción
-        customReply: MENSAJE_AMBAS
+        // 3 burbujas: barriles → eventos → pregunta (web o producto)
+        customReplies: MENSAJE_AMBAS
       };
     }
 
