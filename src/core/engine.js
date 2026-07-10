@@ -16,6 +16,7 @@ import { getSession, saveSession, resetSession } from './db.js';
 import { statesMap } from '../flows/index.js';
 import { readPrompt } from '../views/prompts.js';
 import { buildFaqCatalogContext, sanitizeCustomerFacingReply } from '../logic/utils.js';
+import { isImagePart, assertImageExists } from '../logic/media.js';
 import { buildAdminSosBody } from '../views/templates.js';
 import { FAQ_JSON_PATH } from './paths.js';
 
@@ -107,34 +108,94 @@ function appendStepQuestionIfNeeded(body, question) {
 }
 
 /**
- * normalizeReplyParts: Convierte un string o un array de strings en lista limpia de mensajes.
- * Así promptQuestion puede devolver varios bloques (info + pregunta) y WhatsApp los envía separados.
+ * historyTextForPart: Texto que guardamos en el historial por cada burbuja.
+ * Las imágenes no son string: dejamos un marcador legible para la IA y el debug.
  *
- * @param {string|string[]|null|undefined} reply - Respuesta del estado o customReply(s)
- * @returns {string[]} Mensajes no vacíos listos para enviar
+ * @param {string|{ type: 'image', file: string, caption?: string }} part
+ * @returns {string}
+ */
+function historyTextForPart(part) {
+  if (typeof part === 'string') return part;
+  // Marcador fijo: el CLI y la IA ven el nombre del archivo, no un objeto crudo
+  let text = `[IMAGEN] ${part.file}`;
+  if (part.caption) text += `\n${part.caption}`;
+  return text;
+}
+
+/**
+ * normalizeReplyParts: Convierte string, imagen o array mixto en lista limpia de mensajes.
+ * Así promptQuestion / customReplies pueden mezclar texto e img('foto.webp').
+ *
+ * @param {string|object|Array|null|undefined} reply - Respuesta del estado o customReply(s)
+ * @returns {Array<string|{ type: 'image', file: string, caption?: string }>}
  */
 function normalizeReplyParts(reply) {
   if (reply == null) return [];
   const list = Array.isArray(reply) ? reply : [reply];
-  return list.filter((p) => typeof p === 'string' && p.trim());
+  return list.filter((p) => {
+    if (typeof p === 'string') return p.trim() !== '';
+    return isImagePart(p);
+  });
 }
 
 /**
- * commitBotReplies: Guarda cada bloque en el historial y devuelve string o array para el envío.
- * index.js y el CLI ya saben enviar un array como varios mensajes de WhatsApp.
+ * failMissingImage: Silencia el chat y avisa al admin si falta un archivo en assets/.
+ * No envía nada al cliente: el administrador continúa la conversación a mano.
+ *
+ * @param {object} session - Sesión actual (se muta mute + estado)
+ * @param {string} sessionId - ID de sesión para persistir
+ * @param {string} expectedPath - Ruta relativa esperada (ej. assets/foto.webp)
+ * @returns {null} Siempre null (sin reply al cliente)
+ */
+function failMissingImage(session, sessionId, expectedPath) {
+  const stateId = session.currentState || '(sin estado)';
+  session.isMuted = true;
+  session.silenciado_timestamp = Date.now();
+  session.currentState = 'CERRADO';
+
+  cliLog(`SOS: imagen no encontrada → ${expectedPath}`);
+  cliLog('MUTE activado (imagen faltante). El bot no responde al cliente.');
+
+  if (sendAdminAlert) {
+    sendAdminAlert({
+      type: 'SOS',
+      title: 'IMAGEN FALTANTE',
+      body: buildAdminSosBody({
+        reason: `El sistema intentó enviar una imagen pero no encontró ${expectedPath}. El bot se silenció.`,
+        stateId
+      })
+    });
+  }
+
+  saveSession(sessionId, session);
+  return null;
+}
+
+/**
+ * commitBotReplies: Guarda cada bloque en el historial y devuelve string, imagen o array.
+ * Si alguna imagen no existe en assets/, mute + SOS y no se envía nada al cliente.
  *
  * @param {object} session - Sesión actual (se muta el historial)
  * @param {string} sessionId - ID de sesión para persistir
- * @param {string|string[]} reply - Uno o varios textos del bot
- * @returns {string|string[]|null} Lo que debe enviar WhatsApp / CLI
+ * @param {string|object|Array} reply - Uno o varios textos / imágenes del bot
+ * @returns {string|object|Array|null} Lo que debe enviar WhatsApp / CLI
  */
 function commitBotReplies(session, sessionId, reply) {
   const parts = normalizeReplyParts(reply);
   if (parts.length === 0) return null;
 
+  // Validamos todas las imágenes antes de guardar historial o devolver nada
+  for (const part of parts) {
+    if (!isImagePart(part)) continue;
+    const check = assertImageExists(part.file);
+    if (!check.ok) {
+      return failMissingImage(session, sessionId, check.expectedPath);
+    }
+  }
+
   // Cada burbuja queda como un turno aparte en el historial (útil para la IA)
   for (const part of parts) {
-    session.history.turns.push({ role: 'model', text: part });
+    session.history.turns.push({ role: 'model', text: historyTextForPart(part) });
   }
   saveSession(sessionId, session);
   return parts.length === 1 ? parts[0] : parts;
@@ -164,7 +225,9 @@ function resolvePromptQuestion(stateObj, session) {
 function lastPromptPart(prompt) {
   const parts = normalizeReplyParts(prompt);
   if (parts.length === 0) return '';
-  return parts[parts.length - 1];
+  const last = parts[parts.length - 1];
+  // El fallback FAQ/IA solo usa texto; si el último bloque fuera imagen, no lo pegamos
+  return typeof last === 'string' ? last : '';
 }
 
 export async function processMessage(sessionId, messageText) {
@@ -528,12 +591,19 @@ function cliChat() {
     const stateAfter = sessionAfter.currentState || '(sin estado)';
 
     // --- Respuesta del bot (si hubo) ---
-    // Puede ser string o array de bloques (carta + pregunta, etc.)
+    // Puede ser string, imagen (img) o array mixto (carta/foto + pregunta, etc.)
     if (response) {
       const replies = Array.isArray(response) ? response : [response];
       for (let i = 0; i < replies.length; i++) {
         const label = replies.length > 1 ? `Bot (${i + 1}/${replies.length})` : 'Bot';
-        console.log(`\n${label}: ${replies[i]}`);
+        const part = replies[i];
+        if (typeof part === 'string') {
+          console.log(`\n${label}: ${part}`);
+        } else if (isImagePart(part)) {
+          // En el simulador no hay WhatsApp: mostramos el nombre del archivo
+          console.log(`\n${label}: [IMAGEN] ${part.file}`);
+          if (part.caption) console.log(part.caption);
+        }
       }
     }
 

@@ -27,6 +27,7 @@ import {
 import { extractProductsWithAI } from '../core/llm.js';
 import { OrderBuilder } from '../logic/order-builder.js';
 import { resolveDecisionIntent } from '../logic/decision-intent.js';
+import { img } from '../logic/media.js';
 
 // ============================================================================
 // OBJETIVO: Flujo Barriles Desechables.
@@ -133,13 +134,13 @@ export const barrilesStates = {
         }
       });
 
-      // Carta y pregunta en mensajes separados (más claro en WhatsApp)
+      // Carta (imagen) y pregunta en mensajes separados (más claro en WhatsApp)
       if (intent === 'VER_CATALOGO') {
         return {
           success: true,
           nextState: 'BARRILES_OFRECER_COTIZACION',
           customReplies: [
-            getCartaCocteles('desechable'),
+            img('barril_desechable_precios.webp'),
             getOfferQuoteAfterCatalog()
           ]
         };

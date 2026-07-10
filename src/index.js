@@ -13,7 +13,9 @@ import { getSession, saveSession, resetSession, findSessionIdsForPhone } from '.
 import { loadBotConfig } from './core/config.js';
 import { composeAdminAlertMessage } from './views/templates.js';
 import { AUTH_DIR, PROJECT_ROOT } from './core/paths.js';
+import { isImagePart, assertImageExists } from './logic/media.js';
 import process from 'node:process';
+import fs from 'node:fs';
 
 // ==============================================================================
 // OBJETIVO: Punto de entrada del bot de WhatsApp.
@@ -889,7 +891,7 @@ async function startBot() {
           return;
         }
 
-        // El engine puede devolver un string o un array de mensajes (bloques separados)
+        // El engine puede devolver string, imagen (img) o array mixto (foto + pregunta, etc.)
         const replies = Array.isArray(reply) ? reply : [reply];
         // Responder al JID con el que llegó el mensaje (puede ser @lid); la sesión usa sessionId
         const targetJid = message.key.remoteJid;
@@ -903,13 +905,36 @@ async function startBot() {
 
         // Envío inmediato de cada bloque (sin delay entre customReplies:
         // un delay aquí hacía que el cliente escribiera "entre medio" de dos mensajes).
-        for (const textPart of replies) {
-          if (!textPart) continue;
-          // Sin quoted: en algunos celulares el quote rompe el descifrado
-          const sentMsg = await sock.sendMessage(targetJid, { text: textPart });
-          if (sentMsg?.key?.id) {
-            botSentMessageIds.add(sentMsg.key.id);
-            rememberMessage(sentMsg.key.id, sentMsg.message || { conversation: textPart });
+        for (const part of replies) {
+          if (!part) continue;
+
+          let sentMsg = null;
+
+          if (typeof part === 'string') {
+            // Texto normal (como siempre)
+            sentMsg = await sock.sendMessage(targetJid, { text: part });
+            if (sentMsg?.key?.id) {
+              botSentMessageIds.add(sentMsg.key.id);
+              rememberMessage(sentMsg.key.id, sentMsg.message || { conversation: part });
+            }
+            continue;
+          }
+
+          // Imagen desde assets/ (el engine ya validó que existe; defensa extra aquí)
+          if (isImagePart(part)) {
+            const check = assertImageExists(part.file);
+            if (!check.ok) {
+              console.error(`Imagen no encontrada al enviar: ${check.expectedPath}`);
+              continue;
+            }
+            const imageBuffer = fs.readFileSync(check.absolutePath);
+            const payload = { image: imageBuffer };
+            if (part.caption) payload.caption = part.caption;
+            sentMsg = await sock.sendMessage(targetJid, payload);
+            if (sentMsg?.key?.id) {
+              botSentMessageIds.add(sentMsg.key.id);
+              rememberMessage(sentMsg.key.id, sentMsg.message || payload);
+            }
           }
         }
 

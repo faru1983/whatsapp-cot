@@ -629,11 +629,13 @@ index.js  →  engine.js  →  statesMap (flows/)  →  utils.js + order-builder
 | `src/flows/cerrado.js` | Estado final: conversación cerrada / bot en silencio |
 | `src/flows/index.js` | Junta todos los estados en un solo mapa |
 | `src/logic/utils.js` | Utilidades: normalizar texto, precios, fechas, comunas, etc. |
+| `src/logic/media.js` | Imágenes para WhatsApp: `img('archivo.ext')` desde la carpeta `assets/` |
 | `src/logic/order-builder.js` | Arma la cotización con números reales |
 | `src/views/templates.js` | Mensajes fijos bonitos (bienvenida, cotización, etc.) |
 | `src/views/prompts.js` | Instrucciones que se le dan a la IA según el paso |
 | `db/datos.json` | Catálogo y precios del negocio |
 | `db/faq.json` | Preguntas frecuentes |
+| `assets/` | Fotos que el bot puede enviar (ej. lista de precios de barriles) |
 
 ### La idea central: “máquina de estados”
 
@@ -766,6 +768,23 @@ Si agregas un estado nuevo:
 1. Créalo en `barriles.js` o `eventos.js`
 2. Agrega su prompt en `views/prompts.js`
 3. Regístralo en el mapa de `flows/index.js`
+
+### Enviar una imagen en un paso
+
+1. Pon el archivo en la carpeta `assets/` (nombre completo con extensión, ej. `barril_desechable_precios.webp`).
+2. En el flujo, dentro de `customReplies` o `customReply`:
+
+```js
+import { img } from '../logic/media.js';
+
+customReplies: [
+  img('barril_desechable_precios.webp'),           // solo imagen
+  // img('foto.webp', 'Texto opcional bajo la foto'),
+  '¿Te armo una cotización?'
+]
+```
+
+Si el archivo no está en `assets/`, el bot **se silencia** (sin mensaje al cliente) y manda un **SOS** al admin con la ruta esperada. En `npm run test:local` verás `[IMAGEN] nombre.ext` o el aviso `[TEST]` de mute/SOS.
 
 ---
 

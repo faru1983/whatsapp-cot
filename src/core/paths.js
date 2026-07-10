@@ -21,3 +21,6 @@ export const DATOS_JSON_PATH = path.join(PROJECT_ROOT, 'db', 'datos.json');
 
 /** Preguntas frecuentes */
 export const FAQ_JSON_PATH = path.join(PROJECT_ROOT, 'db', 'faq.json');
+
+/** Imágenes que el bot puede enviar por WhatsApp (ej. lista de precios) */
+export const ASSETS_DIR = path.join(PROJECT_ROOT, 'assets');
