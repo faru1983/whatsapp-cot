@@ -175,7 +175,7 @@ export function getEventQuotationTemplate(sessionData, quote, deliveryCost, isRM
   return [
     text,
     `Si el pedido está bien, escribe *ok* para avanzar con la reserva.
-Si necesitas cambiar algo, escribe *modificar*.`
+_(Si necesitas cambiar algo, escribe *modificar*.)_`
   ];
 }
 
@@ -397,7 +397,7 @@ export function getEventDataSummary(session) {
 
   return [
     lines.join('\n'),
-    `¿Todo bien con estos datos?\nEscribe *ok* para continuar, o corrige lo que necesites (ej: "son 80 invitados" / "es en Providencia").`
+    `¿Todo bien con estos datos?\n\nEscribe *OK* para continuar, o corrige lo que necesites _(ej: "son 80 invitados" / "es en Providencia")_`
   ];
 }
 

@@ -15,11 +15,12 @@ const WELCOME_TEXTS = [
   `👋 *Servicio para Eventos* — estación de coctelería autoservicio para tu celebración.
 
 Tenemos dos formatos:
-• *Dispensador Portátil* — instalación gratis, pedido mín. 10L
-• *Muro de Coctelería* — instalación $50.000, pedido mín. 30L
+- *Dispensador Portátil* — instalación *GRATIS*, pedido mín. 10L
+- *Muro de Coctelería* — instalación *$50.000*, pedido mín. 30L
 
 Ambos incluyen hielo, garnish, vasos/copas y accesorios de bar.
-👉 Arma tu cotización: https://cocktailsontap.cl/eventos`,
+
+👉 *Arma tu cotización:* https://cocktailsontap.cl/eventos`,
   `¿Prefieres cotizar en la *web* o seguimos por *aquí*?
 
 _Si solo estás mirando, escribe *después*._`

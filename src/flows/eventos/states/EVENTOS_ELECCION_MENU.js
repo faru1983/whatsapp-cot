@@ -29,7 +29,7 @@ import {
 
 const ASK_COCKTAILS = `¿Qué cócteles te gustaría incluir en tu evento? (ej: "Mojito 10L y 1 Aperol 5L")`;
 const ASK_OK_AFTER_CART = `Si está bien así, escribe *ok* para ver el resumen de tu cotización.
-(Si quieres cambiar, dime qué agregar o quitar.)`;
+_(Si quieres cambiar, dime qué agregar o quitar)_`;
 
 const AI_PROMPT = `[SISTEMA - ESTADO: PREGUNTAS SOBRE EL MENÚ O LOGÍSTICA DE EVENTOS]
 El cliente está revisando la recomendación para su evento pero tiene dudas en lugar de elegir los cócteles.
@@ -48,7 +48,8 @@ function shortQuestionForSession(session) {
   const hasCart = session.orderBuilder?.products
     && Object.keys(session.orderBuilder.products).length > 0;
   if (hasCart) {
-    return `Si está bien, escribe *ok* para el resumen. Si quieres cambiar, dime qué agregar o quitar.`;
+    return `Si está bien, escribe *ok* para el resumen.
+    _(Si quieres cambiar, dime qué agregar o quitar.)_`;
   }
   return ASK_COCKTAILS;
 }

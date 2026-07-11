@@ -13,7 +13,8 @@ Soy un *asistente virtual*: si me respondes con las palabras en *negrita*, te or
 ¿Buscas *Barriles Desechables* o *Servicio para Eventos*?`;
 
 const SHORT_Q = `Para seguir, ¿buscas *Barriles Desechables* o *Servicio para Eventos*?
-(También puedes escribir *NO* para hablar con una persona.)`;
+
+_(También puedes escribir *NO* para hablar con una persona.)_`;
 
 const MENSAJE_AMBAS = [
   `🍸 ¡Perfecto! Te doy un resumen de ambos:
