@@ -7,10 +7,10 @@ import makeWASocket, {
   useMultiFileAuthState
 } from '@whiskeysockets/baileys';
 import pino from 'pino';
-import { processMessage, setAdminAlertFunction } from './core/engine.js';
+import { processMessage } from './core/engine.js';
 import { shouldHandleMessage, stripTriggerPrefix } from './logic/utils.js';
 import { getSession, saveSession, resetSession, findSessionIdsForPhone } from './core/db.js';
-import { loadBotConfig } from './core/config.js';
+import { assertRuntimeConfigReady, loadBotConfig } from './core/config.js';
 import { AUTH_DIR, PROJECT_ROOT } from './core/paths.js';
 import { isImagePart, assertImageExists } from './logic/media.js';
 import { rememberLabel } from './core/business-labels.js';
@@ -347,7 +347,8 @@ async function startBot() {
   };
 
   try {
-    const config = loadBotConfig();
+    // Fail-fast: API key obligatoria; ADMIN_NUMBERS vacío solo avisa (SOS no llegarían)
+    const config = assertRuntimeConfigReady();
     const logger = pino({ level: 'silent' });
 
     console.log(`Iniciando bot en: ${PROJECT_ROOT}`);
@@ -599,7 +600,8 @@ async function startBot() {
       }
 
       try {
-        // Función que engine usará para avisar eventos importantes (SOS / cierre de venta).
+        // Callback por mensaje: captura sock/sessionId de ESTE chat.
+        // Así, si hay varios clientes a la vez, un SOS no se mezcla con otro.
         // alertData = { type: 'SUCCESS'|'SOS', title, body, labelKey? }
         const sendAdminAlert = async (alertData) => {
           await notifyAdmins({
@@ -613,9 +615,7 @@ async function startBot() {
           });
         };
 
-        setAdminAlertFunction(sendAdminAlert);
-
-        const reply = await processMessage(sessionId, cleanText);
+        const reply = await processMessage(sessionId, cleanText, { sendAdminAlert });
 
         if (!reply) {
           return;

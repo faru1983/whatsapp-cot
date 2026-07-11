@@ -97,7 +97,8 @@ export function rulesBarrilesFiltroCanal() {
     },
     {
       label: 'WEB',
-      test: ({ trimmed, normalized }) => {
+      // Solo si menciona web/link/página. "gracias" solo NO es WEB (es ruido → re-pregunta).
+      test: ({ normalized }) => {
         const mentionsWeb = (
           /web|link|pagina|sitio|url|tienda\s*virtual/.test(normalized)
           || /meterme|me\s+meto|entrar|voy\s+a\s+(la\s+)?(pagina|web|sitio|link)/.test(normalized)
@@ -107,14 +108,14 @@ export function rulesBarrilesFiltroCanal() {
           || /\bvoy\s+a\s+(verlo|mirarlo|revisarlo|chequearlo)\b/.test(normalized)
           || /\b(lo\s+)?(reviso|miro)\s+(alla|ahi|en\s+la\s+(web|pagina|sitio))\b/.test(normalized)
         );
-        const politeClose = /^(ok|okay|dale|listo|perfecto|genial|super|súper)?[,!.\s]*(muchas\s+|mil\s+)?(gracias|thanks|thank\s*you)([,!.\s]+(ok|okay|listo|perfecto))?[,!.\s]*$/i.test(trimmed);
         const mentionsChat = /chat|whatsapp|por\s+aqui|por\s+aca|cuentame|ayudame/.test(normalized);
-        return (mentionsWeb || politeClose) && !mentionsChat;
+        return mentionsWeb && !mentionsChat;
       }
     },
     {
       label: 'CHAT',
       // "no" corto = no a la web (prefiere ayuda por WhatsApp).
+      // NO incluir precio/valor: eso se responde en el filtro sin avanzar canal.
       test: ({ trimmed, normalized }) =>
         /^(no|nop|nope)$/i.test(trimmed)
         || /\b(aqui|aca|aka|chat|whatsapp|por\s+aqui|por\s+aca|por\s+aka|cuentame|ayudame|sigamos|seguimos|continuar)\b/.test(normalized)
@@ -133,36 +134,49 @@ export function rulesWebVsChat() {
   return [
     {
       label: 'WEB',
-      // Frases de "voy a la página" + cortesía de cierre tras ofrecer la web
-      test: ({ trimmed, normalized }) => {
+      // Solo menciones claras de web/link. "gracias" solo NO cierra (ruido → re-pregunta).
+      test: ({ normalized }) => {
         const mentionsWeb = (
           /web|link|pagina|sitio|url|tienda\s*virtual/.test(normalized)
           || /meterme|me\s+meto|entrar|voy\s+a\s+(la\s+)?(pagina|web|sitio|link)/.test(normalized)
           || /ver\s+directamente|prefiero\s+(la\s+)?(web|pagina|link)|mejor\s+(la\s+)?(web|pagina)/.test(normalized)
-          // Tras ofrecer el link: "lo veré", "lo veo", "ya lo reviso" = se va a la web
           || /\blo\s+(vere|veo|reviso|miro|chequeo|chekeo)\b/.test(normalized)
           || /\bya\s+lo\s+(veo|miro|reviso|chequeo|chekeo|vere)\b/.test(normalized)
           || /\bvoy\s+a\s+(verlo|mirarlo|revisarlo|chequearlo)\b/.test(normalized)
           || /\b(lo\s+)?(reviso|miro)\s+(alla|ahi|en\s+la\s+(web|pagina|sitio))\b/.test(normalized)
         );
-        // Cortesía sola = "ok, me bastó / me voy a mirar la web" (no seguir por chat).
-        // Solo mensaje casi vacío de gracias; si pide chat, no aplica.
-        const politeClose = /^(ok|okay|dale|listo|perfecto|genial|super|súper)?[,!.\s]*(muchas\s+|mil\s+)?(gracias|thanks|thank\s*you)([,!.\s]+(ok|okay|listo|perfecto))?[,!.\s]*$/i.test(trimmed);
-
-        // Si también pide chat, no forzamos WEB
         const mentionsChat = /chat|whatsapp|por\s+aqui|por\s+aca|cuentame/.test(normalized);
-        return (mentionsWeb || politeClose) && !mentionsChat;
+        return mentionsWeb && !mentionsChat;
       }
     },
     {
       label: 'CHAT',
       // "no" corto = no a la web cuando el bot preguntó web vs aquí.
-      // "aka" = typo frecuente de "acá".
-      // NO incluir precio/valor/cuánto: eso es duda → FAQ, no avance de canal.
+      // NO incluir precio/valor/cuánto: eso es duda, no avance de canal.
       test: ({ trimmed, normalized }) =>
         /^(no|nop|nope)$/i.test(trimmed)
         || /\b(aqui|aca|aka|chat|whatsapp|por\s+aqui|por\s+aca|por\s+aka|cuentame|ayudame|sigamos|seguimos|continuar)\b/.test(normalized)
     }
+  ];
+}
+
+/**
+ * rulesEventosFiltroCanal: Menú inicial de eventos (web / chat / solo mirando).
+ * Igual idea que barriles: mirón primero, luego web, luego chat.
+ *
+ * @returns {Array<{ label: string, test: Function }>}
+ */
+export function rulesEventosFiltroCanal() {
+  return [
+    {
+      label: 'SOLO_MIRANDO',
+      test: ({ raw, trimmed }) => {
+        // "no" solo = no a la web → CHAT (no cerramos)
+        if (/^(no|nop|nope|nah)$/i.test(trimmed)) return false;
+        return isOnlyBrowsing(raw) || wantsInstagramOrSocial(raw);
+      }
+    },
+    ...rulesWebVsChat()
   ];
 }
 

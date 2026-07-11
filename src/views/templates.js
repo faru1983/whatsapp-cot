@@ -1,156 +1,24 @@
 import { formatPrice } from '../logic/utils.js';
 
 // ==============================================================================
-// OBJETIVO: Textos fijos que el bot envía por WhatsApp (cliente y alertas a admin).
-// Aquí NO hay lógica de negocio (eso va en flows/ y logic/).
-// Solo funciones que devuelven strings formateados para copiar al chat.
+// OBJETIVO: Textos compartidos (cotización, dudas, alertas admin, pitches eventos).
+// Los textos por estado viven en flows/*/states/. Aquí solo lo reutilizable.
 // ==============================================================================
 
 // ==============================================================================
-// 1. MENSAJES DE BIENVENIDA Y FILTRO INICIAL
+// 1. DESPEDIDAS Y ACLARACIONES COMPARTIDAS
 // ==============================================================================
-
-/**
- * getWelcomeBarriles: Mensaje cuando el cliente elige barriles desechables.
- * Devuelve dos bloques: pitch + link, y la pregunta web / WhatsApp / solo mirando.
- *
- * @param {boolean} isSwitch - true si el cliente cambió de eventos a barriles a mitad de conversación
- * @returns {string[]} [bloque informativo, pregunta]
- */
-export function getWelcomeBarriles(isSwitch = false) {
-  // Pregunta final: web vs WhatsApp (SOLO_MIRANDO sigue existiendo por keywords, sin anunciarlo aquí)
-  const question = `¿Quieres ver todos los sabores y precios en *nuestra web* o prefieres que te ayude por *aquí*?`;
-
-  if (isSwitch) {
-    return [
-      `¡Buenísimo! Te cuento: la forma más rápida de conocer todas las variedades, fotos y precios es directamente en *nuestra web*: https://cocktailsontap.cl/barriles`,
-      question
-    ];
-  }
-
-  return [
-    `👋 ¡Gracias por tu interés en nuestros *Barriles Desechables*!
-
-Cada barril viene listo para servir, contiene *5 litros* y rinde aproximadamente *25 cócteles*. Solo debes mantenerlo refrigerado y servir. Solución ideal para juntas y celebraciones de cualquier tipo.
-
-💰 Están disponibles desde los *$39.990*, lo que equivale a aproximadamente *$1.600 por cóctel*. 🍸
-
-📍 Estamos en *Santiago*. Realizamos entregas en todas las comunas de la *Región Metropolitana* y también enviamos a todo Chile por *Blue Express* o empresa de tu preferencia.
-
-La forma más rápida de conocer todas las variedades, fotos y precios es directamente en *nuestra web*.
-👉 https://cocktailsontap.cl/barriles`,
-    question
-  ];
-}
-
-/**
- * getWebChannelGoodbye: Despedida cuando el cliente elige ir a la página web.
- * Cierra el chat (mute) para no duplicar la venta mientras navega.
- *
- * @returns {string}
- */
-export function getWebChannelGoodbye() {
-  return `Perfecto 😊
-En la página encontrarás todas las variedades, precios, fotografías y podrás comprar cuando quieras.
-¡Muchas gracias por tu interés!`;
-}
-
-/**
- * getBarrilesChatCatalogReplies: Tras elegir WhatsApp, enviamos la carta y pedimos pedido.
- * El flujo arma customReplies: [imagen+caption intro, pregunta de sabores].
- *
- * @returns {{ intro: string, pregunta: string }} intro va de caption en la foto; pregunta es burbuja aparte
- */
-export function getBarrilesChatCatalogReplies() {
-  return {
-    intro: `Aquí tienes nuestra lista de variedades y precios para que puedas revisarla con calma.
-
-*Cuando la revises, cuéntame:*`,
-    pregunta: `¿Qué sabor te interesa y cuántos barriles necesitas?
-
-(Puedes escribir por ej. *1 mojito y 1 sangría*)`
-  };
-}
-
-/**
- * getWelcomeEventos: Mensaje cuando el cliente elige servicio para eventos.
- * Explica Dispensador vs Muro y ofrece web o chat.
- * Devuelve dos bloques: pitch + formatos, y la pregunta web vs chat.
- *
- * @param {boolean} isSwitch - true si cambió de barriles a eventos
- * @returns {string[]} [bloque informativo, pregunta]
- */
-export function getWelcomeEventos(isSwitch = false) {
-  // Pregunta final: siempre en su propio mensaje (mismo patrón que barriles)
-  const question = `¿Prefieres cotizar en la página web o *seguimos por aquí*?`;
-
-  const header = isSwitch
-    ? `¡Buenísimo!`
-    : `👋 Gracias por tu interés en nuestro *Servicio para Eventos*.`;
-
-  const webLine = isSwitch
-    ? ''
-    : `\n\nLa forma más rápida de cotizar y armar tu menú en tiempo real es en *nuestra web*: https://cocktailsontap.cl/eventos`;
-
-  return [
-    `${header}
-
-Contamos con dos formatos de alto impacto visual:
-1. *Dispensador Portátil* (Para todo tipo de evento). La instalación es gratuita y el pedido mínimo es de 10 litros.
-2. *Muro de Coctelería* (Matrimonios y eventos grandes). La instalación cuesta $50.000 y el pedido mínimo es de 30 litros.
-
-Ambos formatos incluyen gratis: todo el hielo necesario, decoraciones deshidratadas, vaso/copas en préstamo y accesorios de bar.${webLine}`,
-    question
-  ];
-}
-
-/**
- * WELCOME_SECONDARY_FILTER: Bienvenida del filtro inicial.
- * La mayoría llega desde Instagram ya eligiendo "Desechable" o "Evento";
- * este texto es para quien saluda o escribe sin elegir camino todavía.
- * Siempre nombramos los productos oficiales (no "para la casa").
- */
-export const WELCOME_SECONDARY_FILTER = `¡Hola! Somos *Cocktails on Tap* 🍸
-
-¿Buscas *Barriles Desechables* o *Servicio para Eventos*?`;
-
-/** Pregunta corta para re-encaminar sin repetir toda la bienvenida */
-export const SHORT_INTENT_QUESTION = `¿Buscas *Barriles Desechables* o *Servicio para Eventos*?`;
 
 /**
  * getBrowseOnlyGoodbye: Despedida cuando el cliente solo está mirando opciones.
- * Tono suave; el flujo cierra con mute para no insistir.
  *
  * @returns {string}
  */
 export function getBrowseOnlyGoodbye() {
   return `Sin problema 😊
-Muchas personas comienzan mirando opciones antes de decidir.
-Si más adelante necesitas ayuda para elegir sabores, cantidades o tiempos de despacho, aquí estaré.`;
+Cuando quieras cotizar o ver precios, escríbeme de nuevo.
+¡Que estés muy bien!`;
 }
-
-/**
- * MENSAJE_AMBAS: Resumen cuando el cliente pide ambas opciones.
- * Tres burbujas de WhatsApp: (1) barriles, (2) eventos, (3) pregunta.
- */
-export const MENSAJE_AMBAS = [
-  // (1/3) Barriles Desechables
-  `🍸 ¡Perfecto! Te doy un resumen de ambos:
-
-🛢️ *Barriles Desechables*
-Barriles de 5 litros que rinden aproximadamente 25 cócteles, listos para servir en segundos. Disponibles en sabores clásicos como Mojito, Caipiriña, Sangría y otros. Son ideales para disfrutar en casa, celebraciones o regalar.
-
-Puedes adquirilos en nuestra tienda virtual: https://cocktailsontap.cl/barriles`,
-
-  // (2/3) Servicio para Eventos
-  `🎉 *Servicio para Eventos*
-Montamos una *Estacion de Coctelería Autoservicio* con todo lo necesario para que tus invitados disfruten cócteles listos en segundos. Ideal para matrimonios, cumpleaños, empresas y celebraciones de todo tipo.
-
-Puedes cotizar facilmente aquí: https://cocktailsontap.cl/eventos`,
-
-  // (3/3) Pregunta: web o que le cuenten de un producto
-  `¿Prefieres revisar la *pagina web* o quieres que te cuente más sobre nuestros *Barriles Desechables* o el *Servicio para Eventos*? 🍹`
-];
 
 // ==============================================================================
 // 2. CATÁLOGO Y COTIZACIÓN
@@ -303,10 +171,11 @@ export function getEventQuotationTemplate(sessionData, quote, deliveryCost, isRM
     text += `Ese ítem no se sumó al total.\n`;
   }
 
-  // Pregunta en segundo mensaje para que el cliente lea bien los montos primero
+  // Pregunta en segundo mensaje: guiamos con *ok*; siguen valiendo está bien / modificar / etc.
   return [
     text,
-    `¿Tu pedido *está bien* así para avanzar o necesitas *modificar* algo?`
+    `Si el pedido está bien, escribe *ok* para avanzar con la reserva.
+Si necesitas cambiar algo, escribe *modificar*.`
   ];
 }
 
@@ -398,7 +267,13 @@ export function buildAdminSosBody({ reason, stateId, lastMessage }) {
     body += `📍 *Paso:* ${stateId}\n`;
   }
   if (lastMessage != null && String(lastMessage).trim() !== '') {
-    body += `💬 *Último mensaje:* "${lastMessage}"`;
+    // Truncamos para no spamear al admin con pegados enormes / abuso off-topic
+    const MAX_LAST_MSG = 200;
+    let snippet = String(lastMessage).trim().replace(/\s+/g, ' ');
+    if (snippet.length > MAX_LAST_MSG) {
+      snippet = `${snippet.slice(0, MAX_LAST_MSG)}…`;
+    }
+    body += `💬 *Último mensaje:* "${snippet}"`;
   }
   return body.trim();
 }
@@ -448,8 +323,8 @@ Nuestro *Muro de Coctelería* es una opción premium que convierte la barra en u
 ✨ Todo esto está incluido, sin costo adicional:
 
 🧊 Hielo abundante para todo el evento.
-🍊 Garnish premium con frutas deshidratadas y decoraciones.
-🥂 Vasos o copas plásticas premium para todos los invitados.
+🍊 Garnish (frutas deshidratadas) para decorar tus cócteles.
+🥂 Vasos/Copas (plásticas premium) en prestamo para todos los invitados.
 🧰 Accesorios de bar como hieleras, palas, pinzas y todo lo necesario para servir.
 
 ⏰ Sin límite de tiempo: instalamos el muro antes de tu evento y lo retiramos al día siguiente, sin costos ocultos.`,
@@ -467,8 +342,8 @@ Nuestro *Dispensador Portátil* es ideal para eventos. Funciona sin electricidad
 ✨ Todo esto está incluido, sin costo adicional:
 
 🧊 Hielo abundante para todo el evento.
-🍊 Garnish premium con frutas deshidratadas y decoraciones.
-🥂 Vasos o copas plásticas premium para todos los invitados.
+🍊 Garnish (frutas deshidratadas) para decorar tus cócteles.
+🥂 Vasos/Copas (plásticas premium) en prestamo para todos los invitados.
 🧰 Accesorios de bar como hieleras, palas, pinzas y todo lo necesario para servir.
 
 ⏰ Sin límite de tiempo: instalamos el dispensador antes de tu evento y lo retiramos al día siguiente, sin costos ocultos.`,

@@ -3,16 +3,17 @@
 // Orden: (1) keywords → (2) clasificador IA. Si ambos fallan → null
 // (el engine activará FAQ / respuesta / re-pregunta: cajita 3).
 // NO usar en pasos de datos (fecha, comuna, cócteles, litraje).
-// Usado por barriles.js, eventos.js y futuros flujos.
+// Usado por los estados en flows/*/states/ (menús y confirmaciones).
 // ==============================================================================
 import { matchKeywordIntent } from './keyword-intent.js';
 import { classifyStepIntent, lastBotText } from './nlu-intent.js';
+import { isGreetingOrNoise } from './interruptions.js';
 import { testLog } from '../core/debug-log.js';
 
 /**
  * isDecisionNoise: ¿El mensaje es solo cortesía / ruido, sin elegir opción?
- * Ej.: "gracias", "hola", "ok" solos. NO son una decisión de menú.
- * Si es ruido, no llamamos al NLU (la IA a veces inventa una etiqueta).
+ * Ej.: "gracias", "hola", "Hoooola q genial", "ok". NO son decisión de menú.
+ * Si es ruido, no llamamos al NLU (la IA a veces inventa WEB/CHAT).
  *
  * Importante: se evalúa DESPUÉS de keywords. Así un "ok"/"dale" que sí
  * matchea en reglas de confirmar (cajita 1) sigue funcionando.
@@ -21,10 +22,8 @@ import { testLog } from '../core/debug-log.js';
  * @returns {boolean} true si no debemos clasificar con IA
  */
 export function isDecisionNoise(messageText) {
-  const trimmed = String(messageText ?? '').trim();
-  if (!trimmed) return true;
-  // Misma idea que el filtro de saludo/ruido del engine (FAQ omitido)
-  return /^(hola|holi|buenas|buen\s*d[ií]a|buenas\s*tardes|buenas\s*noches|hey|hi|hello|ok|okay|dale|gracias|thank(s)?|ya|listo|de\s+nada|genial|super|súper)[\s!.?]*$/i.test(trimmed);
+  // Misma detección que engine / filtros (interruptions.js)
+  return isGreetingOrNoise(messageText);
 }
 
 /**

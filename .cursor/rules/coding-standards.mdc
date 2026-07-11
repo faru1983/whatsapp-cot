@@ -30,7 +30,7 @@ Separar bloques lógicos con comentarios de sección numerados o titulados:
 // ==============================================================================
 ```
 
-Usar este patrón en: `engine.js`, flujos largos (`barriles.js`, `eventos.js`), `utils.js`, `index.js`.
+Usar este patrón en: `engine.js`, estados largos (`flows/*/states/*.js`), `utils.js`, `compile-state.js`, `index.js`.
 
 ### 3. Funciones (siempre comentar)
 
@@ -47,7 +47,7 @@ Usar este patrón en: `engine.js`, flujos largos (`barriles.js`, `eventos.js`), 
 export function normalizeString(str) { ... }
 ```
 
-Incluir en el comentario: qué hace, para qué sirve en el bot, parámetros y retorno.
+Incluir: qué hace, para qué sirve en el bot, parámetros y retorno.
 
 ### 4. Pasos dentro de funciones (comentar lo importante)
 
@@ -55,83 +55,82 @@ Dentro de funciones largas o con lógica no trivial, comentar **cada paso releva
 
 ```js
 // Si el cliente elige web, cerramos el chat para no duplicar la venta
-if (wantsWeb) { ... }
+if (intent === 'WEB') { ... }
 
 // Extraemos cócteles del mensaje usando IA (NLU híbrido)
 const { productos, dudas } = await extractProductsWithAI(...);
-
-// Si hay ambigüedad (ej: "piscola"), pedimos que elija marca
-if (dudas?.length > 0) { ... }
 ```
 
-Comentar especialmente: `if/else` de decisiones de negocio, llamadas a IA, cambios de estado, regex, loops, `try/catch`, mute/SOS/alertas admin.
+Comentar especialmente: decisiones de negocio, IA, cambios de estado, regex, mute/SOS/alertas.
 
 ### 5. Estilo del comentario
 
-- Lenguaje **simple y en español** (como si explicaras a un compañero de curso).
-- Explicar el **por qué** además del qué ("cerramos el chat para no duplicar la venta").
-- Si usas un término técnico (NLU, JID, fallback), definirlo en la misma línea o arriba.
-- Referencia de estilo: `engine.js`, `llm.js`, `db.js`, `index.js`.
+- Lenguaje **simple y en español**.
+- Explicar el **por qué** además del qué.
+- Términos técnicos (NLU, JID, fallback): definirlos en la misma línea o arriba.
+- Referencia: `engine.js`, estados en `flows/*/states/`, `compile-state.js`.
 
-### 6. Qué no comentar (excepciones mínimas)
+### 6. Qué no comentar
 
-Solo omitir comentarios en líneas totalmente obvias dentro de funciones ya documentadas (ej: `return null` tras un comentario de bloque que ya explica el caso). En duda, **comentar**.
+Solo omitir lo totalmente obvio dentro de funciones ya documentadas. En duda, **comentar**.
 
 ## Código limpio y sin legacy
 
-- **Eliminar** código muerto, comentado o rutas que ya no se usan — no dejar "por si acaso".
-- **No duplicar** lógica: si algo se repite en 2+ lugares, extraer a `utils.js` o módulo propio.
-- **No acumular** parches sobre código roto: refactorizar la pieza afectada.
-- Preferir **nombres descriptivos** en español o inglés consistente (el proyecto mezcla ambos en nombres de negocio; mantener coherencia por archivo).
-- Una función = una responsabilidad. Si supera ~40 líneas, considerar dividirla.
-- Evitar `magic numbers`: usar constantes con nombre o leer de `datos.json`.
+- Eliminar código muerto y rutas obsoletas (no monolitos `barriles.js` / `eventos.js` / `router.js`).
+- No duplicar: si se repite en 2+ estados, extraer a `logic/` (helpers, interruptions, actions).
+- No acumular parches: refactorizar la pieza afectada.
+- Nombres descriptivos; coherencia por archivo.
+- Una función = una responsabilidad; si un estado supera ~250–300 líneas, considerar `handlers/` auxiliar **sin** repartir textos/prompt a otro lado.
+- Evitar magic numbers: constantes o `datos.json`.
 
 ## Modularidad y crecimiento
 
-Respetar las capas existentes; no mezclar responsabilidades:
-
 | Capa | Responsabilidad |
-|------|-----------------|
-| `src/index.js` | Solo WhatsApp (conexión, listeners, envío) |
-| `src/core/engine.js` | Solo orquestación de estados y fallbacks |
+|---|---|
+| `src/index.js` | Solo WhatsApp |
+| `src/core/engine.js` | Orquestación + fallbacks |
 | `src/core/llm.js` | Solo llamadas a IA |
-| `src/core/db.js` | Solo persistencia de sesiones |
-| `src/flows/` | Solo lógica de cada estado (`validateAndProcess`) |
-| `src/logic/` | Lógica de negocio reutilizable (parsing, precios, pedidos, keywords, NLU de decisión) |
-| `src/views/` | Solo textos y prompts (sin lógica de negocio) |
-| `db/` | Solo datos estáticos (JSON) |
+| `src/core/db.js` | Solo sesiones |
+| `src/flows/*/states/*.js` | **Un paso completo** (textos + aiPrompt + lógica) |
+| `src/flows/*/index.js` | Barrel del flujo → objeto de estados |
+| `src/logic/` | Reutilizable: parsing, keywords, interruptions, compile-state, order-builder, media |
+| `src/views/templates.js` | Solo textos **compartidos** (cotización, admin, pitches multi-estado) |
+| `src/views/prompts.js` | Solo `readPrompt()` global |
+| `db/` | JSON estáticos |
 
-Al agregar funcionalidad nueva:
-1. ¿Es un estado nuevo? → `flows/` + prompt en `views/prompts.js` + registro en `flows/index.js`.
-2. ¿Es lógica reutilizable? → `logic/`.
-3. ¿Es texto fijo al usuario? → `views/templates.js`.
-4. ¿Es dato de negocio? → `db/datos.json` o `db/faq.json`.
+Al agregar funcionalidad:
+
+1. **Estado nuevo** → `flows/<flujo>/states/ID.js` con `defineState` (textos + `aiPrompt` + handler) → export en `flows/<flujo>/index.js` → queda en `statesMap`.
+2. **Lógica reutilizable** → `logic/` (o `validators` / `actions` si es “llamar por nombre”).
+3. **Texto compartido** (2+ estados o alertas) → `templates.js`.
+4. **Dato de negocio** → `db/datos.json` o `db/faq.json`.
+5. Correr **`npm run verify`**.
 
 ## Buenas prácticas al editar
 
-- **Cambios mínimos:** resolver solo lo pedido; no refactorizar de más en la misma tarea.
-- **Reutilizar** funciones existentes (`normalizeString`, `parseDate`, `OrderBuilder`, etc.) antes de crear nuevas.
-- **Validación programática primero**, LLM como fallback (patrón del proyecto).
-- **Manejo de errores:** `try/catch` con `console.error` descriptivo; no tragar errores silenciosamente.
-- **Sesiones:** mutar `session` en el estado; persistir desde `engine.js` con `saveSession`.
-- **Imports ESM:** usar rutas relativas con extensión `.js`.
-- No commitear secretos (`.env`), sesiones (`auth/`, `conversation-memory.sqlite`) ni `node_modules/`.
+- Cambios mínimos: solo el estado/flujo pedido.
+- Reutilizar: `normalizeString`, `parseDate`, `OrderBuilder`, `interruptions`, `resolveDecisionIntent`, `img()`, etc.
+- Validación programática primero; LLM como fallback / NLU.
+- Keywords de decisión en *negrita* en el copy (evitar menús 1/2 salvo que el paso ya los use).
+- Errores: `try/catch` + `console.error`; no silenciar.
+- Sesiones: mutar en el estado; `saveSession` desde `engine.js`.
+- Imports ESM con extensión `.js`.
+- No secrets / `auth/` / sqlite en commits.
 
 ## Lo que NO hacer
 
-- No dejar `TODO` sin issue o contexto claro.
-- No copiar-pegar bloques grandes entre `barriles.js` y `eventos.js` — extraer helper compartido.
-- No meter lógica de precios o parsing dentro de `views/`.
-- No agregar dependencias npm sin necesidad real.
-- No escribir comentarios en inglés y código en español mezclados sin razón en el mismo bloque.
+- No crear de nuevo monolitos (`barriles.js` gigante) ni `STATE_PROMPTS` globales por estado.
+- No poner el copy de un solo paso en `templates.js` / `prompts.js`.
+- No copiar-pegar grandes bloques entre estados barriles/eventos — extraer helper.
+- No meter precios/parsing en `views/`.
+- No agregar npm deps sin necesidad.
+- No dejar `TODO` sin contexto.
 
 ## Checklist antes de terminar un cambio
 
-- [ ] ¿El archivo tiene cabecera OBJETIVO?
-- [ ] ¿Las secciones principales están separadas con comentarios titulados?
-- [ ] ¿Cada función tiene JSDoc (qué hace, params, returns)?
-- [ ] ¿Los pasos importantes dentro de funciones largas están comentados?
-- [ ] ¿Las funciones nuevas están en la capa correcta?
-- [ ] ¿Se eliminó código que quedó obsoleto?
-- [ ] ¿Un estudiante de 1er año podría seguir el flujo solo leyendo comentarios?
-- [ ] ¿`npm run check` pasa sin errores?
+- [ ] ¿Cabecera OBJETIVO + JSDoc + pasos importantes comentados?
+- [ ] ¿El cambio de un paso quedó en **un solo** archivo de estado (salvo helpers compartidos)?
+- [ ] ¿Barrel / `statesMap` actualizado si hay estado nuevo?
+- [ ] ¿Capa correcta (flows vs logic vs views)?
+- [ ] ¿Código obsoleto eliminado?
+- [ ] ¿`npm run verify` pasa (`check` + `test:flows`)?

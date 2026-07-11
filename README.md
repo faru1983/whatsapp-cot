@@ -32,7 +32,7 @@ Piensa en esto como la “lista de compras” antes de cocinar:
 | Qué necesitas | Para qué sirve | ¿Es gratis? |
 |---|---|---|
 | Un computador (Windows, Mac o Linux) | Aquí corre el bot | — |
-| **Node.js** versión 18.18 o superior | Es el “motor” que ejecuta el programa (escrito en JavaScript) | Sí |
+| **Node.js** versión 20 o superior | Es el “motor” que ejecuta el programa (escrito en JavaScript) | Sí |
 | Una cuenta de WhatsApp | El bot se conecta como un “dispositivo vinculado”, igual que WhatsApp Web | Sí (tu número) |
 | Una clave de Inteligencia Artificial (API Key) | Para que el bot entienda mensajes libres y responda dudas | Hay planes gratis / de prueba |
 | Un editor de texto (opcional pero recomendado) | Por ejemplo VS Code o Cursor, para editar archivos | Sí |
@@ -52,7 +52,7 @@ Piensa en esto como la “lista de compras” antes de cocinar:
 node -v
 ```
 
-Deberías ver algo como `v18.18.0` o un número mayor (por ejemplo `v20...` o `v22...`).  
+Deberías ver algo como `v20.0.0` o un número mayor (por ejemplo `v20...` o `v22...`).  
 Si aparece un error del tipo “no se reconoce el comando”, Node no quedó bien instalado: vuelve a instalarlo y cierra/abre la terminal.
 
 También puedes comprobar el gestor de paquetes:
@@ -262,7 +262,7 @@ Alias legacy (solo asistencia): si no defines `LABEL_ASISTENCIA_*`, aún funcion
 → Revisa tu internet. Cierra otras sesiones raras. Vuelve a correr `npm start`. Si la carpeta `auth/` quedó a medias, a veces hay que borrarla y vincular de nuevo (solo si sabes que quieres re-escanear).
 
 **`npm install` falla**  
-→ Lee el error completo. En Windows, `better-sqlite3` suele pedir herramientas de compilación. Asegúrate de tener Node ≥ 18.18.
+→ Lee el error completo. En Windows, `better-sqlite3` suele pedir herramientas de compilación. Asegúrate de tener Node ≥ 20.
 
 **El bot no responde**  
 → ¿Está corriendo `npm start`? ¿El chat está muteado? (prueba `/iniciarbot 569...` o `/reiniciarbot 569...` desde tu chat). ¿Es un grupo? (por defecto suele ignorar grupos). ¿El cliente tiene mensajes temporales? (ya deberían funcionar; si un chat viejo quedó muteado por error, reactívalo con el comando).
@@ -348,14 +348,14 @@ Si falta alguna:
 sudo apt install -y build-essential python3
 ```
 
-#### 4) ¿Hay Node.js 18.18 o superior?
+#### 4) ¿Hay Node.js 20 o superior?
 
 ```bash
 node -v
 npm -v
 ```
 
-Si no está, o la versión es menor a `v18.18.0`, instala Node 20 LTS con NodeSource (método habitual en Ubuntu):
+Si no está, o la versión es menor a `v20.0.0`, instala Node 20 LTS con NodeSource (método habitual en Ubuntu):
 
 ```bash
 curl -fsSL https://deb.nodesource.com/setup_20.x | sudo -E bash -
@@ -557,7 +557,7 @@ Si cambió mucho la lógica de sesión o perdiste `auth/`, puede hacer falta vol
 ### Checklist rápido (servidor Linux)
 
 - [ ] SSH al servidor OK  
-- [ ] `git`, `build-essential`, `python3`, Node ≥ 18.18, `pm2` instalados  
+- [ ] `git`, `build-essential`, `python3`, Node ≥ 20, `pm2` instalados  
 - [ ] Repo clonado y `npm install` OK  
 - [ ] `.env` creado y con claves + `ADMIN_NUMBERS`  
 - [ ] `npm start` → QR escaneado → `Ctrl+C`  
@@ -631,19 +631,21 @@ index.js  →  engine.js  →  statesMap (flows/)  →  utils.js + order-builder
 | `src/core/llm.js` | Todas las llamadas a la Inteligencia Artificial |
 | `src/core/db.js` | Leer/guardar/reiniciar sesiones en SQLite |
 | `src/core/config.js` | Leer el `.env` y armar la configuración del bot |
-| `src/flows/router.js` | Primer filtro: ¿barriles, eventos, o ambos? |
-| `src/flows/barriles.js` | Todo el recorrido de cotización de barriles |
-| `src/flows/eventos.js` | Todo el recorrido de cotización de eventos |
+| `src/flows/router/states/` | Primer filtro: ¿barriles, eventos, o ambos? (`ESPERANDO_INTENCION`) |
+| `src/flows/barriles/states/` | Un archivo por paso del flujo Barriles (`BARRILES_*`) |
+| `src/flows/eventos/states/` | Un archivo por paso del flujo Eventos (`EVENTOS_*`) |
 | `src/flows/cerrado.js` | Estado final: conversación cerrada / bot en silencio |
-| `src/flows/index.js` | Junta todos los estados en un solo mapa |
+| `src/flows/index.js` | Junta todos los estados en un solo mapa (`statesMap`) |
+| `src/logic/compile-state.js` | Arma el objeto de estado que consume el engine |
 | `src/logic/utils.js` | Utilidades: normalizar texto, precios, fechas, comunas, etc. |
 | `src/logic/media.js` | Imágenes para WhatsApp: `img('archivo.ext')` desde la carpeta `assets/` |
 | `src/logic/order-builder.js` | Arma la cotización con números reales |
-| `src/views/templates.js` | Mensajes fijos bonitos (bienvenida, cotización, etc.) |
-| `src/views/prompts.js` | Instrucciones que se le dan a la IA según el paso |
+| `src/views/templates.js` | Textos compartidos (cotización, alertas admin, pitches eventos) |
+| `src/views/prompts.js` | Reglas globales de la IA (`readPrompt`); prompts por paso van en cada estado |
 | `db/datos.json` | Catálogo y precios del negocio |
 | `db/faq.json` | Preguntas frecuentes |
 | `assets/` | Fotos que el bot puede enviar (ej. lista de precios de barriles) |
+| `scripts/verify-flows.mjs` | Tests automáticos de integridad + smoke (`npm run verify`) |
 
 ### La idea central: “máquina de estados”
 
@@ -773,9 +775,10 @@ El código está pensado como **material de aprendizaje** (comentarios didáctic
 
 Si agregas un estado nuevo:
 
-1. Créalo en `barriles.js` o `eventos.js`
-2. Agrega su prompt en `views/prompts.js`
-3. Regístralo en el mapa de `flows/index.js`
+1. Créalo en `src/flows/barriles/states/` o `src/flows/eventos/states/` (un archivo por paso, con textos + `aiPrompt` + lógica)
+2. Expórtalo en el `index.js` del flujo (`barriles/index.js` o `eventos/index.js`)
+3. Queda registrado vía `flows/index.js` → `statesMap`
+4. Corre `npm run verify` para chequear sintaxis + smoke tests
 
 ### Enviar una imagen en un paso
 
@@ -798,7 +801,7 @@ Si el archivo no está en `assets/`, el bot **se silencia** (sin mensaje al clie
 
 ## Requisitos resumidos
 
-- Node.js **≥ 18.18**
+- Node.js **≥ 20**
 - Dependencias del `package.json` (se instalan con `npm install`)
 - Archivo `.env` con proveedor de IA + API key + `ADMIN_NUMBERS`
 - WhatsApp para vincular (solo si usas `npm start`)

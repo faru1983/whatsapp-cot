@@ -180,9 +180,39 @@ export function loadBotConfig() {
     // Umbrales de la red de seguridad (engine.js). Ver sección SECURITY_* en .env
     security: {
       // Anti-loop: cuántas respuestas "no entendidas" seguidas antes de silenciar y avisar al admin
-      maxConsecutiveErrors: parsePositiveInt(process.env.SECURITY_MAX_CONSECUTIVE_ERRORS, 2),
+      // Default 3 = mismo valor que .env.example (evitar mute demasiado agresivo)
+      maxConsecutiveErrors: parsePositiveInt(process.env.SECURITY_MAX_CONSECUTIVE_ERRORS, 3),
       // Cambio de intención: cuántas veces puede alternar barriles ↔ eventos antes de silenciar
-      maxIntentSwitches: parsePositiveInt(process.env.SECURITY_MAX_INTENT_SWITCHES, 2),
+      maxIntentSwitches: parsePositiveInt(process.env.SECURITY_MAX_INTENT_SWITCHES, 3),
     }
   };
+}
+
+/**
+ * assertRuntimeConfigReady: Valida al arranque lo crítico para producción.
+ * - API key del proveedor LLM: si falta → Error (el bot no sirve sin IA).
+ * - ADMIN_NUMBERS: si está vacío → warning (SOS/cotizaciones no avisan a nadie).
+ *
+ * Llamar desde index.js antes de conectar WhatsApp.
+ *
+ * @returns {object} Misma config que loadBotConfig()
+ */
+export function assertRuntimeConfigReady() {
+  // Fail-fast: sin key no tiene sentido abrir el socket
+  const { provider, model } = getEnv();
+  console.log(`LLM listo: proveedor=${provider}, modelo=${model}`);
+
+  const config = loadBotConfig();
+  const adminCount = config.numeros_notificar.length;
+
+  if (adminCount === 0) {
+    console.warn(
+      '⚠️  ADMIN_NUMBERS vacío en .env: las alertas SOS y cotizaciones NO se enviarán a nadie. '
+      + 'Agrega al menos un número (ej. ADMIN_NUMBERS=56912345678).'
+    );
+  } else {
+    console.log(`Admins configurados: ${adminCount}`);
+  }
+
+  return config;
 }

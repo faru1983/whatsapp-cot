@@ -127,13 +127,15 @@ El formato debe ser un objeto JSON con 4 llaves: "analisis", "productos", "dudas
 1. "analisis": Escribe un breve razonamiento de lo que pidió el usuario.
 2. "productos": Array de objetos con "name" y "quantity". Úsalo para los productos que el usuario especificó claramente.
 3. "dudas": Array de objetos con "mencionado" y "opciones" (nombres exactos del catálogo). Úsalo si el usuario menciona un término genérico y existen varias opciones posibles.
-4. "quiere_avanzar": Booleano (true o false). Ponlo en true SOLO si el usuario responde a la pregunta de agregar más cócteles indicando que NO quiere más, que está listo o escribe "no".
+4. "quiere_avanzar": Booleano (true o false). Ponlo en true si el usuario indica que NO quiere más cócteles, que está listo, o escribe "seguimos", "solo estos", "listo", "continuar", "no".
 
 Ejemplo 1 (Duda real): {"analisis": "Pidió piscola (hay varias marcas).", "productos": [], "dudas": [{"mencionado": "piscola", "opciones": ["Piscola Alto 35°", "Piscola Mistral 35°"]}], "quiere_avanzar": false}
 Ejemplo 2 (Sin duda): {"analisis": "Pidió margarita.", "productos": [{"name": "Tequila Margarita", "quantity": 1}], "dudas": [], "quiere_avanzar": false}
 Ejemplo 3 (Múltiple pedido): {"analisis": "Pidió 2 mojitos y piscola.", "productos": [{"name": "Mojito", "quantity": 2}], "dudas": [{"mencionado": "piscola", "opciones": ["Piscola Alto 35°", "Piscola Mistral 35°"]}], "quiere_avanzar": false}
 Ejemplo 4 (Avance): {"analisis": "Dijo que no quiere agregar más nada.", "productos": [], "dudas": [], "quiere_avanzar": true}
+Ejemplo 5 (Solo "seguimos"): {"analisis": "Confirmó el pedido con seguimos; no agrega productos nuevos.", "productos": [], "dudas": [], "quiere_avanzar": true}
 
+IMPORTANTE: Si el usuario solo dice "seguimos", "listo", "solo estos" o similar, productos DEBE ser [] (nunca copies el carrito del mensaje anterior del bot).
 Si no pide nada o pide cosas que no existen, devuelve arrays vacíos.
 REGLA CRÍTICA: En los campos "name" y "opciones", debes usar EXACTAMENTE el nombre que aparece en el catálogo. Copia y pega letra por letra. Prohibido cambiar el orden de las palabras.
 Catálogo válido estricto:
@@ -229,7 +231,7 @@ El formato debe ser un objeto JSON con 4 llaves: "analisis", "productos", "dudas
    - "quantity": cantidad de barriles (unidades). Si no dice cuántos, asume 1.
    - "litrage": tamaño del barril como string ("5L", "10L", "20L" o "30L").
 3. "dudas": Array de objetos con "mencionado" y "opciones" (nombres exactos del catálogo) si hay ambigüedad (ej. "piscola").
-4. "quiere_avanzar": true SOLO si el usuario indica que NO quiere más, que está listo, o escribe "no" / "solo estos" / "listo".
+4. "quiere_avanzar": true SOLO si el usuario indica que NO quiere más, que está listo, o escribe "no" / "solo estos" / "listo" / "seguimos".
 
 REGLA CRÍTICA DE LITRAJE (léela con cuidado):
 - En eventos, el número suele ser el TAMAÑO del barril (5/10/20/30), NO la cantidad de unidades.
@@ -396,7 +398,7 @@ REGLAS:
 6. No clasifiques datos concretos (fechas, comunas, nombres de cócteles) como decisión: eso es UNCLEAR.
 7. Lee bien las pistas de cada etiqueta. Ej.: si WEB = ir al sitio y CHAT = seguir en WhatsApp, "voy a meterme a ver / entrar a la página / prefiero el link / lo veré / lo veo / lo reviso" es WEB, NO CHAT.
 8. Si el paso es web vs chat y el cliente solo dice "precio", "valor", "cuánto", "cuánto cuestan" SIN elegir canal → UNCLEAR (es duda, no decisión).
-9. Cortesía sola SIN elegir opción → UNCLEAR + low. Ej.: "gracias", "ok", "dale", "ya", "listo", "hola" (sin más texto). NUNCA elijas WEB/BARRILES/EVENTOS/CHAT solo porque el último mensaje del bot mencionó esa opción.
+9. Cortesía o entusiasmo SIN elegir opción → UNCLEAR + low. Ej.: "gracias", "ok", "dale", "hola", "Hoooola q genial". NUNCA elijas WEB/BARRILES/EVENTOS/CHAT solo por el último mensaje del bot.
 10. No adivines por el orden del menú ni por la última opción citada. Si el cliente no eligió de forma explícita o con sinónimo claro → UNCLEAR.
 
 Ejemplo: {"intent":"${labels[0]}","confidence":"high"}`;

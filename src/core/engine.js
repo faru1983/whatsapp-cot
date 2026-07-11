@@ -16,6 +16,7 @@ import { getSession, saveSession, resetSession } from './db.js';
 import { statesMap } from '../flows/index.js';
 import { readPrompt } from '../views/prompts.js';
 import { buildFaqCatalogContext, sanitizeCustomerFacingReply } from '../logic/utils.js';
+import { isGreetingOrNoise } from '../logic/interruptions.js';
 import { isImagePart, assertImageExists } from '../logic/media.js';
 import { buildAdminSosBody } from '../views/templates.js';
 import { FAQ_JSON_PATH } from './paths.js';
@@ -30,9 +31,25 @@ if (isMainModule) enableTestDebug();
 const botConfig = loadBotConfig();
 const { maxConsecutiveErrors, maxIntentSwitches } = botConfig.security;
 
-let sendAdminAlert = null;
-export function setAdminAlertFunction(fn) {
-  sendAdminAlert = fn;
+// Cola por sessionId: evita que dos mensajes del mismo cliente se pisen
+// (getSession → lógica async → saveSession sin candado).
+const sessionQueues = new Map();
+
+/**
+ * withSessionLock: Encadena el procesamiento de un mismo cliente.
+ * Si llegan 2 mensajes seguidos, el segundo espera a que termine el primero.
+ *
+ * @param {string} sessionId - JID / id de sesión
+ * @param {() => Promise<*>} work - Trabajo async a ejecutar en serie
+ * @returns {Promise<*>} Resultado de work
+ */
+function withSessionLock(sessionId, work) {
+  const previous = sessionQueues.get(sessionId) || Promise.resolve();
+  // Si el anterior falló, igual seguimos (no bloqueamos al cliente para siempre)
+  const current = previous.catch(() => {}).then(work);
+  // Guardamos una promesa que siempre se resuelve, solo para encadenar el orden
+  sessionQueues.set(sessionId, current.then(() => {}, () => {}));
+  return current;
 }
 
 /**
@@ -146,9 +163,10 @@ function normalizeReplyParts(reply) {
  * @param {object} session - Sesión actual (se muta mute + estado)
  * @param {string} sessionId - ID de sesión para persistir
  * @param {string} expectedPath - Ruta relativa esperada (ej. assets/foto.webp)
+ * @param {((alert: object) => void)|null} alertAdmin - Callback de alerta (por mensaje, no global)
  * @returns {null} Siempre null (sin reply al cliente)
  */
-function failMissingImage(session, sessionId, expectedPath) {
+function failMissingImage(session, sessionId, expectedPath, alertAdmin) {
   const stateId = session.currentState || '(sin estado)';
   session.isMuted = true;
   session.silenciado_timestamp = Date.now();
@@ -157,8 +175,8 @@ function failMissingImage(session, sessionId, expectedPath) {
   cliLog(`SOS: imagen no encontrada → ${expectedPath}`);
   cliLog('MUTE activado (imagen faltante). El bot no responde al cliente.');
 
-  if (sendAdminAlert) {
-    sendAdminAlert({
+  if (alertAdmin) {
+    alertAdmin({
       type: 'SOS',
       title: 'IMAGEN FALTANTE',
       body: buildAdminSosBody({
@@ -179,9 +197,10 @@ function failMissingImage(session, sessionId, expectedPath) {
  * @param {object} session - Sesión actual (se muta el historial)
  * @param {string} sessionId - ID de sesión para persistir
  * @param {string|object|Array} reply - Uno o varios textos / imágenes del bot
+ * @param {((alert: object) => void)|null} [alertAdmin] - Callback de alerta del mensaje actual
  * @returns {string|object|Array|null} Lo que debe enviar WhatsApp / CLI
  */
-function commitBotReplies(session, sessionId, reply) {
+function commitBotReplies(session, sessionId, reply, alertAdmin = null) {
   const parts = normalizeReplyParts(reply);
   if (parts.length === 0) return null;
 
@@ -190,7 +209,7 @@ function commitBotReplies(session, sessionId, reply) {
     if (!isImagePart(part)) continue;
     const check = assertImageExists(part.file);
     if (!check.ok) {
-      return failMissingImage(session, sessionId, check.expectedPath);
+      return failMissingImage(session, sessionId, check.expectedPath, alertAdmin);
     }
   }
 
@@ -231,7 +250,36 @@ function lastPromptPart(prompt) {
   return typeof last === 'string' ? last : '';
 }
 
-export async function processMessage(sessionId, messageText) {
+/**
+ * processMessage: Orquesta un turno completo (mute, estado, fallbacks, SOS).
+ * WhatsApp pasa `options.sendAdminAlert` por mensaje para no mezclar clientes
+ * si hay varios chats procesándose a la vez.
+ *
+ * @param {string} sessionId - JID / id de sesión
+ * @param {string} messageText - Texto del cliente (o comando CLI)
+ * @param {{ sendAdminAlert?: (alert: object) => void|Promise<void> }} [options]
+ * @returns {Promise<string|object|Array|null>}
+ */
+export async function processMessage(sessionId, messageText, options = {}) {
+  return withSessionLock(sessionId, () =>
+    processMessageUnlocked(sessionId, messageText, options)
+  );
+}
+
+/**
+ * processMessageUnlocked: Cuerpo real del engine (ya serializado por sessionId).
+ *
+ * @param {string} sessionId
+ * @param {string} messageText
+ * @param {{ sendAdminAlert?: (alert: object) => void|Promise<void> }} options
+ * @returns {Promise<string|object|Array|null>}
+ */
+async function processMessageUnlocked(sessionId, messageText, options = {}) {
+  // Callback de este mensaje concreto (no variable global compartida)
+  const alertAdmin = typeof options.sendAdminAlert === 'function'
+    ? options.sendAdminAlert
+    : null;
+
   let session = getSession(sessionId);
 
   // ==============================================================================
@@ -320,8 +368,8 @@ export async function processMessage(sessionId, messageText) {
           cliLog(`SEGURIDAD: demasiados cambios de intención (>= ${maxIntentSwitches}). Silenciando.`);
           session.isMuted = true;
           // Alerta SOS unificada: cabecera (cliente) la arma index.js
-          if (sendAdminAlert) {
-            sendAdminAlert({
+          if (alertAdmin) {
+            alertAdmin({
               type: 'SOS',
               title: 'INDECISIÓN',
               body: buildAdminSosBody({
@@ -341,7 +389,7 @@ export async function processMessage(sessionId, messageText) {
 
         // Puede ser string o array (info + pregunta en burbujas separadas)
         const newState = statesMap[session.currentState];
-        return commitBotReplies(session, sessionId, resolvePromptQuestion(newState, session));
+        return commitBotReplies(session, sessionId, resolvePromptQuestion(newState, session), alertAdmin);
       }
     }
   }
@@ -381,14 +429,14 @@ export async function processMessage(sessionId, messageText) {
       // El aviso visible al usuario del test lo imprime cliChat (formato [TEST] unificado)
     }
 
-    if (processResult.notifyAdmin && sendAdminAlert) {
-      sendAdminAlert(processResult.notifyAdmin);
+    if (processResult.notifyAdmin && alertAdmin) {
+      alertAdmin(processResult.notifyAdmin);
     }
 
     // customReplies: varios mensajes separados (ej. carta + pregunta de cotizar)
     // customReply: un solo mensaje (compatibilidad con el resto del flujo)
     if (Array.isArray(processResult.customReplies) && processResult.customReplies.length > 0) {
-      return commitBotReplies(session, sessionId, processResult.customReplies);
+      return commitBotReplies(session, sessionId, processResult.customReplies, alertAdmin);
     }
 
     if (processResult.customReply) {
@@ -423,7 +471,7 @@ export async function processMessage(sessionId, messageText) {
     }
 
     // Guarda y devuelve (string o array de burbujas)
-    const committed = commitBotReplies(session, sessionId, reply);
+    const committed = commitBotReplies(session, sessionId, reply, alertAdmin);
     if (committed != null) return committed;
 
     saveSession(sessionId, session);
@@ -431,10 +479,10 @@ export async function processMessage(sessionId, messageText) {
 
   } else {
     // ==============================================================================
-    // 4. RED DE SEGURIDAD GLOBAL: SOPORTE Y FAQS
+    // 4. RED DE SEGURIDAD GLOBAL: FAQ → plantilla corta / SOS (sin monólogo creativo)
+    // Strikes: solo cuando NO pudimos ayudar. FAQ OK y ruido/re-pregunta NO suman.
     // ==============================================================================
-    cliLog(`paso sin match → red de seguridad (FAQ → IA → re-pregunta)`);
-    session.consecutiveErrors = (session.consecutiveErrors || 0) + 1;
+    cliLog(`paso sin match → red de seguridad (FAQ → plantilla/SOS)`);
 
     // Si promptQuestion es array (info + pregunta), usamos solo la última parte
     const questionText = lastPromptPart(resolvePromptQuestion(currentState, session));
@@ -443,126 +491,159 @@ export async function processMessage(sessionId, messageText) {
     const finalQuestion = shortQ || questionText;
 
     const buildNoInfoReply = () =>
-      `Disculpa, por ahora no tengo esa información. 😔\n\nPor favor indícame: _${finalQuestion}_\no escribe *NO* para que alguien de nuestro equipo te contacte.`;
+      `Disculpa, no tengo esa info ahora. 😔\n\n${finalQuestion}\n\nO escribe *NO* para hablar con alguien del equipo.`;
+
+    /**
+     * triggerSosMute: Silencia el chat y avisa al admin (handoff humano).
+     * Preferimos SOS a inventar pitch cuando el mensaje es raro o hay fallos seguidos.
+     *
+     * @param {string} title - Título corto de la alerta
+     * @param {string} reason - Motivo legible para el admin
+     * @param {string|null} [clientReply] - Mensaje al cliente (null = silencio total)
+     * @returns {string|null}
+     */
+    const triggerSosMute = (title, reason, clientReply = null) => {
+      cliLog(`SOS: ${title} en estado ${currentStateId}.`);
+      session.isMuted = true;
+      session.silenciado_timestamp = Date.now();
+      if (alertAdmin) {
+        alertAdmin({
+          type: 'SOS',
+          title,
+          body: buildAdminSosBody({
+            reason,
+            stateId: currentStateId,
+            lastMessage: messageText
+          })
+        });
+      }
+      if (clientReply) {
+        session.history.turns.push({ role: 'model', text: clientReply });
+      }
+      saveSession(sessionId, session);
+      return clientReply;
+    };
 
     // 4.0 SOS explícito: el cliente pide hablar con un humano
-    const SOS_EXCLUDED_STATES = ['BARRILES_RECOGIDA_DATOS'];
+    // En BARRILES_RECOGIDA_DATOS, "no" puede ser dato ("no tengo fecha") → no cuenta como SOS.
+    // "sos" y frases de pedir humano SÍ funcionan en todos los pasos.
+    const SOS_NO_EXCLUDED_STATES = ['BARRILES_RECOGIDA_DATOS'];
     const trimmedMessage = messageText.trim();
-    const wantsExplicitSOS = /^(no|sos)$/i.test(trimmedMessage) && !SOS_EXCLUDED_STATES.includes(currentStateId);
+    const isSosWord = /^sos$/i.test(trimmedMessage);
+    const isNoWord = /^no$/i.test(trimmedMessage);
+    const wantsExplicitSOS = isSosWord
+      || (isNoWord && !SOS_NO_EXCLUDED_STATES.includes(currentStateId));
     const wantsHumanHelp = /hablar con|necesito (un )?(asesor|humano)|persona real|equipo comercial|contactar.*equipo/i.test(messageText);
 
     if (wantsExplicitSOS || wantsHumanHelp) {
-      cliLog(`SOS: cliente pidió humano en estado ${currentStateId}.`);
-      session.isMuted = true;
-      session.silenciado_timestamp = Date.now();
+      return triggerSosMute(
+        'PIDIÓ HUMANO',
+        'Solicitó hablar con el equipo.',
+        `Te comunico con alguien del equipo. ¡Ya te escriben! 🙌`
+      );
+    }
 
-      // Alerta SOS unificada: cabecera (cliente) la arma index.js
-      if (sendAdminAlert) {
-        sendAdminAlert({
-          type: 'SOS',
-          title: 'PIDIÓ HUMANO',
-          body: buildAdminSosBody({
-            reason: 'Solicitó hablar con el equipo.',
-            stateId: currentStateId,
-            lastMessage: messageText
-          })
-        });
-      }
-      reply = `Disculpa, no te entendí. Te comunicaré con alguien de nuestro equipo para que te ayude directamente. ¡Ya te escriben! 🙌`;
+    // 4.1 Saludo / ruido / entusiasmo → re-pregunta corta SIN sumar strike
+    // (ej. "Hoooola q genial", "gracias", "ok" a mitad de pedido)
+    if (isGreetingOrNoise(trimmedMessage)) {
+      cliLog('ruido/cortesía → re-pregunta fija (sin strike, sin IA)');
+      reply = currentStateId === 'ESPERANDO_INTENCION'
+        ? `¡Hola! 🍸 Soy el *asistente virtual* de Cocktails on Tap.\n\n${finalQuestion}`
+        : `Disculpa, no te entendí bien 😊\nResponde con la palabra en *negrita* si puedes.\n\n${finalQuestion}`;
       session.history.turns.push({ role: 'model', text: reply });
       saveSession(sessionId, session);
       return reply;
     }
 
-    // 4.1 Límite de Strikes (Anti-loop) — umbral configurable en SECURITY_MAX_CONSECUTIVE_ERRORS
-    if (session.consecutiveErrors >= maxConsecutiveErrors) {
-      cliLog(`SEGURIDAD: anti-loop (${session.consecutiveErrors}/${maxConsecutiveErrors}). Silenciando.`);
-      session.isMuted = true;
-      session.silenciado_timestamp = Date.now();
+    // 4.2 Off-topic claro: NO alertamos al admin en el primer mensaje.
+    // Sumamos strike y re-preguntamos; SOS solo al llegar al umbral anti-loop.
+    const looksClearOffTopic = trimmedMessage.length >= 40
+      && !/\b(barril|coctel|cóctel|precio|valor|web|whatsapp|evento|despacho|envio|envío|mojito|sangria|pisco|margarita|dispensador|muro|invitad|comuna|fecha|litro)\b/i.test(trimmedMessage)
+      && !/\?/.test(trimmedMessage);
 
-      // Alerta SOS unificada: cabecera (cliente) la arma index.js
-      if (sendAdminAlert) {
-        sendAdminAlert({
-          type: 'SOS',
-          title: 'ANTI-LOOP',
-          body: buildAdminSosBody({
-            reason: 'Varias respuestas seguidas que el bot no entendió.',
-            stateId: currentStateId,
-            lastMessage: messageText
-          })
-        });
+    if (looksClearOffTopic) {
+      session.consecutiveErrors = (session.consecutiveErrors || 0) + 1;
+      cliLog(`off-topic → strike ${session.consecutiveErrors}/${maxConsecutiveErrors} (sin SOS inmediato)`);
+
+      if (session.consecutiveErrors >= maxConsecutiveErrors) {
+        return triggerSosMute(
+          'OFF-TOPIC',
+          'Varios mensajes fuera de contexto de cotización; handoff a humano.',
+          `Disculpa, mejor te paso con alguien del equipo para ayudarte bien. ¡Ya te escriben! 🙌`
+        );
       }
-      saveSession(sessionId, session);
-      return null;
-    }
 
-    // 4.2 Buscar en faq.json (también usa IA para decidir si aplica y redactar)
-    // Saludos / ruido corto no son FAQ.
-    // Fuera del router inicial: no inventamos con IA (ej. "ok" → fingir WhatsApp).
-    // Solo disculpa + re-pregunta del paso.
-    const isGreetingOrNoise = /^(hola|holi|buenas|buen\s*d[ií]a|buenas\s*tardes|buenas\s*noches|hey|hi|hello|ok|okay|dale|gracias|thank(s)?|ya|listo)[\s!.?]*$/i.test(trimmedMessage);
-
-    if (isGreetingOrNoise && currentStateId !== 'ESPERANDO_INTENCION') {
-      cliLog('ruido/cortesía → re-pregunta fija (sin IA, evita inventar avance)');
-      reply = `Disculpa, no te entendí bien 😊\n\n${finalQuestion}`;
+      reply = `Disculpa, estoy para ayudarte a cotizar 🍸\nResponde con la palabra en *negrita* si puedes.\n\n${finalQuestion}\n\nO escribe *NO* para hablar con alguien del equipo.`;
       session.history.turns.push({ role: 'model', text: reply });
       saveSession(sessionId, session);
       return reply;
     }
 
-    let faqResponse = "NO_FAQ";
-    if (isGreetingOrNoise) {
-      cliLog('FAQ: omitido (saludo/ruido) → fallback IA generativa');
-    } else {
-      cliLog('FAQ: consultando faq.json + catálogo/despachos (datos.json) con IA...');
-      const faqData = JSON.parse(fs.readFileSync(FAQ_JSON_PATH, 'utf8'));
-      // Pasamos intención/formato para adaptar respuestas (ej. rendimiento solo 5L en desechables)
-      faqResponse = await responderFAQ(messageText, faqData, {
-        userIntent: session.userIntent,
-        eventoFormato: session.eventoFormato
-      });
-    }
+    // 4.3 FAQ (precios, despacho, ingredientes oficiales…)
+    let faqResponse = 'NO_FAQ';
+    cliLog('FAQ: consultando faq.json + catálogo/despachos (datos.json) con IA...');
+    const faqData = JSON.parse(fs.readFileSync(FAQ_JSON_PATH, 'utf8'));
+    faqResponse = await responderFAQ(messageText, faqData, {
+      userIntent: session.userIntent,
+      eventoFormato: session.eventoFormato
+    });
 
-    if (faqResponse !== "NO_FAQ") {
-      // FAQ respondió: sanitizamos jerga interna y re-preguntamos el paso si hace falta
-      cliLog('FAQ: match encontrado → respondiendo desde FAQ/datos oficiales');
+    if (faqResponse !== 'NO_FAQ') {
+      // FAQ OK: ayudamos → reseteamos strikes (no cuenta como fallo)
+      session.consecutiveErrors = 0;
+      cliLog('FAQ: match → respondiendo (strikes en 0)');
       reply = appendStepQuestionIfNeeded(sanitizeCustomerFacingReply(faqResponse), finalQuestion);
-    } else {
-      // 4.3 Delegar a la Inteligencia Artificial (LLM Generativo)
-      if (!isGreetingOrNoise) {
-        cliLog('FAQ: sin match (NO_FAQ) → fallback IA generativa');
-      }
+      session.history.turns.push({ role: 'model', text: reply });
+      saveSession(sessionId, session);
+      return reply;
+    }
+
+    // 4.4 Sin FAQ clara: strike + plantilla fija (o LLM muy corto si parece pregunta real)
+    session.consecutiveErrors = (session.consecutiveErrors || 0) + 1;
+    cliLog(`sin ayuda clara → strike ${session.consecutiveErrors}/${maxConsecutiveErrors}`);
+
+    // Anti-loop: umbral SECURITY_MAX_CONSECUTIVE_ERRORS → mute + SOS
+    if (session.consecutiveErrors >= maxConsecutiveErrors) {
+      return triggerSosMute(
+        'ANTI-LOOP',
+        'Varias respuestas seguidas que el bot no entendió.',
+        null
+      );
+    }
+
+    // ¿Parece una pregunta real? Intentamos LLM ultra-corto; si no, plantilla fija
+    const looksLikeRealQuestion = /\?/.test(trimmedMessage)
+      || /\b(como|cómo|donde|dónde|cuando|cuándo|quien|quién|porque|por\s*qu[eé]|que\s+es|qué\s+es)\b/i.test(trimmedMessage);
+
+    if (looksLikeRealQuestion) {
+      cliLog('FAQ: NO_FAQ → LLM corto disciplinado');
       let systemInstruction = readPrompt();
       if (currentState.aiContextPrompt) {
         systemInstruction = `${systemInstruction}\n\n${currentState.aiContextPrompt}`;
       }
-
-      // Misma fuente oficial que el FAQ: evita inventar ingredientes/precios en el fallback
       systemInstruction = `${systemInstruction}\n\n${buildFaqCatalogContext()}
-REGLA FALLBACK: Si hablas de ingredientes, precios o despacho RM, usa SOLO la información oficial de arriba. No inventes ni completes fichas.
-REGLA ANTI-JERGA: NUNCA digas al cliente "DATOS OFICIALES", "FAQ", "datos.json" ni "sección". Habla solo como vendedor.`;
+REGLA FALLBACK (crítica): Máximo 2 frases cortas. Si no sabes con certeza → di que no tienes esa info y ofrece escribir *NO* para un humano. NO inventes pitch, precios ni historias.
+REGLA ANTI-JERGA: NUNCA digas "DATOS OFICIALES", "FAQ" ni "datos.json".`;
 
-      systemInstruction = `${systemInstruction}\n\n[DATOS CONOCIDOS DE LA SESIÓN DE WHATSAPP]:
-- Tipo de compra actual: ${session.userIntent || 'No definido'}
-- Nombre del cliente: ${session.orderBuilder?.clientData?.name || session.userName || 'No informado'}`;
-
+      systemInstruction = `${systemInstruction}\n\n[DATOS CONOCIDOS]:
+- Intención: ${session.userIntent || 'No definido'}
+- Nombre: ${session.orderBuilder?.clientData?.name || session.userName || 'No informado'}`;
       if (session.eventoFormato) {
-        systemInstruction += `\n- Formato de Evento: ${session.eventoFormato}`;
+        systemInstruction += `\n- Formato evento: ${session.eventoFormato}`;
       }
 
-      // Convertimos el historial al formato que espera Gemini
       const contents = session.history.turns.map(t => ({ role: t.role, parts: [{ text: t.text }] }));
-      
-      const config = { temperature: 0.7, maxOutputTokens: 300 };
-      cliLog('IA: generando respuesta (fallback)...');
+      const config = { temperature: 0.2, maxOutputTokens: 120 };
       const generated = await generateResponse(config, systemInstruction, contents);
-
       if (generated) {
-         // generateResponse ya sanitiza; re-limpiamos por defensa en profundidad
-         reply = appendStepQuestionIfNeeded(sanitizeCustomerFacingReply(generated), finalQuestion);
+        reply = appendStepQuestionIfNeeded(sanitizeCustomerFacingReply(generated), finalQuestion);
       } else {
-         reply = buildNoInfoReply();
+        reply = buildNoInfoReply();
       }
+    } else {
+      // Sin pregunta clara → plantilla fija (no monólogo creativo)
+      cliLog('FAQ: NO_FAQ → plantilla fija (sin LLM creativo)');
+      reply = buildNoInfoReply();
     }
 
     session.history.turns.push({ role: 'model', text: reply });

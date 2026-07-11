@@ -463,8 +463,8 @@ export function hasDrinkSelection(text) {
 
 /**
  * isOnlyBrowsing: true si el cliente dice que solo mira / no quiere cotizar ahora.
- * Cubre frases naturales: "mirando", "solo estoy mirando", "gracias, solo miraba", "no gracias".
- * Sirve para cerrar con despedida suave en lugar de mandar al fallback FAQ/IA.
+ * Cubre: "mirando", "no gracias", "lo tendré presente", "para agosto", "no lo tomaré".
+ * Sirve para cerrar con despedida suave (mute + CERRADO) en lugar de insistir.
  *
  * @param {string} messageText - Mensaje del cliente
  * @returns {boolean}
@@ -474,11 +474,11 @@ export function isOnlyBrowsing(messageText) {
 	if (!trimmed) return false;
 	const lower = trimmed.toLowerCase();
 
-	// Respuestas cortas de rechazo ("no", "nop", "nah")
+	// Respuestas cortas de rechazo ("no", "nop", "nah") — en filtro barriles
+	// la regla SOLO_MIRANDO excluye "no" solo (ahí "no" = no a la web → CHAT).
 	if (/^(no|nop|nope|nah)$/i.test(trimmed)) return true;
 
 	// Mensaje casi solo "mirando" / "consultando" (con o sin "gracias" / "solo" / "estoy")
-	// Ej: "mirando" | "solo mirando" | "gracias, solo estoy mirando"
 	if (/^(gracias[,!.]?\s+)?(solo\s+)?(estoy\s+|estaba\s+|estuve\s+)?(mirando|consultando|viendo|miraba)[.!]?$/i.test(trimmed)) {
 		return true;
 	}
@@ -488,8 +488,18 @@ export function isOnlyBrowsing(messageText) {
 		return true;
 	}
 
-	// Rechazo explícito de cotizar / comprar ahora
-	if (/\b(no\s+gracias|no\s+quiero(\s+cotiz)?|no\s+deseo|no\s+me\s+interesa|por\s+ahora\s+no|ahora\s+no|despu[eé]s|luego|en\s+otro\s+momento|nada|cancelar)\b/i.test(lower)) {
+	// Rechazo explícito / "después" / no lo tomará
+	if (/\b(no\s+gracias|gracias\s+no|no\s+quiero(\s+cotiz)?|no\s+deseo|no\s+me\s+interesa|no\s+lo\s+tomar[eé]|por\s+ahora\s+no|ahora\s+no|despu[eé]s|luego|en\s+otro\s+momento|nada|cancelar)\b/i.test(lower)) {
+		return true;
+	}
+
+	// "Lo tendré presente", "lo tengo presente", "para agosto/más adelante"
+	if (/\b(lo\s+tendr[eé]\s+presente|lo\s+tengo\s+presente|tendr[eé]\s+presente|m[aá]s\s+adelante|en\s+el\s+futuro)\b/i.test(lower)) {
+		return true;
+	}
+	// Mes futuro sin pedir cotizar ahora (ej. "para agosto", "en diciembre quizás")
+	if (/\b(para|en)\s+(enero|febrero|marzo|abril|mayo|junio|julio|agosto|septiembre|octubre|noviembre|diciembre)\b/i.test(lower)
+		&& !/\b(cotiz|quiero|necesito|pedido|comprar|agendar)\b/i.test(lower)) {
 		return true;
 	}
 
@@ -529,12 +539,53 @@ export function stripTriggerPrefix(text, config) {
 // ==============================================================================
 // FUNCIONES MEJORADAS DE EXTRACCION (Para Order Builder)
 // ==============================================================================
+
+/** Palabras cortas que NUNCA son comuna (evita "no" → Ñuñoa por substring). */
+const LOCATION_STOPWORDS = new Set([
+	'no', 'si', 'ok', 'ya', 'el', 'la', 'los', 'las', 'de', 'del', 'en', 'un', 'una',
+	'mi', 'tu', 'su', 'para', 'por', 'con', 'sin', 'mas', 'muy', 'solo', 'hola',
+	'gracias', 'web', 'chat', 'aca', 'aqui', 'aka', 'dale', 'listo', 'sos', 'nop'
+]);
+
+/** Largo mínimo para aceptar match parcial (typo "nuno" / "provid"). */
+const LOCATION_MIN_PARTIAL_LEN = 4;
+
+/**
+ * textContainsLocationPhrase: ¿El texto normalizado contiene la comuna como frase?
+ * Evita matches por pedazos ("no" dentro de "nunoa").
+ *
+ * @param {string} haystackNorm - Mensaje ya normalizado
+ * @param {string} needleNorm - Nombre de comuna normalizado
+ * @returns {boolean}
+ */
+function textContainsLocationPhrase(haystackNorm, needleNorm) {
+	if (!haystackNorm || !needleNorm) return false;
+	if (haystackNorm === needleNorm) return true;
+	// Palabra/frase completa con bordes (espacios o inicio/fin)
+	const escaped = needleNorm.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+	return new RegExp(`(?:^|\\s)${escaped}(?:\\s|$)`).test(haystackNorm);
+}
+
+/**
+ * findLocationByFuzzyMatch: Busca comuna/región en el texto del cliente.
+ * 1) Igualdad exacta del mensaje completo.
+ * 2) La comuna aparece como palabra/frase dentro del mensaje ("en ñuñoa").
+ * 3) Typo parcial solo si el cliente escribió ≥4 letras ("provid" → Providencia).
+ * Nunca usa includes suelto con textos cortos (bug: "no" ⊂ "nunoa" → Ñuñoa).
+ *
+ * @param {string} userLocation - Mensaje o fragmento con posible comuna
+ * @returns {{ name: string, region: string, deliveryCost: object|null, isRM: boolean }|null}
+ */
 export function findLocationByFuzzyMatch(userLocation) {
 	if (!userLocation) return null;
 
 	const normalized = normalizeString(userLocation);
-	const comunasRM = preciosData.comunas_rm || {};
+	if (!normalized || LOCATION_STOPWORDS.has(normalized)) return null;
 
+	const comunasRM = preciosData.comunas_rm || {};
+	const regionesChile = preciosData.regiones_chile || {};
+
+	// 1) Mensaje = nombre exacto de comuna RM
 	for (const [comunaName, rates] of Object.entries(comunasRM)) {
 		if (normalizeString(comunaName) === normalized) {
 			return {
@@ -546,7 +597,7 @@ export function findLocationByFuzzyMatch(userLocation) {
 		}
 	}
 
-	const regionesChile = preciosData.regiones_chile || {};
+	// 1b) Mensaje = nombre exacto fuera de RM
 	for (const [regionName, comunasList] of Object.entries(regionesChile)) {
 		for (const comuna of comunasList) {
 			if (normalizeString(comuna) === normalized) {
@@ -560,9 +611,27 @@ export function findLocationByFuzzyMatch(userLocation) {
 		}
 	}
 
+	// 2–3) Fuzzy controlado sobre RM
 	for (const [comunaName] of Object.entries(comunasRM)) {
 		const normComuna = normalizeString(comunaName);
-		if (normalized.includes(normComuna) || normComuna.includes(normalized)) {
+		if (normComuna.length < 3) continue;
+
+		// "para el viernes en nunoa" → contiene la frase
+		if (textContainsLocationPhrase(normalized, normComuna)) {
+			return {
+				name: comunaName,
+				region: 'Región Metropolitana',
+				deliveryCost: { desechable: comunasRM[comunaName].desechable, evento: comunasRM[comunaName].evento },
+				isRM: true
+			};
+		}
+
+		// Typo / abreviatura: solo si el cliente escribió suficiente texto
+		if (
+			normalized.length >= LOCATION_MIN_PARTIAL_LEN
+			&& normalized.length < normComuna.length
+			&& normComuna.includes(normalized)
+		) {
 			return {
 				name: comunaName,
 				region: 'Región Metropolitana',
@@ -572,10 +641,11 @@ export function findLocationByFuzzyMatch(userLocation) {
 		}
 	}
 
+	// 2b) Fuzzy fuera de RM: solo si la comuna aparece como frase en el mensaje
 	for (const [regionName, comunasList] of Object.entries(regionesChile)) {
 		for (const comuna of comunasList) {
 			const normComuna = normalizeString(comuna);
-			if (normComuna.length >= 3 && normalized.includes(normComuna)) {
+			if (normComuna.length >= 3 && textContainsLocationPhrase(normalized, normComuna)) {
 				return {
 					name: comuna,
 					region: regionName,
