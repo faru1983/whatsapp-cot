@@ -26,10 +26,10 @@ const WELCOME_TEXTS = [
 • Desde *$31.990* (según sabor)
 
 📍 Despacho en toda la RM y a regiones por encomienda.
-👉 Sabores y Precios: https://cocktailsontap.cl/barriles`,
-  `¿Prefieres revisar la *web*, o te envío los precios por *aquí* (WhatsApp)?
+🔗 Sabores y Precios: *www.cocktailsontap.cl/barriles*`,
+  `¿Prefieres revisar la *web*, o que te envíe los precios por *aquí*?
 
-_Si solo estás mirando, escribe *después* y no te molesto._`
+_Si solo estás mirando, escribe *después* y no te vuelvo a molestar._`
 ];
 
 const AI_PROMPT = `[SISTEMA - ESTADO: FILTRO DE CANAL BARRILES]
