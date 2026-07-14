@@ -303,18 +303,18 @@ export function composeAdminAlertMessage({ type, title, clientLabel, body }) {
 // ==============================================================================
 
 /**
- * getEventFormatPitch: Texto de venta del formato elegido + pregunta de confirmación.
- * Dos burbujas: explicación de lo incluido, y "¿continuamos? escribe ok".
+ * getEventFormatPitch: Texto de venta del formato elegido (lo incluido).
+ * Se envía al elegir Dispensador/Muro, justo antes de la carta de cócteles.
+ * Ya no pide un segundo "ok": el siguiente paso es armar el menú.
  *
  * @param {'dispensador'|'muro'} formatKey - Formato elegido
- * @returns {string[]} [pitch, pregunta]
+ * @returns {string} Pitch de lo incluido en el servicio
  */
 export function getEventFormatPitch(formatKey) {
   const isMuro = formatKey === 'muro';
 
   if (isMuro) {
-    return [
-      `¡Excelente elección! 🍸
+    return `¡Excelente elección! 🍸
 
 Nuestro *Muro de Coctelería* es una opción premium que convierte la barra en un verdadero punto de atracción para tus invitados. Su diseño elegante, iluminación LED y sistema de dispensación permiten servir cócteles de forma rápida, práctica y con una presentación espectacular.
 
@@ -327,15 +327,10 @@ Nuestro *Muro de Coctelería* es una opción premium que convierte la barra en u
 🥂 Vasos/Copas (plásticas premium) en prestamo para todos los invitados.
 🧰 Accesorios de bar como hieleras, palas, pinzas y todo lo necesario para servir.
 
-⏰ Sin límite de tiempo: instalamos el muro antes de tu evento y lo retiramos al día siguiente, sin costos ocultos.`,
-      `¿Te gustaría continuar con el *Muro de Coctelería*? 🍸
-
-Si es así, escribe *ok* y te muestro la lista de cócteles y precios. Si prefieres el *Dispensador*, dímelo y te cuento esa opción.`
-    ];
+⏰ Sin límite de tiempo: instalamos el muro antes de tu evento y lo retiramos al día siguiente, sin costos ocultos.`;
   }
 
-  return [
-    `¡Excelente elección! 🍸
+  return `¡Excelente elección! 🍸
 
 Nuestro *Dispensador Portátil* es ideal para eventos. Funciona sin electricidad, mantiene los cócteles fríos con hielo gracias a su tecnología térmica y se adapta fácilmente a espacios pequeños o grandes.
 
@@ -346,11 +341,7 @@ Nuestro *Dispensador Portátil* es ideal para eventos. Funciona sin electricidad
 🥂 Vasos/Copas (plásticas premium) en prestamo para todos los invitados.
 🧰 Accesorios de bar como hieleras, palas, pinzas y todo lo necesario para servir.
 
-⏰ Sin límite de tiempo: instalamos el dispensador antes de tu evento y lo retiramos al día siguiente, sin costos ocultos.`,
-    `¿Te gustaría continuar con el *Dispensador Portátil*? 🍸
-
-Si es así, escribe *ok* y te muestro la lista de cócteles y precios. Si prefieres el *Muro*, dímelo y te cuento esa opción.`
-  ];
+⏰ Sin límite de tiempo: instalamos el dispensador antes de tu evento y lo retiramos al día siguiente, sin costos ocultos.`;
 }
 
 /**

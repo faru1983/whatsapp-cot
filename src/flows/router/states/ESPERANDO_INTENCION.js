@@ -78,7 +78,7 @@ export const ESPERANDO_INTENCION = defineState({
 
     if (intent === 'EVENTOS') {
       session.userIntent = 'EVENTOS';
-      return { success: true, nextState: 'EVENTOS_FILTRO_CANAL' };
+      return { success: true, nextState: 'EVENTOS_RECOGIDA_DATOS' };
     }
 
     if (intent === 'AMBAS' && !session.hasAskedAmbas) {
@@ -123,7 +123,7 @@ export const ESPERANDO_INTENCION = defineState({
       }
       if (choice === 'EVENTOS') {
         session.userIntent = 'EVENTOS';
-        return { success: true, nextState: 'EVENTOS_FILTRO_CANAL' };
+        return { success: true, nextState: 'EVENTOS_RECOGIDA_DATOS' };
       }
     }
 

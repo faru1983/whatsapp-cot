@@ -15,14 +15,12 @@ import { hasDrinkSelection } from '../utils.js';
 import { matchKeywordIntent } from '../keyword-intent.js';
 import {
   rulesBarrilesFiltroCanal,
-  rulesEventosFiltroCanal,
   rulesConfirmarOModificar,
   rulesMenuUnoDos,
   rulesRouterIntencion,
   rulesWebVsChat,
   rulesConfirmarOCorregirDatos,
-  rulesDispensadorOMuro,
-  rulesConfirmarFormatoEvento
+  rulesDispensadorOMuro
 } from '../keyword-intent.js';
 
 // ==============================================================================
@@ -35,15 +33,12 @@ import {
  */
 const RULE_PRESETS = {
   barrilesFiltroCanal: () => rulesBarrilesFiltroCanal(),
-  eventosFiltroCanal: () => rulesEventosFiltroCanal(),
   confirmarOModificar: () => rulesConfirmarOModificar(),
   menuUnoDosProductosDatos: () => rulesMenuUnoDos({ labelUno: 'PRODUCTOS', labelDos: 'DATOS' }),
   routerIntencion: () => rulesRouterIntencion(),
   webVsChat: () => rulesWebVsChat(),
   confirmarOCorregirDatos: () => rulesConfirmarOCorregirDatos(),
-  dispensadorOMuro: () => rulesDispensadorOMuro(),
-  /** @param {string} currentKey */
-  confirmarFormatoEvento: (currentKey) => rulesConfirmarFormatoEvento(currentKey)
+  dispensadorOMuro: () => rulesDispensadorOMuro()
 };
 
 /**

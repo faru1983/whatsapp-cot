@@ -22,11 +22,9 @@ const EXPECTED_STATES = [
   'BARRILES_RECOGIDA_DATOS',
   'BARRILES_REVISION_COTIZACION',
   'BARRILES_ROUTER_MODIFICACION',
-  'EVENTOS_FILTRO_CANAL',
   'EVENTOS_RECOGIDA_DATOS',
   'EVENTOS_CONFIRMAR_DATOS',
   'EVENTOS_ELECCION_FORMATO',
-  'EVENTOS_CONFIRMAR_FORMATO',
   'EVENTOS_ELECCION_MENU',
   'EVENTOS_COTIZACION',
   'CERRADO'
@@ -102,12 +100,27 @@ assert(wantsAdvanceProductsOrder('ok'), `"ok" sí quiere avanzar`);
 assert(!isOnlyAdvanceProductsOrder('aka'), `"aka" no es advance`);
 
 // Comunas: "no" NUNCA debe matchear Ñuñoa (substring "no" ⊂ "nunoa")
-const { findLocationByFuzzyMatch } = await import('../src/logic/utils.js');
+const { findLocationByFuzzyMatch, parseDate } = await import('../src/logic/utils.js');
 assert(findLocationByFuzzyMatch('no') == null, `"no" no es comuna`);
 assert(findLocationByFuzzyMatch('sos') == null, `"sos" no es comuna`);
 assert(findLocationByFuzzyMatch('ñuñoa')?.name === 'Ñuñoa', `"ñuñoa" → Ñuñoa`);
 assert(findLocationByFuzzyMatch('para el viernes en nunoa')?.name === 'Ñuñoa', `frase con ñuñoa`);
 assert(findLocationByFuzzyMatch('Las Condes')?.name === 'Las Condes', `Las Condes exacto`);
+assert(findLocationByFuzzyMatch('cumpleaños, proxima semana en la condes')?.name === 'Las Condes', `typo la condes en frase`);
+assert(findLocationByFuzzyMatch('en la condes')?.name === 'Las Condes', `en la condes`);
+assert(findLocationByFuzzyMatch('en las condes')?.name === 'Las Condes', `en las condes`);
+assert(findLocationByFuzzyMatch('lascondes')?.name === 'Las Condes', `sin espacios`);
+assert(findLocationByFuzzyMatch('en el bosque')?.name === 'El Bosque', `en el bosque`);
+assert(findLocationByFuzzyMatch('stgo')?.name === 'Santiago', `alias stgo`);
+assert(findLocationByFuzzyMatch('en provid')?.name === 'Providencia', `hint parcial provid`);
+assert(findLocationByFuzzyMatch('boda de maria en providencia')?.name === 'Providencia', `no confundir de maria`);
+assert(findLocationByFuzzyMatch('no') == null, `"no" sigue sin ser comuna`);
+
+// Fechas: día+mes y solo mes (ej. "para diciembre" en cotización de evento)
+assert(parseDate('15 de mayo') === '15 de mayo', `día+mes → 15 de mayo`);
+assert(parseDate('quiero cotizar un matrimonio para diciembre') === 'para diciembre', `mes solo con para`);
+assert(parseDate('en marzo 2027') === 'en marzo 2027', `mes + año`);
+assert(parseDate('sin fecha acá') == null, `sin fecha → null`);
 
 // Grep nextState en flows
 const flowsRoot = path.join(__dirname, '../src/flows');
@@ -216,9 +229,18 @@ try {
   await runCase('Eventos keyword', [
     {
       input: 'evento',
-      expectState: 'EVENTOS_FILTRO_CANAL',
+      expectState: 'EVENTOS_RECOGIDA_DATOS',
       expectMuted: false,
       expectIncludes: ['Eventos']
+    }
+  ]);
+
+  await runCase('Mirón en eventos (datos)', [
+    { input: 'evento', expectState: 'EVENTOS_RECOGIDA_DATOS' },
+    {
+      input: 'después',
+      expectState: 'CERRADO',
+      expectMuted: true
     }
   ]);
 } catch (err) {

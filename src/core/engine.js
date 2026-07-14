@@ -325,7 +325,7 @@ async function processMessageUnlocked(sessionId, messageText, options = {}) {
       session.userIntent === 'BARRILES'
         ? 'BARRILES_FILTRO_CANAL'
         : session.userIntent === 'EVENTOS'
-          ? 'EVENTOS_FILTRO_CANAL'
+          ? 'EVENTOS_RECOGIDA_DATOS'
           : 'ESPERANDO_INTENCION';
 
     cliLog(`WARN: estado desconocido "${currentStateId}" → redirigiendo a ${fallbackState}`);
@@ -346,8 +346,8 @@ async function processMessageUnlocked(sessionId, messageText, options = {}) {
     const earlyStates = [
       'BARRILES_FILTRO_CANAL',
       'BARRILES_RECOGIDA_PRODUCTOS',
-      'EVENTOS_FILTRO_CANAL',
-      'EVENTOS_RECOGIDA_DATOS'
+      'EVENTOS_RECOGIDA_DATOS',
+      'EVENTOS_CONFIRMAR_DATOS'
     ];
     
     if (earlyStates.includes(currentStateId)) {
@@ -384,7 +384,7 @@ async function processMessageUnlocked(sessionId, messageText, options = {}) {
 
         cliLog(`SWITCH: cliente cambia intención → ${switchIntent}`);
         session.userIntent = switchIntent;
-        session.currentState = switchIntent === 'BARRILES' ? 'BARRILES_FILTRO_CANAL' : 'EVENTOS_FILTRO_CANAL';
+        session.currentState = switchIntent === 'BARRILES' ? 'BARRILES_FILTRO_CANAL' : 'EVENTOS_RECOGIDA_DATOS';
         session.consecutiveErrors = 0;
 
         // Puede ser string o array (info + pregunta en burbujas separadas)

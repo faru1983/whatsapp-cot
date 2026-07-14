@@ -58,12 +58,24 @@ export function applyEventDataFromMessage(messageText, session) {
     session.region = locationSearch.region;
     hasNewInfo = true;
   } else {
-    const locationMatch = messageText.match(/\ben\s+([A-Za-záéíóúÁÉÍÓÚñÑ]+(?:\s+[A-Za-záéíóúÁÉÍÓÚñÑ]+)?)\b/i);
-    if (locationMatch && !/el|la|un|una|mi|casa/i.test(locationMatch[1])) {
-      session.location = locationMatch[1].trim();
-      session.isRM = false;
-      session.region = null;
-      hasNewInfo = true;
+    // Fallback: "en Talca" u otra ciudad fuera del catálogo fuzzy
+    // Solo rechazamos si la captura ENTERA es un stopword ("la"), no si empieza con "la condes"
+    const locationMatch = messageText.match(
+      /\b(?:en|comuna(?:\s+de)?)\s+((?:(?:el|la|los|las|lo)\s+)?[A-Za-záéíóúÁÉÍÓÚñÑ0-9]+(?:\s+[A-Za-záéíóúÁÉÍÓÚñÑ0-9]+){0,3})\b/i
+    );
+    if (locationMatch) {
+      const captured = locationMatch[1].trim();
+      const capturedNorm = captured
+        .toLowerCase()
+        .normalize('NFD')
+        .replace(/[\u0300-\u036f]/g, '');
+      const isBareStopword = /^(el|la|los|las|lo|un|una|mi|tu|su|casa|de|del|en)$/i.test(capturedNorm);
+      if (!isBareStopword && capturedNorm.length >= 3) {
+        session.location = captured;
+        session.isRM = false;
+        session.region = null;
+        hasNewInfo = true;
+      }
     }
   }
 

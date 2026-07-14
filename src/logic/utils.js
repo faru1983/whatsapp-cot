@@ -544,11 +544,62 @@ export function stripTriggerPrefix(text, config) {
 const LOCATION_STOPWORDS = new Set([
 	'no', 'si', 'ok', 'ya', 'el', 'la', 'los', 'las', 'de', 'del', 'en', 'un', 'una',
 	'mi', 'tu', 'su', 'para', 'por', 'con', 'sin', 'mas', 'muy', 'solo', 'hola',
-	'gracias', 'web', 'chat', 'aca', 'aqui', 'aka', 'dale', 'listo', 'sos', 'nop'
+	'gracias', 'web', 'chat', 'aca', 'aqui', 'aka', 'dale', 'listo', 'sos', 'nop',
+	'casa', 'fiesta', 'evento', 'semana', 'mes', 'ano', 'hoy', 'manana'
 ]);
+
+/** Artículos típicos al inicio de comunas chilenas (La / Las / El / Lo…). */
+const LOCATION_ARTICLES = ['el', 'la', 'los', 'las', 'lo'];
 
 /** Largo mínimo para aceptar match parcial (typo "nuno" / "provid"). */
 const LOCATION_MIN_PARTIAL_LEN = 4;
+
+/**
+ * Apodos / typos frecuentes → nombre oficial en datos.json.
+ * Se buscan como frase dentro del mensaje ya normalizado.
+ */
+const LOCATION_ALIASES = {
+	stgo: 'Santiago',
+	'santiago centro': 'Santiago',
+	'la condes': 'Las Condes',
+	lasconde: 'Las Condes',
+	lascondes: 'Las Condes',
+	condes: 'Las Condes',
+	pac: 'Pedro Aguirre Cerda',
+	'pedro aguirre': 'Pedro Aguirre Cerda',
+	provid: 'Providencia',
+	'estacion central': 'Estación Central',
+	'jose de maipo': 'San José de Maipo',
+	'san jose de maipo': 'San José de Maipo',
+	nunoa: 'Ñuñoa',
+	penalolen: 'Peñalolén',
+	'til til': 'Tiltil'
+};
+
+/**
+ * normalizeLocationText: Normaliza para buscar comunas (sin tildes ni signos).
+ * "Las Condes!" / "la condes," → "las condes" / "la condes".
+ *
+ * @param {string} str
+ * @returns {string}
+ */
+function normalizeLocationText(str) {
+	return normalizeString(str)
+		.replace(/[^a-z0-9\s]/g, ' ')
+		.replace(/\s+/g, ' ')
+		.trim();
+}
+
+/**
+ * stripLeadingArticle: Quita el artículo inicial de un nombre normalizado.
+ * "las condes" → "condes"; "providencia" → "providencia".
+ *
+ * @param {string} norm
+ * @returns {string}
+ */
+function stripLeadingArticle(norm) {
+	return String(norm || '').replace(/^(el|la|los|las|lo)\s+/, '');
+}
 
 /**
  * textContainsLocationPhrase: ¿El texto normalizado contiene la comuna como frase?
@@ -567,10 +618,98 @@ function textContainsLocationPhrase(haystackNorm, needleNorm) {
 }
 
 /**
+ * buildLocationSearchKeys: Variantes con las que suele escribir el cliente.
+ * Ej. "Las Condes" → "las condes", "condes", "la condes", "lascondes"…
+ *
+ * @param {string} comunaName - Nombre oficial
+ * @returns {string[]} Claves normalizadas (más largas primero)
+ */
+function buildLocationSearchKeys(comunaName) {
+	const base = normalizeLocationText(comunaName);
+	if (!base) return [];
+
+	const keys = new Set([base]);
+	const core = stripLeadingArticle(base);
+	keys.add(core);
+	keys.add(base.replace(/\s+/g, ''));
+	keys.add(core.replace(/\s+/g, ''));
+
+	// Si la comuna lleva artículo, también aceptamos artículo "equivocado"
+	// (muy común: "la condes" en vez de "las condes")
+	if (core && core !== base) {
+		for (const art of LOCATION_ARTICLES) {
+			keys.add(`${art} ${core}`);
+		}
+	}
+
+	return [...keys]
+		.filter((k) => k.length >= 3 && !LOCATION_STOPWORDS.has(k))
+		.sort((a, b) => b.length - a.length);
+}
+
+/**
+ * extractLocationHints: Saca candidatos tras "en …" / "comuna …".
+ * Así "proxima semana en la condes" aporta el hint "la condes".
+ * No usamos "de …" suelto (evita "boda de María" → María Pinto).
+ *
+ * @param {string} normalized - Mensaje ya normalizado para ubicación
+ * @returns {string[]}
+ */
+function extractLocationHints(normalized) {
+	if (!normalized) return [];
+	const hints = new Set();
+	const re =
+		/\b(?:en|comuna(?:\s+de)?|sector|zona|vivo\s+en|queda\s+en|es\s+en)\s+((?:(?:el|la|los|las|lo)\s+)?[a-z0-9]+(?:\s+[a-z0-9]+){0,3})/g;
+	let m;
+	while ((m = re.exec(normalized))) {
+		let hint = String(m[1] || '').trim();
+		// Recorta si pegó palabras de fecha al final del hint
+		hint = hint
+			.replace(
+				/\b(enero|febrero|marzo|abril|mayo|junio|julio|agosto|septiembre|octubre|noviembre|diciembre|semana|hoy|manana)\b.*$/i,
+				''
+			)
+			.trim();
+		if (hint.length >= 3 && !LOCATION_STOPWORDS.has(hint)) hints.add(hint);
+	}
+	return [...hints];
+}
+
+/**
+ * resolveComunaRecord: Arma el objeto de retorno para una comuna RM u otra región.
+ *
+ * @param {string} comunaName
+ * @param {object} comunasRM
+ * @param {object} regionesChile
+ * @returns {{ name: string, region: string, deliveryCost: object|null, isRM: boolean }|null}
+ */
+function resolveComunaRecord(comunaName, comunasRM, regionesChile) {
+	if (comunasRM[comunaName]) {
+		const rates = comunasRM[comunaName];
+		return {
+			name: comunaName,
+			region: 'Región Metropolitana',
+			deliveryCost: { desechable: rates.desechable, evento: rates.evento },
+			isRM: true
+		};
+	}
+	for (const [regionName, comunasList] of Object.entries(regionesChile)) {
+		if (comunasList.includes(comunaName)) {
+			return {
+				name: comunaName,
+				region: regionName,
+				deliveryCost: null,
+				isRM: false
+			};
+		}
+	}
+	return null;
+}
+
+/**
  * findLocationByFuzzyMatch: Busca comuna/región en el texto del cliente.
- * 1) Igualdad exacta del mensaje completo.
- * 2) La comuna aparece como palabra/frase dentro del mensaje ("en ñuñoa").
- * 3) Typo parcial solo si el cliente escribió ≥4 letras ("provid" → Providencia).
+ * Cubre: nombre exacto, con "en …", artículo mal puesto ("la condes"),
+ * sin espacios ("lascondes"), apodos (stgo) y typos parciales cortos.
  * Nunca usa includes suelto con textos cortos (bug: "no" ⊂ "nunoa" → Ñuñoa).
  *
  * @param {string} userLocation - Mensaje o fragmento con posible comuna
@@ -579,28 +718,40 @@ function textContainsLocationPhrase(haystackNorm, needleNorm) {
 export function findLocationByFuzzyMatch(userLocation) {
 	if (!userLocation) return null;
 
-	const normalized = normalizeString(userLocation);
+	const normalized = normalizeLocationText(userLocation);
 	if (!normalized || LOCATION_STOPWORDS.has(normalized)) return null;
 
 	const comunasRM = preciosData.comunas_rm || {};
 	const regionesChile = preciosData.regiones_chile || {};
 
-	// 1) Mensaje = nombre exacto de comuna RM
-	for (const [comunaName, rates] of Object.entries(comunasRM)) {
-		if (normalizeString(comunaName) === normalized) {
-			return {
-				name: comunaName,
-				region: 'Región Metropolitana',
-				deliveryCost: { desechable: rates.desechable, evento: rates.evento },
-				isRM: true
-			};
+	/**
+	 * tryReturn: Resuelve nombre oficial → registro, o null si no existe.
+	 * @param {string} officialName
+	 */
+	const tryReturn = (officialName) =>
+		resolveComunaRecord(officialName, comunasRM, regionesChile);
+
+	// --- A) Apodos / typos conocidos (frase completa en el mensaje) ---
+	// Preferimos aliases más largos ("santiago centro" antes que "stgo")
+	const aliasEntries = Object.entries(LOCATION_ALIASES)
+		.filter(([, official]) => official)
+		.sort((a, b) => b[0].length - a[0].length);
+	for (const [alias, official] of aliasEntries) {
+		if (textContainsLocationPhrase(normalized, alias)) {
+			const hit = tryReturn(official);
+			if (hit) return hit;
 		}
 	}
 
-	// 1b) Mensaje = nombre exacto fuera de RM
+	// --- B) Mensaje = nombre exacto (RM u otra región) ---
+	for (const comunaName of Object.keys(comunasRM)) {
+		if (normalizeLocationText(comunaName) === normalized) {
+			return tryReturn(comunaName);
+		}
+	}
 	for (const [regionName, comunasList] of Object.entries(regionesChile)) {
 		for (const comuna of comunasList) {
-			if (normalizeString(comuna) === normalized) {
+			if (normalizeLocationText(comuna) === normalized) {
 				return {
 					name: comuna,
 					region: regionName,
@@ -611,47 +762,66 @@ export function findLocationByFuzzyMatch(userLocation) {
 		}
 	}
 
-	// 2–3) Fuzzy controlado sobre RM
-	for (const [comunaName] of Object.entries(comunasRM)) {
-		const normComuna = normalizeString(comunaName);
-		if (normComuna.length < 3) continue;
+	// Hints tras "en …" (sirven para match exacto de variante y para typos)
+	const hints = extractLocationHints(normalized);
 
-		// "para el viernes en nunoa" → contiene la frase
-		if (textContainsLocationPhrase(normalized, normComuna)) {
-			return {
-				name: comunaName,
-				region: 'Región Metropolitana',
-				deliveryCost: { desechable: comunasRM[comunaName].desechable, evento: comunasRM[comunaName].evento },
-				isRM: true
-			};
-		}
+	// --- C) Variantes de cada comuna RM dentro del mensaje o de un hint ---
+	// Elegimos la clave más larga que matchee (más específica).
+	let best = null;
+	let bestKeyLen = 0;
 
-		// Typo / abreviatura: solo si el cliente escribió suficiente texto
-		if (
-			normalized.length >= LOCATION_MIN_PARTIAL_LEN
-			&& normalized.length < normComuna.length
-			&& normComuna.includes(normalized)
-		) {
-			return {
-				name: comunaName,
-				region: 'Región Metropolitana',
-				deliveryCost: { desechable: comunasRM[comunaName].desechable, evento: comunasRM[comunaName].evento },
-				isRM: true
-			};
+	for (const comunaName of Object.keys(comunasRM)) {
+		const keys = buildLocationSearchKeys(comunaName);
+		for (const key of keys) {
+			const inMessage = textContainsLocationPhrase(normalized, key);
+			const inHint = hints.some(
+				(h) => h === key || stripLeadingArticle(h) === stripLeadingArticle(key)
+			);
+			if ((inMessage || inHint) && key.length > bestKeyLen) {
+				best = comunaName;
+				bestKeyLen = key.length;
+			}
 		}
 	}
 
-	// 2b) Fuzzy fuera de RM: solo si la comuna aparece como frase en el mensaje
+	if (best) return tryReturn(best);
+
+	// --- D) Fuzzy fuera de RM: frase o hint ---
 	for (const [regionName, comunasList] of Object.entries(regionesChile)) {
 		for (const comuna of comunasList) {
-			const normComuna = normalizeString(comuna);
-			if (normComuna.length >= 3 && textContainsLocationPhrase(normalized, normComuna)) {
-				return {
-					name: comuna,
-					region: regionName,
-					deliveryCost: null,
-					isRM: false
-				};
+			const keys = buildLocationSearchKeys(comuna);
+			for (const key of keys) {
+				if (textContainsLocationPhrase(normalized, key) || hints.includes(key)) {
+					return {
+						name: comuna,
+						region: regionName,
+						deliveryCost: null,
+						isRM: false
+					};
+				}
+			}
+		}
+	}
+
+	// --- E) Typo parcial: mensaje corto O hint corto contenido en el nombre ---
+	const partialCandidates = [
+		normalized,
+		...hints
+	].filter((t) => t.length >= LOCATION_MIN_PARTIAL_LEN);
+
+	for (const candidate of partialCandidates) {
+		// Solo si el candidato es "casi" el nombre (no el mensaje largo entero)
+		if (candidate === normalized && /\s/.test(normalized) && normalized.split(/\s+/).length > 4) {
+			continue;
+		}
+		for (const comunaName of Object.keys(comunasRM)) {
+			const normComuna = normalizeLocationText(comunaName);
+			const core = stripLeadingArticle(normComuna);
+			if (
+				(normComuna.includes(candidate) || core.includes(candidate))
+				&& candidate.length < normComuna.length
+			) {
+				return tryReturn(comunaName);
 			}
 		}
 	}
@@ -709,11 +879,28 @@ export function parseClientName(text) {
 	return null;
 }
 
+/**
+ * parseDate: Extrae una fecha del mensaje del cliente (texto libre).
+ * Acepta día+mes ("15 de mayo"), solo mes ("para diciembre"), números,
+ * días de la semana y relativas (hoy / mañana).
+ *
+ * @param {string} text - Mensaje del cliente
+ * @returns {string|null} Fragmento de fecha encontrado, o null
+ */
 export function parseDate(text) {
 	if (!text) return null;
 
+	const months =
+		'enero|febrero|marzo|abril|mayo|junio|julio|agosto|septiembre|octubre|noviembre|diciembre';
+
 	const datePatterns = [
-		/((?:el\s+)?\d{1,2}\s+de\s+(?:enero|febrero|marzo|abril|mayo|junio|julio|agosto|septiembre|octubre|noviembre|diciembre))/i,
+		// Día + mes: "15 de mayo", "el 3 de diciembre"
+		new RegExp(`((?:el\\s+)?\\d{1,2}\\s+de\\s+(?:${months}))`, 'i'),
+		// Solo mes (con o sin preposición/año): "diciembre", "para diciembre", "en marzo 2027"
+		new RegExp(
+			`((?:(?:para|en|durante|este|el)\\s+)?(?:${months})(?:\\s+(?:de\\s+)?\\d{4})?)`,
+			'i'
+		),
 		/(\d{1,2}[-/]\d{1,2}(?:[-/]\d{2,4})?)/,
 		/((?:el\s+)?(?:lunes|martes|mi[eé]rcoles|jueves|jeuves|viernes|s[aá]bado|domingo)(?:\s+\d{1,2})?)/i,
 		/(hoy|ma[ñn]ana|mañana|pasado ma[ñn]ana|este (?:lunes|martes|mi[eé]rcoles|jueves|jeuves|viernes|s[aá]bado|domingo)|proxima (?:semana|semana)|próxima semana)/i,

@@ -125,7 +125,7 @@ export function rulesBarrilesFiltroCanal() {
 
 /**
  * rulesWebVsChat: ¿Quiere ir a la web o seguir por WhatsApp?
- * Usado en filtro de canal de eventos y post-ambas del router.
+ * Usado en filtro de canal Barriles, post-ambas del router, y "web" en Eventos.
  * En esos pasos, elegir WEB cierra el chat (CERRADO + mute).
  *
  * @returns {Array<{ label: string, test: Function }>}
@@ -157,26 +157,6 @@ export function rulesWebVsChat() {
         /^(no|nop|nope)$/i.test(trimmed)
         || /\b(aqui|aca|aka|chat|whatsapp|por\s+aqui|por\s+aca|por\s+aka|cuentame|ayudame|sigamos|seguimos|continuar)\b/.test(normalized)
     }
-  ];
-}
-
-/**
- * rulesEventosFiltroCanal: Menú inicial de eventos (web / chat / solo mirando).
- * Igual idea que barriles: mirón primero, luego web, luego chat.
- *
- * @returns {Array<{ label: string, test: Function }>}
- */
-export function rulesEventosFiltroCanal() {
-  return [
-    {
-      label: 'SOLO_MIRANDO',
-      test: ({ raw, trimmed }) => {
-        // "no" solo = no a la web → CHAT (no cerramos)
-        if (/^(no|nop|nope|nah)$/i.test(trimmed)) return false;
-        return isOnlyBrowsing(raw) || wantsInstagramOrSocial(raw);
-      }
-    },
-    ...rulesWebVsChat()
   ];
 }
 
@@ -283,38 +263,6 @@ export function rulesDispensadorOMuro() {
         if (isMuro) return true;
         if (isDispensador) return false;
         return false;
-      }
-    }
-  ];
-}
-
-/**
- * rulesConfirmarFormatoEvento: ok para ver carta, o cambiar a muro/dispensador.
- * Necesita la clave actual del formato para no "cambiar" al mismo.
- *
- * @param {'dispensador'|'muro'} currentKey - Formato ya elegido en sesión
- * @returns {Array<{ label: string, test: Function }>}
- */
-export function rulesConfirmarFormatoEvento(currentKey) {
-  return [
-    {
-      label: 'CAMBIAR_MURO',
-      test: ({ lower }) => /\bmuro\b/i.test(lower) && currentKey !== 'muro'
-    },
-    {
-      label: 'CAMBIAR_DISPENSADOR',
-      test: ({ lower }) =>
-        /\b(dispensador|portatil|portátil)\b/i.test(lower) && currentKey !== 'dispensador'
-    },
-    {
-      label: 'CONTINUAR',
-      test: ({ lower }) => {
-        const wantsMuro = /\bmuro\b/i.test(lower);
-        const wantsDisp = /\b(dispensador|portatil|portátil)\b/i.test(lower);
-        const wantsOk = /\b(ok|okay|si|sí|dale|vamos|listo|perfecto|continuar|continuemos|adelante|claro|por\s+favor|porfa)\b/i.test(lower);
-        return wantsOk
-          || (wantsMuro && currentKey === 'muro')
-          || (wantsDisp && currentKey === 'dispensador');
       }
     }
   ];

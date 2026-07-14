@@ -1,6 +1,6 @@
 // ==============================================================================
 // OBJETIVO: Paso EVENTOS_ELECCION_FORMATO — Dispensador vs Muro.
-// Al elegir, NO mostramos carta aún: vamos al pitch + confirmación.
+// Al elegir, enviamos pitch corto + carta y pasamos directo a menú (sin segundo ok).
 // ==============================================================================
 import { defineState } from '../../../logic/compile-state.js';
 import { getEventFormatPitch } from '../../../views/templates.js';
@@ -8,17 +8,18 @@ import { resolveDecisionIntent } from '../../../logic/decision-intent.js';
 import { rulesDispensadorOMuro } from '../../../logic/keyword-intent.js';
 import {
   getEventFormatKey,
-  ensureEventOrderBuilder
+  ensureEventOrderBuilder,
+  buildMenuEntryReplies
 } from '../../../logic/eventos-helpers.js';
 
-const SHORT_Q = `¿Qué formato prefieres, Dispensador o Muro?`;
+const SHORT_Q = `¿Qué formato prefieres, *Dispensador* o *Muro*?`;
 
 const AI_PROMPT = `[SISTEMA - ESTADO: PREGUNTAS SOBRE FORMATO DE EVENTO]
-El cliente ya recibió la recomendación de formato de evento (Dispensador Portátil o Muro de Coctelería) pero tiene dudas en lugar de elegir.
+El cliente ya recibió la recomendación de formato (Dispensador Portátil o Muro de Coctelería) pero tiene dudas en lugar de elegir.
 1. Responde su duda de forma breve y amigable.
-2. REGLA DE LOGÍSTICA: La instalación para el Dispensador es gratis, y para el Muro cuesta $50.000. NUNCA inventes tarifas de envío adicionales.
+2. REGLA DE LOGÍSTICA: Instalación Dispensador = gratis; Muro = $50.000. NUNCA inventes tarifas de envío.
 3. NUNCA cotices ni calcules precios finales todavía.
-4. Al finalizar tu respuesta, recuérdale amablemente que debe elegir entre el "Dispensador Portátil" o el "Muro de Coctelería" para continuar.`;
+4. Al finalizar, recuérdale elegir entre *Dispensador Portátil* o *Muro de Coctelería*.`;
 
 export const EVENTOS_ELECCION_FORMATO = defineState({
   id: 'EVENTOS_ELECCION_FORMATO',
@@ -44,11 +45,14 @@ export const EVENTOS_ELECCION_FORMATO = defineState({
       const formatKey = getEventFormatKey(session.eventoFormato);
       ensureEventOrderBuilder(session, formatKey);
 
-      // Pitch del formato + pregunta "ok para ver carta"
+      // Pitch de lo incluido + carta/precios → menú de cócteles (sin pedir otro ok)
       return {
         success: true,
-        nextState: 'EVENTOS_CONFIRMAR_FORMATO',
-        customReplies: getEventFormatPitch(formatKey)
+        nextState: 'EVENTOS_ELECCION_MENU',
+        customReplies: [
+          getEventFormatPitch(formatKey),
+          ...buildMenuEntryReplies(session, formatKey)
+        ]
       };
     }
 
