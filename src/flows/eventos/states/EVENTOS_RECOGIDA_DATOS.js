@@ -16,13 +16,12 @@ import { applyEventDataFromMessage } from '../../../logic/eventos-helpers.js';
 const WELCOME_TEXTS = [
   `👋 *Servicio para Eventos* — estación de coctelería autoservicio para tu celebración.
 
-Puedes cotizar fácil y rápido en la web
-👉 *www.cocktailsontap.cl/eventos*`,
-  `Si prefieres seguir por aquí, cuéntame:
-  
-  ¿*qué celebras*, cuántos *invitados*, *fecha* y *comuna*?
+Puedes cotizar fácil y rápido en la web:
+👉 *www.cocktailsontap.cl/eventos*
 
-Ej: _"Matrimonio, 50 invitados, 15 de mayo, Las Condes"_`
+Si prefieres seguir por aquí, cuéntame: *qué celebras*, cuántos *invitados*, *fecha* y *comuna*.
+
+Ejemplo: _"Matrimonio, 50 invitados, 15 de mayo, Las Condes"_`
 ];
 
 const AI_PROMPT = `[SISTEMA - ESTADO: DATOS DEL EVENTO (entrada)]
