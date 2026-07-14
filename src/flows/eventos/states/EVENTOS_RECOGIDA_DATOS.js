@@ -12,15 +12,14 @@ import {
 import { matchKeywordIntent, rulesWebVsChat } from '../../../logic/keyword-intent.js';
 import { applyEventDataFromMessage } from '../../../logic/eventos-helpers.js';
 
-// Bienvenida corta: sin menú web/aquí; el dato del evento es el filtro real
+// Bienvenida en 2 burbujas: primero el servicio + web; luego pedimos los datos
 const WELCOME_TEXTS = [
   `👋 *Servicio para Eventos* — estación de coctelería autoservicio para tu celebración.
 
-Para armarte una cotización personalizada, cuéntame: *qué celebras*, cuántos *invitados*, *fecha* y *comuna*.
+Puedes cotizar fácil y rápido en la web 👉 *www.cocktailsontap.cl/eventos*`,
+  `Si prefieres seguir por aquí, cuéntame: *qué celebras*, cuántos *invitados*, *fecha* y *comuna*.
 
-Ejemplo: _"matrimonio, 50 invitados, 15 de mayo, Las Condes"_`,
-  `_Si solo estás mirando, escribe *después*.
-También puedes cotizar en https://cocktailsontap.cl/eventos_`
+Ejemplo: _"Matrimonio, 50 invitados, 15 de mayo, Las Condes"_`
 ];
 
 const AI_PROMPT = `[SISTEMA - ESTADO: DATOS DEL EVENTO (entrada)]
@@ -28,7 +27,7 @@ El cliente acaba de entrar a Servicio para Eventos. Debe dar datos (celebración
 1. Responde su duda de forma breve y amigable.
 2. REGLA DE LOGÍSTICA: La instalación y logística la coordina el equipo; Dispensador gratis, Muro $50.000. NUNCA inventes tarifas de envío.
 3. NUNCA cotices ni calcules precios finales todavía.
-4. NUNCA digas que cotizan por web o WhatsApp como menú a elegir: ya estamos en el chat.
+4. Puedes mencionar la web www.cocktailsontap.cl/eventos si pregunta precios o prefiere cotizar solo; no lo presentes como menú obligatorio web vs chat.
 5. Al finalizar, si aún no hay cantidad de invitados, pídela. Celebración, fecha y comuna son opcionales: no insistas si no las dio.`;
 
 /**
@@ -39,8 +38,7 @@ El cliente acaba de entrar a Servicio para Eventos. Debe dar datos (celebración
  */
 function shortQuestionForSession(session) {
   if (!session.guests) {
-    return `¿Cuántos *invitados* serán aproximadamente?
-_(Si solo miras, escribe *después*.)_`;
+    return `¿Cuántos *invitados* serán aproximadamente?`;
   }
   return `¿Me confirmas los datos del evento para seguir?`;
 }
