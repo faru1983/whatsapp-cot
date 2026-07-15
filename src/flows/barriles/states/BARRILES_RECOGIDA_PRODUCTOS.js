@@ -58,6 +58,29 @@ ${formatCartLines(products)}
 ¿Agregas otro sabor o *seguimos* con estos? 🍸`;
 }
 
+/**
+ * hasDeliveryData: ¿Ya tenemos fecha y comuna? (se piden en la entrada del flujo).
+ *
+ * @param {object} session
+ * @returns {boolean}
+ */
+function hasDeliveryData(session) {
+  const cd = session.orderBuilder?.clientData;
+  return Boolean(cd?.date && cd?.location);
+}
+
+/**
+ * nextStateAfterProducts: Si ya hay despacho → cotización; si no → pedir datos.
+ *
+ * @param {object} session
+ * @returns {'BARRILES_REVISION_COTIZACION'|'BARRILES_RECOGIDA_DATOS'}
+ */
+function nextStateAfterProducts(session) {
+  return hasDeliveryData(session)
+    ? 'BARRILES_REVISION_COTIZACION'
+    : 'BARRILES_RECOGIDA_DATOS';
+}
+
 export const BARRILES_RECOGIDA_PRODUCTOS = defineState({
   id: 'BARRILES_RECOGIDA_PRODUCTOS',
   // Al entrar: solo pedimos sabor/cantidad. *seguimos* se ofrece cuando ya hay carrito.
@@ -88,7 +111,7 @@ export const BARRILES_RECOGIDA_PRODUCTOS = defineState({
 Dime un sabor y cantidad (ej. *1 mojito*), o escribe *lista* para ver la carta de precios.`
         };
       }
-      return { success: true, nextState: 'BARRILES_RECOGIDA_DATOS' };
+      return { success: true, nextState: nextStateAfterProducts(session) };
     }
 
     // "lista" / precios con carrito vacío → reenviar la carta (sin empujar *seguimos* aún)
@@ -133,7 +156,7 @@ ${formatCartLines(session.orderBuilder.products)}
 
     // "seguimos" solo (o NLU dice avanzar) con carrito ya lleno → siguiente paso
     if (wantsAdvance && Object.keys(session.orderBuilder.products).length > 0 && (!extractedList || extractedList.length === 0)) {
-      return { success: true, nextState: 'BARRILES_RECOGIDA_DATOS' };
+      return { success: true, nextState: nextStateAfterProducts(session) };
     }
 
     if (dudas?.length > 0) {
@@ -180,7 +203,7 @@ ${formatCartLines(session.orderBuilder.products)}
         && Object.entries(parsedProducts).every(([name, qty]) => session.orderBuilder.products[name] === qty);
 
       if (wantsAdvance && isCartEcho) {
-        return { success: true, nextState: 'BARRILES_RECOGIDA_DATOS' };
+        return { success: true, nextState: nextStateAfterProducts(session) };
       }
 
       for (const [pName, pQty] of Object.entries(parsedProducts)) {
@@ -189,7 +212,7 @@ ${formatCartLines(session.orderBuilder.products)}
 
       // "2 mojitos y 1 aperol seguimos" → agrega al carrito y avanza (no re-pregunta vacío)
       if (wantsAdvance) {
-        return { success: true, nextState: 'BARRILES_RECOGIDA_DATOS' };
+        return { success: true, nextState: nextStateAfterProducts(session) };
       }
 
       return {

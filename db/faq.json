@@ -36,6 +36,10 @@
     "respuesta": "Responde SOLO según el contexto del chat (ver CONTEXTO DE SESIÓN). Calculando vaso/copa con hielo ≈ 200ml.\n- Si el cliente está en Barriles Desechables: un barril de 5L rinde aprox. 25 cócteles. No menciones 10L/20L/30L ni formatos de evento.\n- Si está en Eventos (Dispensador): 5L ≈ 25 tragos | 10L ≈ 50 tragos. No menciones 20L/30L ni barriles desechables salvo que pregunte.\n- Si está en Eventos (Muro): 10L ≈ 50 | 20L ≈ 100 | 30L ≈ 150 tragos. No menciones 5L ni desechables salvo que pregunte.\n- Si aún no eligió formato: di que el rendimiento depende del tamaño (5L≈25, 10L≈50, etc.) y pregunta si cotiza desechable o evento."
   },
   {
+    "pregunta": "¿Cuánto duran los barriles? ¿Qué duración tienen? ¿Cuánto tiempo se conservan? ¿Caducidad / vencimiento / vida útil? ¿Se pueden guardar en el refri? ¿Si sobra se puede volver a guardar?",
+    "respuesta": "Los Barriles Desechables de 5L duran aproximadamente 3 semanas si se mantienen refrigerados. Se pueden abrir y servir; si sobra, se pueden volver a guardar en el refrigerador."
+  },
+  {
     "pregunta": "¿Cuáles son los precios, valores, o dónde veo el catálogo y la carta? ¿Cuánto cuestan? ¿Valor?",
     "respuesta": "Los Barriles Desechables (5L) parten desde $31.990. También tenemos servicio para eventos (Dispensador y Muro) con otros precios. Puedes ver la carta completa en https://cocktailsontap.cl/cotizar. Si me dices el formato que te interesa, te oriento mejor."
   }

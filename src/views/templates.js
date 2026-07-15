@@ -68,7 +68,7 @@ export function getQuotationTemplate(clientData, quote, deliveryCost, locationDa
   // Pregunta en segundo mensaje para que el cliente lea bien los montos primero
   return [
     text,
-    `¿Todo está *correcto* o deseas hacer alguna modificación?`
+    `¿Te parece bien esta cotización? Escribe *ok* para confirmarla, o dime qué cambiar.`
   ];
 }
 

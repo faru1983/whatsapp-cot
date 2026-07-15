@@ -8,10 +8,10 @@ import { resolveDecisionIntent } from '../../../logic/decision-intent.js';
 import { rulesConfirmarOModificar } from '../../../logic/keyword-intent.js';
 import { getQuotationTemplate, buildAdminBarrilesOrderBody } from '../../../views/templates.js';
 
-const SHORT_Q = `¿Todo bien con la cotización o cambiamos algo?`;
+const SHORT_Q = `¿Te parece bien esta cotización? Escribe *ok* para confirmarla, o dime qué cambiar.`;
 
 const AI_PROMPT = `[SISTEMA - ESTADO: REVISIÓN COTIZACIÓN BARRILES]
-Resuelve dudas breves de precio/despacho. Cierra: "¿Todo bien con la cotización o cambiamos algo?".`;
+Resuelve dudas breves de precio/despacho. Cierra pidiendo *ok* para confirmar o que diga qué cambiar.`;
 
 export const BARRILES_REVISION_COTIZACION = defineState({
   id: 'BARRILES_REVISION_COTIZACION',

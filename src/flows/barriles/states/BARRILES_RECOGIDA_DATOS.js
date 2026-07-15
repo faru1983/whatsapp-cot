@@ -1,21 +1,25 @@
 // ==============================================================================
-// OBJETIVO: Paso BARRILES_RECOGIDA_DATOS — fecha y comuna de entrega.
+// OBJETIVO: Paso BARRILES_RECOGIDA_DATOS — completar/corregir fecha y comuna.
+// Red de seguridad: la entrada ya pide estos datos; aquí solo si faltan o se corrigen.
 // ==============================================================================
 import { defineState } from '../../../logic/compile-state.js';
 import { parseClientName, parseDate, findLocationByFuzzyMatch } from '../../../logic/utils.js';
 
+const SHORT_Q = `¿Me pasas la *fecha* y *comuna* de entrega?
+Ejemplo: _"Para este sábado en Providencia"_`;
+
 const AI_PROMPT = `[SISTEMA - ESTADO: DATOS DE DESPACHO]
-Faltan fecha y/o comuna para Barriles Desechables.
+Faltan fecha y/o comuna para Barriles Desechables (o el cliente quiere corregirlas).
 1. Dudas: transferencias OK; regiones por encomienda. NUNCA inventes tarifas.
-2. Cierra pidiendo fecha y comuna. NO menciones extras.`;
+2. Cierra pidiendo lo que falte (fecha y/o comuna). NO menciones extras.`;
 
 export const BARRILES_RECOGIDA_DATOS = defineState({
   id: 'BARRILES_RECOGIDA_DATOS',
   promptQuestion: () => [
-    `¡Excelente elección! 🤩 Ya casi terminamos: necesito *fecha* y *comuna* de entrega para calcular despacho.`,
+    `Para armar la cotización con despacho, necesito *fecha* y *comuna* de entrega.`,
     `Ejemplo: _"Para este sábado en Providencia"_`
   ],
-  shortQuestion: `¿Me pasas la *fecha* y *comuna* de entrega?`,
+  shortQuestion: SHORT_Q,
   aiPrompt: AI_PROMPT,
 
   async validateAndProcess(messageText, session) {
@@ -53,6 +57,7 @@ export const BARRILES_RECOGIDA_DATOS = defineState({
     if (parsedDate) session.orderBuilder.clientData.date = parsedDate;
 
     const hasAllData = session.orderBuilder.clientData.date && session.orderBuilder.clientData.location;
+    const hasProducts = Object.keys(session.orderBuilder.products || {}).length > 0;
 
     if (!hasAllData) {
       if (!hasNewInfo) {
@@ -68,6 +73,14 @@ export const BARRILES_RECOGIDA_DATOS = defineState({
       };
     }
 
-    return { success: true, nextState: 'BARRILES_REVISION_COTIZACION' };
+    // Datos completos: si ya hay cócteles → cotización; si no → catálogo
+    if (hasProducts) {
+      return { success: true, nextState: 'BARRILES_REVISION_COTIZACION' };
+    }
+    return {
+      success: true,
+      nextState: 'BARRILES_RECOGIDA_PRODUCTOS',
+      customReply: `Listo 🙂 Ahora dime *qué sabor* y *cuántos* barriles (ej. *1 mojito y 1 sangría*), o escribe *lista*.`
+    };
   }
 });

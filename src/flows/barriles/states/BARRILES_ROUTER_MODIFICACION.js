@@ -49,8 +49,16 @@ export const BARRILES_ROUTER_MODIFICACION = defineState({
     }
 
     if (intent === 'DATOS') {
-      session.orderBuilder.clientData = { name: null, date: null, location: null };
-      return { success: true, nextState: 'BARRILES_RECOGIDA_DATOS' };
+      // No borramos los datos: el cliente puede corregir solo uno (fecha o comuna)
+      return {
+        success: true,
+        nextState: 'BARRILES_RECOGIDA_DATOS',
+        customReply: `Claro. Hoy tienes:
+📅 Fecha: *${session.orderBuilder.clientData?.date || 'Por confirmar'}*
+📍 Comuna: *${session.orderBuilder.clientData?.location || 'Por confirmar'}*
+
+Escribe el dato nuevo (ej: _"es en Ñuñoa"_ o _"para el viernes"_).`
+      };
     }
 
     return { success: false };

@@ -502,7 +502,7 @@ ${sessionBlock}
 
 REGLAS:
 1. Responde SOLO si el mensaje es claramente una pregunta sobre:
-   - Una FAQ de la lista (horarios, envíos/regiones, dónde entregan, de dónde son / de qué parte son, pago, web, Instagram, correo, teléfono, rendimiento), O
+   - Una FAQ de la lista (horarios, envíos/regiones, dónde entregan, de dónde son / de qué parte son, pago, web, Instagram, correo, teléfono, rendimiento, duración/conservación de barriles), O
    - Precios / catálogo / carta / valor de un cóctel o extra (usar la información oficial de arriba), O
    - Ingredientes / de qué está hecho un cóctel del catálogo (usar SOLO el campo "Ingredientes" de la información oficial), O
    - Costo de despacho a una comuna de la RM (usar tabla DESPACHOS; distinguir desechable vs evento).
@@ -528,10 +528,14 @@ REGLAS:
    - Si intención = EVENTOS y formato = Muro de Coctelería: solo 10L≈50, 20L≈100, 30L≈150 tragos.
    - Si intención = EVENTOS sin formato aún: puedes dar 5L/10L (dispensador) y mencionar que el Muro usa 10L/20L/30L, o preguntar el formato.
    - Si intención no definida: resumen breve y pregunta si cotiza desechable o evento. NO pegues la tabla completa si el contexto ya es claro.
-9. Si preguntan "precios" o "carta" de forma general: explica las 3 categorías de barril en 1–2 líneas, menciona la web https://cocktailsontap.cl/cotizar y ofrece cotizar un cóctel concreto cuando digan formato. No pegues el catálogo completo.
-10. Extras o comuna concreta (con categoría clara): responde solo ese dato, amable y breve, en pesos chilenos.
-11. PROHIBIDO decir "no tengo respuesta" o disculparte cuando no hay match. En ese caso SOLO: NO_FAQ
-12. ANTI-JERGA INTERNA (crítica): NUNCA escribas al cliente palabras como "DATOS OFICIALES", "FAQ", "faq.json", "datos.json", "sección", "base de datos", "CONTEXTO DE SESIÓN" ni "consultar la tabla en...". Habla solo como vendedor: da la info útil en español chileno cordial.`;
+9. DURACIÓN / CONSERVACIÓN (no confundir con rendimiento):
+   - Si preguntan cuánto DURAN, se conservan, caducidad o si se pueden guardar/volver a refrigerar: usa la FAQ de duración.
+   - Responde SOLO sobre Barriles Desechables 5L: ≈ 3 semanas refrigerados; se pueden servir y, si sobra, volver a guardar en el refri.
+   - NO inventes duración para Dispensador/Muro. Redacta en español natural de vendedor; NUNCA copies instrucciones internas ("Habla SOLO", "Responde SOLO según…").
+10. Si preguntan "precios" o "carta" de forma general: explica las 3 categorías de barril en 1–2 líneas, menciona la web https://cocktailsontap.cl/cotizar y ofrece cotizar un cóctel concreto cuando digan formato. No pegues el catálogo completo.
+11. Extras o comuna concreta (con categoría clara): responde solo ese dato, amable y breve, en pesos chilenos.
+12. PROHIBIDO decir "no tengo respuesta" o disculparte cuando no hay match. En ese caso SOLO: NO_FAQ
+13. ANTI-JERGA INTERNA (crítica): NUNCA escribas al cliente palabras como "DATOS OFICIALES", "FAQ", "faq.json", "datos.json", "sección", "base de datos", "CONTEXTO DE SESIÓN" ni "consultar la tabla en...". Habla solo como vendedor: da la info útil en español chileno cordial. NUNCA pegues meta-instrucciones de la base FAQ.`;
 
   try {
     let textResult = "NO_FAQ";

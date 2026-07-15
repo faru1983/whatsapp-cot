@@ -196,10 +196,10 @@ try {
     }
   ]);
 
-  await runCase('Barriles + aquí', [
+  await runCase('Barriles + datos entrega', [
     { input: 'desechables', expectState: 'BARRILES_FILTRO_CANAL', expectMuted: false },
     {
-      input: 'aqui',
+      input: 'Providencia, para este sábado',
       expectState: 'BARRILES_RECOGIDA_PRODUCTOS',
       expectMuted: false,
       expectIncludes: ['sabor']
@@ -208,7 +208,7 @@ try {
 
   await runCase('Seguimos con carrito vacío', [
     { input: 'desechables', expectState: 'BARRILES_FILTRO_CANAL' },
-    { input: 'aqui', expectState: 'BARRILES_RECOGIDA_PRODUCTOS' },
+    { input: 'Providencia, para el viernes', expectState: 'BARRILES_RECOGIDA_PRODUCTOS' },
     {
       input: 'seguimos',
       expectState: 'BARRILES_RECOGIDA_PRODUCTOS',
@@ -223,6 +223,16 @@ try {
       input: 'lo tendré presente para agosto',
       expectState: 'CERRADO',
       expectMuted: true
+    }
+  ]);
+
+  await runCase('Barriles parcial pide fecha', [
+    { input: 'desechables', expectState: 'BARRILES_FILTRO_CANAL' },
+    {
+      input: 'Las Condes',
+      expectState: 'BARRILES_FILTRO_CANAL',
+      expectMuted: false,
+      expectIncludes: ['fecha']
     }
   ]);
 
