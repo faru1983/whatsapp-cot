@@ -16,6 +16,16 @@ const SHORT_Q = `Para seguir, ¿buscas *Barriles Desechables* o *Servicio para E
 
 _(También puedes escribir *NO* para hablar con una persona.)_`;
 
+/**
+ * Respuesta al CTA de Instagram "más información" (mensaje predefinido del anuncio).
+ * Presentación corta + menú (el cliente aún no eligió producto).
+ */
+const AD_INFO_REPLY = `¡Hola! Soy un *asistente virtual* de *Cocktails on Tap* 🍸
+
+¿Buscas *Barriles Desechables* o *Servicio para Eventos*?
+
+_(También puedes escribir *NO* para hablar con una persona.)_`;
+
 const MENSAJE_AMBAS = [
   `🍸 ¡Perfecto! Te doy un resumen de ambos:
 
@@ -41,6 +51,22 @@ const PRICE_HINT = `Claro 🙂 Para darte *precios* exactos necesito saber el pr
 
 const PREGUNTA_POST_AMBAS =
   '¿Prefieres revisar la *página web* o quieres que te cuente más sobre *Barriles Desechables* o el *Servicio para Eventos*?';
+
+/**
+ * isInstagramInfoCta: ¿Es el CTA genérico de anuncio / “quiero más info”?
+ * Keywords: más info, más información, información, info
+ * (también con "hola" / "quiero…", típico de Meta).
+ * Solo usarlo al inicio (sin userIntent).
+ *
+ * @param {string} messageText
+ * @returns {boolean}
+ */
+function isInstagramInfoCta(messageText) {
+  const t = String(messageText || '').trim();
+  if (!t) return false;
+  // más info | más información | información | info
+  return /\b(?:m[aá]s\s+)?info(?:rmaci[oó]n)?\b/i.test(t);
+}
 
 const AI_PROMPT = `[SISTEMA - ESTADO: FILTRO PRINCIPAL]
 Eres un asistente virtual de Cocktails on Tap. El cliente aún no eligió camino.
@@ -79,6 +105,16 @@ export const ESPERANDO_INTENCION = defineState({
     if (intent === 'EVENTOS') {
       session.userIntent = 'EVENTOS';
       return { success: true, nextState: 'EVENTOS_RECOGIDA_DATOS' };
+    }
+
+    // CTA Instagram "más información" (solo al inicio, sin producto elegido aún).
+    // Barriles/Eventos ya se resolvieron arriba si el anuncio venía con esas keywords.
+    if (!session.userIntent && isInstagramInfoCta(messageText)) {
+      return {
+        success: true,
+        nextState: 'ESPERANDO_INTENCION',
+        customReply: AD_INFO_REPLY
+      };
     }
 
     if (intent === 'AMBAS' && !session.hasAskedAmbas) {

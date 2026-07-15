@@ -187,6 +187,24 @@ try {
     }
   ]);
 
+  await runCase('CTA Instagram más información', [
+    {
+      input: '¡Hola! Quiero más información',
+      expectState: 'ESPERANDO_INTENCION',
+      expectMuted: false,
+      expectIncludes: ['asistente virtual', 'Barriles Desechables', 'Servicio para Eventos']
+    }
+  ]);
+
+  await runCase('CTA keyword más info', [
+    {
+      input: 'mas info',
+      expectState: 'ESPERANDO_INTENCION',
+      expectMuted: false,
+      expectIncludes: ['Barriles Desechables']
+    }
+  ]);
+
   await runCase('Precios sin producto', [
     {
       input: 'hola, me interesan los precios',
