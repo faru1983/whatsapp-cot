@@ -157,4 +157,43 @@ export function wantsBrowseOnlyClose(messageText) {
   return isOnlyBrowsing(messageText) || wantsInstagramOrSocial(messageText);
 }
 
+/**
+ * wantsExplicitHandoff: Detecta de forma segura si el cliente solicita asistencia humana,
+ * evitando falsos positivos con palabras como "personas" o "contacto" a menos que estén
+ * en frases estructuradas.
+ *
+ * @param {string} messageText - Mensaje del cliente
+ * @returns {boolean}
+ */
+export function wantsExplicitHandoff(messageText) {
+  const trimmed = String(messageText ?? '').trim();
+  if (!trimmed) return false;
+
+  // 1. Frases compuestas de acción (Regex de Alta Precisión)
+  // Ej: "hablar con alguien", "necesito un asesor", "hablar con un humano", "contacto humano"
+  const regexHandoffFrase = /\b(hablar|conversar|chatear|comunicar|conectar|necesito|quiero|solicito|llamar|contactar|contacto|pedir)\s+(con|a)?\s*(un[oa]?\s+)?(persona|humano|asesor[a]?|ejecutivo[a]?|vendedor[a]?|agente|operador[a]?|alguien|el\s+equipo|soporte|atencion|atenci[oó]n)\b/i;
+  
+  if (regexHandoffFrase.test(trimmed)) {
+    return true;
+  }
+
+  // 2. Sustantivos de rol no ambiguos y palabras sueltas seguras
+  // Matcheamos solo palabra completa para evitar falsos positivos
+  const norm = trimmed.toLowerCase()
+    .normalize('NFD')
+    .replace(/[\u0300-\u036f]/g, '') // quita tildes
+    .replace(/[^a-z]/g, ''); // deja solo letras de la palabra suelta
+
+  const rolesSeguros = new Set([
+    'asesor', 'asesora', 'ejecutivo', 'ejecutiva', 'vendedor', 'vendedora', 'ejecutivos', 'soporte'
+  ]);
+
+  if (rolesSeguros.has(norm)) {
+    return true;
+  }
+
+  return false;
+}
+
 export { isOnlyBrowsing, wantsInstagramOrSocial };
+

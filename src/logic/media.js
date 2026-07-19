@@ -47,6 +47,38 @@ export function isImagePart(part) {
   );
 }
 
+/**
+ * album: Arma un objeto álbum para agrupar múltiples imágenes.
+ *
+ * Ejemplo:
+ *   customReplies: [album(['foto1.webp', 'foto2.webp', 'foto3.webp'])]
+ *
+ * @param {string[]} fileNames - Nombres de los archivos
+ * @returns {{ type: 'album', files: string[] }}
+ */
+export function album(fileNames) {
+  return { 
+    type: 'album', 
+    files: (Array.isArray(fileNames) ? fileNames : []).map(f => String(f).trim()).filter(Boolean) 
+  };
+}
+
+/**
+ * isAlbumPart: ¿Este ítem de reply es un álbum?
+ *
+ * @param {unknown} part
+ * @returns {boolean}
+ */
+export function isAlbumPart(part) {
+  return Boolean(
+    part
+    && typeof part === 'object'
+    && part.type === 'album'
+    && Array.isArray(part.files)
+    && part.files.length > 0
+  );
+}
+
 // ==============================================================================
 // 2. RESOLVER RUTA Y COMPROBAR QUE EL ARCHIVO EXISTE
 // ==============================================================================

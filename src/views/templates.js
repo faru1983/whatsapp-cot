@@ -365,7 +365,7 @@ export function getEventLitersSuggestion(guests, formatKey) {
 🍹 *${tranquilo}L* si el evento es más tranquilo (aprox. 3 tragos por persona)
 🎉 *${fiesta}L* si quieren fiesta (aprox. 5 tragos por persona)
 
-El pedido mínimo de este formato es *${minLiters}L* y los barriles vienen en *${litrajes}*. Puedes combinar sabores hasta llegar a esa cantidad (o más, si quieres).`;
+El pedido mínimo de este formato es *${minLiters}L* y los barriles vienen en *${litrajes}*. Puedes combinar sabores hasta llegar a esa cantidad (o la que prefieras).`;
 }
 
 /**

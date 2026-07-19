@@ -12,7 +12,7 @@ import { shouldHandleMessage, stripTriggerPrefix } from './logic/utils.js';
 import { getSession, saveSession, resetSession, findSessionIdsForPhone } from './core/db.js';
 import { assertRuntimeConfigReady, loadBotConfig } from './core/config.js';
 import { AUTH_DIR, PROJECT_ROOT } from './core/paths.js';
-import { isImagePart, assertImageExists } from './logic/media.js';
+import { isImagePart, isAlbumPart, assertImageExists } from './logic/media.js';
 import { rememberLabel } from './core/business-labels.js';
 import {
   sendTracked,
@@ -654,6 +654,34 @@ async function startBot() {
             const payload = { image: imageBuffer };
             if (part.caption) payload.caption = part.caption;
             await sendTracked(sock, targetJid, payload);
+          } else if (isAlbumPart(part)) {
+            // Envío como álbum
+            const validFiles = part.files.map(f => {
+              const check = assertImageExists(f);
+              if (!check.ok) {
+                 console.error(`Imagen de álbum no encontrada: ${check.expectedPath}`);
+                 return null;
+              }
+              return check.absolutePath;
+            }).filter(Boolean);
+
+            if (validFiles.length > 0) {
+              // 1. Enviar el mensaje padre del álbum
+              const albumMsg = await sendTracked(sock, targetJid, {
+                album: { expectedImageCount: validFiles.length }
+              });
+
+              if (albumMsg) {
+                // 2. Enviar cada imagen asociada al parentKey
+                for (let i = 0; i < validFiles.length; i++) {
+                  const imageBuffer = fs.readFileSync(validFiles[i]);
+                  await sendTracked(sock, targetJid, {
+                    image: imageBuffer,
+                    albumParentKey: albumMsg.key
+                  });
+                }
+              }
+            }
           }
         }
 

@@ -16,8 +16,8 @@ import { getSession, saveSession, resetSession } from './db.js';
 import { statesMap } from '../flows/index.js';
 import { readPrompt } from '../views/prompts.js';
 import { buildFaqCatalogContext, sanitizeCustomerFacingReply } from '../logic/utils.js';
-import { isGreetingOrNoise } from '../logic/interruptions.js';
-import { isImagePart, assertImageExists } from '../logic/media.js';
+import { isGreetingOrNoise, wantsExplicitHandoff } from '../logic/interruptions.js';
+import { isImagePart, isAlbumPart, assertImageExists } from '../logic/media.js';
 import { buildAdminSosBody } from '../views/templates.js';
 import { FAQ_JSON_PATH } from './paths.js';
 import { enableTestDebug, testLog } from './debug-log.js';
@@ -152,7 +152,7 @@ function normalizeReplyParts(reply) {
   const list = Array.isArray(reply) ? reply : [reply];
   return list.filter((p) => {
     if (typeof p === 'string') return p.trim() !== '';
-    return isImagePart(p);
+    return isImagePart(p) || isAlbumPart(p);
   });
 }
 
@@ -206,10 +206,18 @@ function commitBotReplies(session, sessionId, reply, alertAdmin = null) {
 
   // Validamos todas las imágenes antes de guardar historial o devolver nada
   for (const part of parts) {
-    if (!isImagePart(part)) continue;
-    const check = assertImageExists(part.file);
-    if (!check.ok) {
-      return failMissingImage(session, sessionId, check.expectedPath, alertAdmin);
+    if (isImagePart(part)) {
+      const check = assertImageExists(part.file);
+      if (!check.ok) {
+        return failMissingImage(session, sessionId, check.expectedPath, alertAdmin);
+      }
+    } else if (isAlbumPart(part)) {
+      for (const f of part.files) {
+        const check = assertImageExists(f);
+        if (!check.ok) {
+          return failMissingImage(session, sessionId, check.expectedPath, alertAdmin);
+        }
+      }
     }
   }
 
@@ -314,9 +322,50 @@ async function processMessageUnlocked(sessionId, messageText, options = {}) {
     session.currentState = 'ESPERANDO_INTENCION';
   }
 
+  const currentStateId = session.currentState;
+
+  // triggerSosMute: Silencia el chat y avisa al admin (handoff humano).
+  const triggerSosMute = (title, reason, clientReply = null) => {
+    cliLog(`SOS: ${title} en estado ${currentStateId}.`);
+    session.isMuted = true;
+    session.silenciado_timestamp = Date.now();
+    session.currentState = 'CERRADO';
+    if (alertAdmin) {
+      alertAdmin({
+        type: 'SOS',
+        title,
+        body: buildAdminSosBody({
+          reason,
+          stateId: currentStateId,
+          lastMessage: messageText
+        })
+      });
+    }
+    if (clientReply) {
+      session.history.turns.push({ role: 'model', text: clientReply });
+    }
+    saveSession(sessionId, session);
+    return clientReply;
+  };
+
+  // 1.1 Escape global a humano (handoff seguro)
+  const isNoWord = /^no$/i.test(messageText.trim());
+  const isSosWord = /^sos$/i.test(messageText.trim());
+  const SOS_NO_EXCLUDED_STATES = ['BARRILES_RECOGIDA_DATOS'];
+  const wantsNoHandoff = isNoWord && !SOS_NO_EXCLUDED_STATES.includes(currentStateId);
+  const wantsHandoff = isSosWord || wantsNoHandoff || wantsExplicitHandoff(messageText);
+
+  if (wantsHandoff) {
+    session.history.turns.push({ role: 'user', text: messageText });
+    return triggerSosMute(
+      'PIDIÓ HUMANO',
+      'Solicitó hablar con el equipo de forma explícita.',
+      `Te comunico con alguien del equipo. ¡Ya te escriben! 🙌`
+    );
+  }
+
   session.history.turns.push({ role: 'user', text: messageText });
 
-  const currentStateId = session.currentState;
   let currentState = statesMap[currentStateId];
   cliLog(`paso actual: ${currentStateId}`);
 
@@ -394,6 +443,43 @@ async function processMessageUnlocked(sessionId, messageText, options = {}) {
     }
   }
 
+  // 2.9 Pre-intercepción de preguntas (FAQ) para evitar extracción ansiosa (shadowing)
+  const isQuestion = /\?/.test(messageText)
+    || /^(como|cómo|donde|dónde|cuando|cuándo|quien|quién|porque|por\s*qu[eé]|que\s+es|qué\s+es|tienen|tienen\s+disponibilidad|cuanto|cuánto|cuesta|cuestan|vale|valen|hacen|realizan|despachan|envian|envían|van|llegan)\b/i.test(messageText.trim());
+
+  if (isQuestion && currentStateId !== 'CERRADO') {
+    cliLog(`FAQ PRE-CHECK: Detectada posible pregunta en '${messageText}'`);
+    const faqData = JSON.parse(fs.readFileSync(FAQ_JSON_PATH, 'utf8'));
+    const faqResponse = await responderFAQ(messageText, faqData, {
+      userIntent: session.userIntent,
+      eventoFormato: session.eventoFormato
+    });
+
+    if (faqResponse === 'SOS_HANDOFF') {
+      cliLog('FAQ PRE-CHECK: Match con SOS_HANDOFF → handoff inmediato');
+      return triggerSosMute(
+        'FRUSTRACIÓN / COMPLEJIDAD',
+        'El cliente muestra frustración o consultó algo fuera de la base de conocimientos.',
+        `Te comunico con alguien del equipo para ayudarte con eso. ¡Ya te escriben! 🙌`
+      );
+    }
+
+    if (faqResponse !== 'NO_FAQ') {
+      cliLog('FAQ PRE-CHECK: Match con FAQ → respondiendo antes de extraer datos');
+      session.consecutiveErrors = 0; // se reinicia por respuesta exitosa
+
+      // Si promptQuestion es array (info + pregunta), usamos solo la última parte
+      const questionText = lastPromptPart(resolvePromptQuestion(currentState, session));
+      const shortQ = typeof currentState.shortQuestion === 'function' ? currentState.shortQuestion(session) : currentState.shortQuestion;
+      const finalQuestion = shortQ || questionText;
+
+      const reply = appendStepQuestionIfNeeded(sanitizeCustomerFacingReply(faqResponse), finalQuestion);
+      session.history.turns.push({ role: 'model', text: reply });
+      saveSession(sessionId, session);
+      return reply;
+    }
+  }
+
   // ==============================================================================
   // 3. EJECUCIÓN DEL ESTADO ACTUAL (Máquina Declarativa)
   // ==============================================================================
@@ -466,10 +552,9 @@ async function processMessageUnlocked(sessionId, messageText, options = {}) {
            const generated = await generateResponse(config, systemInstruction, contents);
            // generateResponse ya limpia jerga interna; defensa extra por si acaso
            reply = sanitizeCustomerFacingReply(generated) || "";
-         }
+          }
       }
     }
-
     // Guarda y devuelve (string o array de burbujas)
     const committed = commitBotReplies(session, sessionId, reply, alertAdmin);
     if (committed != null) return committed;
@@ -490,58 +575,14 @@ async function processMessageUnlocked(sessionId, messageText, options = {}) {
     // Preferimos la pregunta corta para no re-pegar el prompt largo del estado
     const finalQuestion = shortQ || questionText;
 
-    const buildNoInfoReply = () =>
-      `Disculpa, no tengo esa info ahora. 😔\n\n${finalQuestion}\n\nO escribe *NO* para hablar con alguien del equipo.`;
+    const conversationalMaxErrors = Math.min(2, maxConsecutiveErrors || 3);
 
-    /**
-     * triggerSosMute: Silencia el chat y avisa al admin (handoff humano).
-     * Preferimos SOS a inventar pitch cuando el mensaje es raro o hay fallos seguidos.
-     *
-     * @param {string} title - Título corto de la alerta
-     * @param {string} reason - Motivo legible para el admin
-     * @param {string|null} [clientReply] - Mensaje al cliente (null = silencio total)
-     * @returns {string|null}
-     */
-    const triggerSosMute = (title, reason, clientReply = null) => {
-      cliLog(`SOS: ${title} en estado ${currentStateId}.`);
-      session.isMuted = true;
-      session.silenciado_timestamp = Date.now();
-      if (alertAdmin) {
-        alertAdmin({
-          type: 'SOS',
-          title,
-          body: buildAdminSosBody({
-            reason,
-            stateId: currentStateId,
-            lastMessage: messageText
-          })
-        });
-      }
-      if (clientReply) {
-        session.history.turns.push({ role: 'model', text: clientReply });
-      }
-      saveSession(sessionId, session);
-      return clientReply;
+    const buildNoInfoReply = () => {
+      const userIntentLabel = session.userIntent === 'BARRILES' ? 'Barriles Desechables' : session.userIntent === 'EVENTOS' ? 'Servicio para Eventos' : 'tu cotización';
+      return `Disculpa, soy un *asistente virtual* y no estoy seguro de cómo responder a eso. 😔\n\n¿Quieres seguir con ${userIntentLabel}?\n\n${finalQuestion}\n\nO escribe *NO* o *HUMANO* para hablar con alguien del equipo.`;
     };
 
-    // 4.0 SOS explícito: el cliente pide hablar con un humano
-    // En BARRILES_RECOGIDA_DATOS, "no" puede ser dato ("no tengo fecha") → no cuenta como SOS.
-    // "sos" y frases de pedir humano SÍ funcionan en todos los pasos.
-    const SOS_NO_EXCLUDED_STATES = ['BARRILES_RECOGIDA_DATOS'];
     const trimmedMessage = messageText.trim();
-    const isSosWord = /^sos$/i.test(trimmedMessage);
-    const isNoWord = /^no$/i.test(trimmedMessage);
-    const wantsExplicitSOS = isSosWord
-      || (isNoWord && !SOS_NO_EXCLUDED_STATES.includes(currentStateId));
-    const wantsHumanHelp = /hablar con|necesito (un )?(asesor|humano)|persona real|equipo comercial|contactar.*equipo/i.test(messageText);
-
-    if (wantsExplicitSOS || wantsHumanHelp) {
-      return triggerSosMute(
-        'PIDIÓ HUMANO',
-        'Solicitó hablar con el equipo.',
-        `Te comunico con alguien del equipo. ¡Ya te escriben! 🙌`
-      );
-    }
 
     // 4.1 Saludo / ruido / entusiasmo → re-pregunta corta SIN sumar strike
     // (ej. "Hoooola q genial", "gracias", "ok" a mitad de pedido)
@@ -563,9 +604,9 @@ async function processMessageUnlocked(sessionId, messageText, options = {}) {
 
     if (looksClearOffTopic) {
       session.consecutiveErrors = (session.consecutiveErrors || 0) + 1;
-      cliLog(`off-topic → strike ${session.consecutiveErrors}/${maxConsecutiveErrors} (sin SOS inmediato)`);
+      cliLog(`off-topic → strike ${session.consecutiveErrors}/${conversationalMaxErrors} (sin SOS inmediato)`);
 
-      if (session.consecutiveErrors >= maxConsecutiveErrors) {
+      if (session.consecutiveErrors >= conversationalMaxErrors) {
         return triggerSosMute(
           'OFF-TOPIC',
           'Varios mensajes fuera de contexto de cotización; handoff a humano.',
@@ -573,7 +614,7 @@ async function processMessageUnlocked(sessionId, messageText, options = {}) {
         );
       }
 
-      reply = `Disculpa, estoy para ayudarte a cotizar 🍸\nResponde con la palabra en *negrita* si puedes.\n\n${finalQuestion}\n\nO escribe *NO* para hablar con alguien del equipo.`;
+      reply = `Disculpa, soy un *asistente virtual* y estoy para ayudarte a cotizar 🍸\nResponde con la palabra en *negrita* si puedes.\n\n${finalQuestion}\n\nO escribe *NO* o *HUMANO* para hablar con alguien del equipo.`;
       session.history.turns.push({ role: 'model', text: reply });
       saveSession(sessionId, session);
       return reply;
@@ -588,6 +629,15 @@ async function processMessageUnlocked(sessionId, messageText, options = {}) {
       eventoFormato: session.eventoFormato
     });
 
+    if (faqResponse === 'SOS_HANDOFF') {
+      cliLog('FAQ: Match con SOS_HANDOFF (frustración o fuera de alcance) → handoff inmediato');
+      return triggerSosMute(
+        'FRUSTRACIÓN / COMPLEJIDAD',
+        'El cliente muestra frustración o consultó algo fuera de la base de conocimientos.',
+        `Te comunico con alguien del equipo para ayudarte con eso. ¡Ya te escriben! 🙌`
+      );
+    }
+
     if (faqResponse !== 'NO_FAQ') {
       // FAQ OK: ayudamos → reseteamos strikes (no cuenta como fallo)
       session.consecutiveErrors = 0;
@@ -600,10 +650,10 @@ async function processMessageUnlocked(sessionId, messageText, options = {}) {
 
     // 4.4 Sin FAQ clara: strike + plantilla fija (o LLM muy corto si parece pregunta real)
     session.consecutiveErrors = (session.consecutiveErrors || 0) + 1;
-    cliLog(`sin ayuda clara → strike ${session.consecutiveErrors}/${maxConsecutiveErrors}`);
+    cliLog(`sin ayuda clara → strike ${session.consecutiveErrors}/${conversationalMaxErrors}`);
 
-    // Anti-loop: umbral SECURITY_MAX_CONSECUTIVE_ERRORS → mute + SOS
-    if (session.consecutiveErrors >= maxConsecutiveErrors) {
+    // Anti-loop: umbral anti-loop conversacional → mute + SOS
+    if (session.consecutiveErrors >= conversationalMaxErrors) {
       return triggerSosMute(
         'ANTI-LOOP',
         'Varias respuestas seguidas que el bot no entendió.',
@@ -622,12 +672,12 @@ async function processMessageUnlocked(sessionId, messageText, options = {}) {
         systemInstruction = `${systemInstruction}\n\n${currentState.aiContextPrompt}`;
       }
       systemInstruction = `${systemInstruction}\n\n${buildFaqCatalogContext()}
-REGLA FALLBACK (crítica): Máximo 2 frases cortas. Si no sabes con certeza → di que no tienes esa info y ofrece escribir *NO* para un humano. NO inventes pitch, precios ni historias.
+REGLA FALLBACK (crítica): Máximo 2 frases cortas. Si no sabes con certeza → di que no tienes esa info y ofrece escribir *NO* o *HUMANO* para un humano. NO inventes pitch, precios ni historias.
 REGLA ANTI-JERGA: NUNCA digas "DATOS OFICIALES", "FAQ" ni "datos.json".`;
 
       systemInstruction = `${systemInstruction}\n\n[DATOS CONOCIDOS]:
-- Intención: ${session.userIntent || 'No definido'}
-- Nombre: ${session.orderBuilder?.clientData?.name || session.userName || 'No informado'}`;
+      - Intención: ${session.userIntent || 'No definido'}
+      - Nombre: ${session.orderBuilder?.clientData?.name || session.userName || 'No informado'}`;
       if (session.eventoFormato) {
         systemInstruction += `\n- Formato evento: ${session.eventoFormato}`;
       }
@@ -655,10 +705,7 @@ REGLA ANTI-JERGA: NUNCA digas "DATOS OFICIALES", "FAQ" ni "datos.json".`;
 // ==============================================================================
 // 5. ENTORNO DE PRUEBAS LOCALES (CLI)
 // ==============================================================================
-const rl = readline.createInterface({
-  input: process.stdin,
-  output: process.stdout
-});
+let rl = null;
 
 /**
  * cliChat: Bucle del simulador local.
@@ -666,6 +713,13 @@ const rl = readline.createInterface({
  */
 function cliChat() {
   const sessionId = 'cli-test@s.whatsapp.net';
+
+  if (!rl) {
+    rl = readline.createInterface({
+      input: process.stdin,
+      output: process.stdout
+    });
+  }
 
   rl.question('\nTú: ', async (message) => {
     if (message.toLowerCase() === '/exit') {
@@ -696,6 +750,11 @@ function cliChat() {
           // En el simulador no hay WhatsApp: mostramos el nombre del archivo
           console.log(`\n${label}: [IMAGEN] ${part.file}`);
           if (part.caption) console.log(part.caption);
+        } else if (isAlbumPart(part)) {
+          console.log(`\n${label}: [ÁLBUM DE IMÁGENES]`);
+          for (const f of part.files) {
+            console.log(`  - ${f}`);
+          }
         }
       }
     }

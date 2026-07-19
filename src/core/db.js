@@ -146,3 +146,13 @@ export function findSessionIdsForPhone(phoneDigits) {
     return id === `${digits}@s.whatsapp.net` || id.startsWith(`${digits}@`) || idDigits === digits;
   });
 }
+
+/**
+ * closeDb: Closes the SQLite database connection cleanly.
+ */
+export function closeDb() {
+  try {
+    db.close();
+  } catch (_) {}
+}
+

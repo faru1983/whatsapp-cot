@@ -8,8 +8,8 @@
     "respuesta": "Somos de Santiago, podemos enviar a todo Chile por Blue Express o empresas similares de encomiendas."
   },
   {
-    "pregunta": "¿Dónde entregan? ¿Hacen envíos? ¿A qué comunas o regiones llegan? ¿Cubren despacho? ¿Envían a regiones o provincias? ¿Solo en Santiago?",
-    "respuesta": "Repartimos en todas las comunas de la Región Metropolitana. A otras regiones enviamos por Blue Express o empresas similares de encomiendas; el costo exacto se confirma al procesar la compra. Si me dices tu comuna de la RM, te indico el costo de despacho."
+    "pregunta": "¿Dónde entregan? ¿Hacen envíos? ¿A qué comunas o regiones llegan? ¿Cubren despacho? ¿Envían a regiones o provincias? ¿Solo en Santiago? ¿Van a regiones? ¿Van a La Serena, Coquimbo o Concepción? ¿Llegan a Viña del Mar o Valparaíso?",
+    "respuesta": "Para eventos (barra y coctelería), atendemos habitualmente en la Región Metropolitana, pero podemos evaluar servicios en otras regiones (como La Serena o Concepción) de forma personalizada según la escala del evento. Escribe HUMANO para que te atienda un asesor. Para barriles desechables de 5L, despachamos a todo Chile mediante Blue Express o encomiendas similares."
   },
   {
     "pregunta": "¿Cuáles son los métodos, formas o tipos de pago?",

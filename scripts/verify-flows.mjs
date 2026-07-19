@@ -8,7 +8,7 @@ import { fileURLToPath } from 'node:url';
 
 import { statesMap } from '../src/flows/index.js';
 import { processMessage } from '../src/core/engine.js';
-import { getSession, resetSession } from '../src/core/db.js';
+import { getSession, resetSession, closeDb } from '../src/core/db.js';
 import { ASSETS_DIR } from '../src/core/paths.js';
 import { isImagePart } from '../src/logic/media.js';
 
@@ -271,6 +271,59 @@ try {
       expectMuted: true
     }
   ]);
+
+  await runCase('Handoff global por frase', [
+    {
+      input: 'quiero hablar con un humano',
+      expectState: 'CERRADO',
+      expectMuted: true,
+      expectIncludes: ['comunico con alguien del equipo']
+    }
+  ]);
+
+  await runCase('Handoff global por rol suelto', [
+    {
+      input: 'asesor',
+      expectState: 'CERRADO',
+      expectMuted: true,
+      expectIncludes: ['comunico con alguien del equipo']
+    }
+  ]);
+
+  await runCase('Evitar falso positivo "personas" o "contacto"', [
+    {
+      input: 'Hola, cotizar evento para 50 personas, mi contacto es de las condes',
+      expectState: 'EVENTOS_RECOGIDA_DATOS',
+      expectMuted: false
+    }
+  ]);
+
+  await runCase('Pregunta de cobertura con comuna externa sin extraccion', [
+    {
+      input: 'evento',
+      expectState: 'EVENTOS_RECOGIDA_DATOS'
+    },
+    {
+      input: 'van a la serena?',
+      expectState: 'EVENTOS_RECOGIDA_DATOS',
+      expectMuted: false,
+      expectIncludes: ['Metropolitana', 'Serena']
+    }
+  ]);
+
+  await runCase('Anti-loop conversacional con 2 strikes', [
+    {
+      input: 'calentamiento global',
+      expectState: 'ESPERANDO_INTENCION',
+      expectMuted: false,
+      expectIncludes: ['asistente virtual', 'no estoy seguro']
+    },
+    {
+      input: 'segunda pregunta off topic',
+      expectState: 'CERRADO',
+      expectMuted: true
+    }
+  ]);
 } catch (err) {
   failed += 1;
   console.error('  FAIL: excepción en simulación:', err);
@@ -279,7 +332,10 @@ try {
 console.log('\n=== Resultado ===\n');
 if (failed > 0) {
   console.error(`VERIFY FAILED (${failed} assertion(s))`);
+  try { closeDb(); } catch (_) {}
   process.exit(1);
 }
 console.log('VERIFY PASSED');
+try { closeDb(); } catch (_) {}
 process.exit(0);
+

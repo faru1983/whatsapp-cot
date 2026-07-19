@@ -486,9 +486,9 @@ export async function responderFAQ(userMessage, faqData, sessionContext = {}) {
   // Contexto del flujo: sirve para no listar litrajes de evento si está en desechables
   const intent = sessionContext.userIntent || 'No definido';
   const eventoFormato = sessionContext.eventoFormato || 'No elegido';
-  const sessionBlock = `=== CONTEXTO DE SESIÓN ===
-- Intención actual: ${intent} (BARRILES = desechables 5L; EVENTOS = dispensador/muro)
-- Formato de evento elegido: ${eventoFormato}`;
+  const sessionBlock = `CONTEXTO DEL CLIENTE:
+- El cliente está cotizando: ${intent}
+- Formato elegido: ${eventoFormato}`;
 
   const systemInstruction = `Eres un clasificador + redactor de FAQ estricto.
 El usuario escribió: "${userMessage}"
@@ -500,9 +500,17 @@ ${JSON.stringify(faqData, null, 2)}
 
 ${sessionBlock}
 
+REGLAS DE CONTEXTO:
+- Asume siempre que el producto indicado en "CONTEXTO DEL CLIENTE" define el producto sobre el cual el usuario está preguntando.
+- Si el cliente está cotizando EVENTOS, asume que las preguntas se refieren al servicio de eventos.
+- Si el cliente está cotizando BARRILES, asume que las preguntas se refieren a barriles desechables.
+
+REGLAS DE COBERTURA:
+- Preguntar si llegamos/vamos/despachamos a una comuna, región o ciudad que NO tiene cobertura (ej. La Serena para eventos) SÍ se considera un match de FAQ. Debes responder indicando que no hay cobertura para ese servicio, usando la información de la regla 7. NUNCA respondas NO_FAQ en estos casos de consulta de cobertura.
+
 REGLAS:
 1. Responde SOLO si el mensaje es claramente una pregunta sobre:
-   - Una FAQ de la lista (horarios, envíos/regiones, dónde entregan, de dónde son / de qué parte son, pago, web, Instagram, correo, teléfono, rendimiento, duración/conservación de barriles), O
+   - Una FAQ de la lista (horarios, envíos/regiones/cobertura/llegada, dónde entregan/despachan/van/llegan, de dónde son / de qué parte son, pago, web, Instagram, correo, teléfono, rendimiento, duración/conservación de barriles), O
    - Precios / catálogo / carta / valor de un cóctel o extra (usar la información oficial de arriba), O
    - Ingredientes / de qué está hecho un cóctel del catálogo (usar SOLO el campo "Ingredientes" de la información oficial), O
    - Costo de despacho a una comuna de la RM (usar tabla DESPACHOS; distinguir desechable vs evento).
@@ -518,16 +526,18 @@ REGLAS:
    - Si preguntan el precio de un cóctel SIN indicar categoría (ej. "¿cuánto vale el Pisco Sour?"): NO listes los 3 precios. Aclara brevemente que hay 3 formatos de barril y PREGUNTA cuál quiere cotizar (desechable 5L / Dispensador / Muro).
    - Solo da el precio numérico cuando el cliente ya eligió la categoría (o la dejó inequívoca). Entonces responde SOLO ese canal, con litraje si aplica.
    - PROHIBIDO pegar la tabla completa desechable+dispensador+muro en una sola respuesta.
-7. Origen / cobertura / envíos:
-   - "¿De dónde son?": Somos de Santiago (FAQ de origen).
-   - Cobertura: repartimos en todas las comunas de la RM; a otras regiones por Blue Express o empresas similares de encomiendas (FAQ de envíos).
-   - Si preguntan costo a una comuna de RM: usa la tabla DESPACHOS. Fuera de RM: no inventes monto; di encomienda y que el costo se confirma al comprar. En RM: si no dicen si es barril desechable o evento, pregunta antes de cotizar el envío.
-8. RENDIMIENTO DE BARRILES (según CONTEXTO DE SESIÓN; vaso/copa con hielo ≈ 200ml):
-   - Si intención = BARRILES: responde SOLO que el barril desechable de 5L rinde aprox. 25 cócteles. NO menciones 10L, 20L, 30L ni formatos de evento.
-   - Si intención = EVENTOS y formato = Dispensador Portátil: solo 5L≈25 y 10L≈50 tragos.
-   - Si intención = EVENTOS y formato = Muro de Coctelería: solo 10L≈50, 20L≈100, 30L≈150 tragos.
-   - Si intención = EVENTOS sin formato aún: puedes dar 5L/10L (dispensador) y mencionar que el Muro usa 10L/20L/30L, o preguntar el formato.
-   - Si intención no definida: resumen breve y pregunta si cotiza desechable o evento. NO pegues la tabla completa si el contexto ya es claro.
+7. Origen / cobertura / envíos (La Serena, Coquimbo, Concepción, etc. son comunas/regiones de Chile fuera de RM; usa el CONTEXTO DEL CLIENTE para guiar la respuesta):
+    - "¿De dónde son?": Somos de Santiago (FAQ de origen).
+    - Si el cliente está cotizando EVENTOS: responde que atendemos habitualmente en la Región Metropolitana (RM), pero para otras regiones (como La Serena o Concepción) podemos evaluar servicios de forma personalizada según la escala y requerimientos del evento. Sugiérele pedir asistencia de un humano (escribiendo HUMANO) para que el equipo lo evalúe.
+    - Si el cliente está cotizando BARRILES: responde que despachamos barriles desechables de 5L a todo Chile (otras regiones como La Serena) por Blue Express o encomiendas similares.
+    - Si el producto que cotiza no está definido: responde detalladamente que atendemos eventos de forma personalizada fuera de la Región Metropolitana (RM) según la escala (puedes escribir HUMANO para evaluar), y los barriles desechables de 5L los enviamos a todo Chile (otras regiones como La Serena) por Blue Express.
+    - Si preguntan costo a una comuna de RM: usa la tabla DESPACHOS. Fuera de RM: no inventes monto; di encomienda y que el costo se confirma al comprar. En RM: si no dicen si es barril desechable o evento, pregunta antes de cotizar el envío.
+8. RENDIMIENTO DE BARRILES (según CONTEXTO DEL CLIENTE; vaso/copa con hielo ≈ 200ml):
+   - Si el cliente está cotizando BARRILES: responde SOLO que el barril desechable de 5L rinde aprox. 25 cócteles. NO menciones 10L, 20L, 30L ni formatos de evento.
+   - Si el cliente está cotizando EVENTOS y formato = Dispensador Portátil: solo 5L≈25 y 10L≈50 tragos.
+   - Si el cliente está cotizando EVENTOS y formato = Muro de Coctelería: solo 10L≈50, 20L≈100, 30L≈150 tragos.
+   - Si el cliente está cotizando EVENTOS sin formato aún: puedes dar 5L/10L (dispensador) y mencionar que el Muro usa 10L/20L/30L, o preguntar el formato.
+   - Si no está definido: resumen breve y pregunta si cotiza desechable o evento. NO pegues la tabla completa si el contexto ya es claro.
 9. DURACIÓN / CONSERVACIÓN (no confundir con rendimiento):
    - Si preguntan cuánto DURAN, se conservan, caducidad o si se pueden guardar/volver a refrigerar: usa la FAQ de duración.
    - Responde SOLO sobre Barriles Desechables 5L: ≈ 3 semanas refrigerados; se pueden servir y, si sobra, volver a guardar en el refri.
@@ -535,7 +545,8 @@ REGLAS:
 10. Si preguntan "precios" o "carta" de forma general: explica las 3 categorías de barril en 1–2 líneas, menciona la web https://cocktailsontap.cl/cotizar y ofrece cotizar un cóctel concreto cuando digan formato. No pegues el catálogo completo.
 11. Extras o comuna concreta (con categoría clara): responde solo ese dato, amable y breve, en pesos chilenos.
 12. PROHIBIDO decir "no tengo respuesta" o disculparte cuando no hay match. En ese caso SOLO: NO_FAQ
-13. ANTI-JERGA INTERNA (crítica): NUNCA escribas al cliente palabras como "DATOS OFICIALES", "FAQ", "faq.json", "datos.json", "sección", "base de datos", "CONTEXTO DE SESIÓN" ni "consultar la tabla en...". Habla solo como vendedor: da la info útil en español chileno cordial. NUNCA pegues meta-instrucciones de la base FAQ.`;
+13. ANTI-JERGA INTERNA (crítica): NUNCA escribas al cliente palabras como "DATOS OFICIALES", "FAQ", "faq.json", "datos.json", "sección", "base de datos", "CONTEXTO DE SESIÓN" ni "consultar la tabla en...". Habla solo como vendedor: da la info útil en español chileno cordial. NUNCA pegues meta-instrucciones de la base FAQ.
+14. DETECCIÓN DE FRUSTRACIÓN O COMPLEJIDAD (crítica): Si el mensaje denota frustración o enojo con el bot (ej. "bot tonto", "no entiendo", "mal servicio", "asesor ya"), o si consultan requerimientos de facturación, medios de pago complejos, convenios o logística muy avanzada fuera de catálogo y FAQ, responde EXACTAMENTE: SOS_HANDOFF`;
 
   try {
     let textResult = "NO_FAQ";
