@@ -10,7 +10,7 @@ import { statesMap } from '../src/flows/index.js';
 import { processMessage } from '../src/core/engine.js';
 import { getSession, resetSession, closeDb } from '../src/core/db.js';
 import { ASSETS_DIR } from '../src/core/paths.js';
-import { isImagePart } from '../src/logic/media.js';
+import { isImagePart, isVideoPart } from '../src/logic/media.js';
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const SESSION_ID = 'verify-flows@test.local';
@@ -25,6 +25,7 @@ const EXPECTED_STATES = [
   'EVENTOS_RECOGIDA_DATOS',
   'EVENTOS_CONFIRMAR_DATOS',
   'EVENTOS_ELECCION_FORMATO',
+  'EVENTOS_INTRO_MENU',
   'EVENTOS_ELECCION_MENU',
   'EVENTOS_COTIZACION',
   'CERRADO'
@@ -52,7 +53,7 @@ function assert(condition, message) {
 }
 
 /**
- * replyToText: Normaliza reply (string | array | img) a texto buscable.
+ * replyToText: Normaliza reply (string | array | img | vid) a texto buscable.
  * @param {unknown} reply
  * @returns {string}
  */
@@ -60,9 +61,14 @@ function replyToText(reply) {
   if (reply == null) return '';
   if (typeof reply === 'string') return reply;
   if (Array.isArray(reply)) {
-    return reply.map((p) => (isImagePart(p) ? `[IMG:${p.file}] ${p.caption || ''}` : String(p))).join('\n');
+    return reply.map((p) => {
+      if (isImagePart(p)) return `[IMG:${p.file}] ${p.caption || ''}`;
+      if (isVideoPart(p)) return `[VID:${p.file}] ${p.caption || ''}`;
+      return String(p);
+    }).join('\n');
   }
   if (isImagePart(reply)) return `[IMG:${reply.file}] ${reply.caption || ''}`;
+  if (isVideoPart(reply)) return `[VID:${reply.file}] ${reply.caption || ''}`;
   return String(reply);
 }
 
@@ -85,9 +91,9 @@ const assetPath = path.join(ASSETS_DIR, 'barril_desechable_precios.webp');
 assert(fs.existsSync(assetPath), `existe asset barril_desechable_precios.webp`);
 assert(fs.existsSync(path.join(ASSETS_DIR, 'dispensador_portatil_precios.webp')), `existe asset dispensador_portatil_precios.webp`);
 assert(fs.existsSync(path.join(ASSETS_DIR, 'muro_de_cocteleria_precios.webp')), `existe asset muro_de_cocteleria_precios.webp`);
-assert(fs.existsSync(path.join(ASSETS_DIR, 'dispensador_portatil.webp')), `existe asset dispensador_portatil.webp`);
-assert(fs.existsSync(path.join(ASSETS_DIR, 'muro_de_cocteleria.webp')), `existe asset muro_de_cocteleria.webp`);
-assert(fs.existsSync(path.join(ASSETS_DIR, 'eventos_formatos1.webp')), `existe asset eventos_formatos1.webp`);
+assert(fs.existsSync(path.join(ASSETS_DIR, 'eventos_ambas.webp')), `existe asset eventos_ambas.webp`);
+assert(fs.existsSync(path.join(ASSETS_DIR, 'eventos_dispensador1.webp')), `existe asset eventos_dispensador1.webp`);
+assert(fs.existsSync(path.join(ASSETS_DIR, 'eventos_muro.mp4')), `existe asset eventos_muro.mp4`);
 
 // Helpers de *seguimos*: puro vs mezclado con pedido
 const { isOnlyAdvanceProductsOrder, wantsAdvanceProductsOrder } = await import('../src/logic/interruptions.js');
@@ -260,6 +266,108 @@ try {
       expectState: 'EVENTOS_RECOGIDA_DATOS',
       expectMuted: false,
       expectIncludes: ['Eventos']
+    }
+  ]);
+
+  // Confirmación de datos → foto única con caption de recomendación + pregunta de formato
+  await runCase('Eventos confirmación → formato (img+caption)', [
+    { input: 'evento', expectState: 'EVENTOS_RECOGIDA_DATOS' },
+    {
+      input: 'cumpleaños para 50 invitados en Providencia el 15 de mayo',
+      expectState: 'EVENTOS_CONFIRMAR_DATOS',
+      expectMuted: false,
+      expectIncludes: ['50', 'Providencia']
+    },
+    {
+      input: 'ok',
+      expectState: 'EVENTOS_ELECCION_FORMATO',
+      expectMuted: false,
+      expectIncludes: [
+        '[IMG:eventos_ambas.webp]',
+        'Dispensador Portátil',
+        'Muro de Coctelería',
+        'Dispensador',
+        'Muro'
+      ]
+    }
+  ]);
+
+  // "ambos" / "las 2" en elección de formato → respuesta fija, sin forzar opción ni fallback genérico
+  await runCase('Eventos formato ambos → explicación', [
+    { input: 'evento', expectState: 'EVENTOS_RECOGIDA_DATOS' },
+    {
+      input: 'cumpleaños para 50 invitados en Providencia el 15 de mayo',
+      expectState: 'EVENTOS_CONFIRMAR_DATOS'
+    },
+    { input: 'ok', expectState: 'EVENTOS_ELECCION_FORMATO' },
+    {
+      input: 'ambos',
+      expectState: 'EVENTOS_ELECCION_FORMATO',
+      expectMuted: false,
+      expectIncludes: ['uno', 'HUMANO', 'Dispensador', 'Muro'],
+      expectNotIncludes: ['no estoy seguro', 'Quieres seguir con']
+    }
+  ]);
+
+  await runCase('Eventos formato las 2 → explicación', [
+    { input: 'evento', expectState: 'EVENTOS_RECOGIDA_DATOS' },
+    {
+      input: 'cumpleaños para 80 invitados en Las Condes el 20 de junio',
+      expectState: 'EVENTOS_CONFIRMAR_DATOS'
+    },
+    { input: 'ok', expectState: 'EVENTOS_ELECCION_FORMATO' },
+    {
+      input: 'las 2',
+      expectState: 'EVENTOS_ELECCION_FORMATO',
+      expectMuted: false,
+      expectIncludes: ['uno', 'HUMANO', 'Dispensador', 'Muro'],
+      expectNotIncludes: ['no estoy seguro']
+    }
+  ]);
+
+  // Pitch → intro → carta + litros≈cócteles → menú
+  await runCase('Eventos formato → intro → menú (carta+rendimiento)', [
+    { input: 'evento', expectState: 'EVENTOS_RECOGIDA_DATOS' },
+    {
+      input: 'cumpleaños para 50 invitados en Providencia el 15 de mayo',
+      expectState: 'EVENTOS_CONFIRMAR_DATOS'
+    },
+    { input: 'ok', expectState: 'EVENTOS_ELECCION_FORMATO' },
+    {
+      input: '1',
+      expectState: 'EVENTOS_INTRO_MENU',
+      expectMuted: false,
+      expectIncludes: ['Excelente elección', 'cócteles', 'precios', '[IMG:eventos_dispensador1.webp]'],
+      expectNotIncludes: ['[IMG:dispensador_portatil_precios.webp]']
+    },
+    {
+      input: 'ok',
+      expectState: 'EVENTOS_ELECCION_MENU',
+      expectMuted: false,
+      expectIncludes: [
+        '[IMG:dispensador_portatil_precios.webp]',
+        '30L',
+        '~150',
+        'Rendimiento',
+        '5L ≈ 25',
+        'Mojito'
+      ]
+    }
+  ]);
+
+  // Muro: pitch como caption del video
+  await runCase('Eventos formato muro → video pitch', [
+    { input: 'evento', expectState: 'EVENTOS_RECOGIDA_DATOS' },
+    {
+      input: 'matrimonio para 120 invitados en Providencia el 10 de agosto',
+      expectState: 'EVENTOS_CONFIRMAR_DATOS'
+    },
+    { input: 'ok', expectState: 'EVENTOS_ELECCION_FORMATO' },
+    {
+      input: '2',
+      expectState: 'EVENTOS_INTRO_MENU',
+      expectMuted: false,
+      expectIncludes: ['[VID:eventos_muro.mp4]', 'Muro de Coctelería', 'cócteles', 'precios']
     }
   ]);
 

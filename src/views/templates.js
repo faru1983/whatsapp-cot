@@ -1,4 +1,4 @@
-import { formatPrice } from '../logic/utils.js';
+import { formatPrice, preciosData } from '../logic/utils.js';
 
 // ==============================================================================
 // OBJETIVO: Textos compartidos (cotización, dudas, alertas admin, pitches eventos).
@@ -304,8 +304,7 @@ export function composeAdminAlertMessage({ type, title, clientLabel, body }) {
 
 /**
  * getEventFormatPitch: Texto de venta del formato elegido (lo incluido).
- * Se envía al elegir Dispensador/Muro, justo antes de la carta de cócteles.
- * Ya no pide un segundo "ok": el siguiente paso es armar el menú.
+ * Se envía al elegir Dispensador/Muro; después el cliente confirma para ver la carta.
  *
  * @param {'dispensador'|'muro'} formatKey - Formato elegido
  * @returns {string} Pitch de lo incluido en el servicio
@@ -346,26 +345,40 @@ Nuestro *Dispensador Portátil* es ideal para eventos. Funciona sin electricidad
 
 /**
  * getEventLitersSuggestion: Explica cuántos litros pedir según invitados.
- * Texto sugerente (no solo números) para que el cliente entienda el pedido.
+ * Incluye rendimientos del formato (datos.json) y litros ≈ cócteles (vaso ~200ml).
  *
  * @param {number} guests - Cantidad de invitados
- * @param {'dispensador'|'muro'} formatKey - Formato (define mínimo)
+ * @param {'dispensador'|'muro'} formatKey - Formato (define mínimo y litrajes)
  * @returns {string}
  */
 export function getEventLitersSuggestion(guests, formatKey) {
   const n = Number(guests) || 0;
+  const rendimientos = preciosData.rendimientos_barriles || {};
+  // 5 cócteles por litro (= 200ml). Si el litraje está en la tabla, usamos ese valor.
+  const cocktailsForLiters = (liters) => {
+    const fromTable = rendimientos[`${liters}L`];
+    if (fromTable != null) return fromTable;
+    return liters * 5;
+  };
+
   // 3 tragos (tranquilo) o 5 (fiesta) × 0.2 L por trago, redondeado a múltiplos de 5L
   const tranquilo = Math.ceil((n * 3 * 0.2) / 5) * 5;
   const fiesta = Math.ceil((n * 5 * 0.2) / 5) * 5;
   const minLiters = formatKey === 'muro' ? 30 : 10;
-  const litrajes = formatKey === 'muro' ? '10L, 20L y 30L' : '5L y 10L';
+  const litrajes = formatKey === 'muro' ? ['10L', '20L', '30L'] : ['5L', '10L'];
+  const rendLine = litrajes
+    .map((l) => `${l} ≈ ${rendimientos[l] ?? cocktailsForLiters(parseInt(l, 10))} cócteles`)
+    .join(' · ');
 
-  return `Para orientarte con *${n || 'tus'} invitados*, una buena referencia de consumo es:
+  return `📦 *Rendimiento de los barriles* (vaso/copa con hielo ≈ 200ml):
+${rendLine}
 
-🍹 *${tranquilo}L* si el evento es más tranquilo (aprox. 3 tragos por persona)
-🎉 *${fiesta}L* si quieren fiesta (aprox. 5 tragos por persona)
+Para orientarte con *${n || 'tus'} invitados*, una buena referencia de consumo es:
 
-El pedido mínimo de este formato es *${minLiters}L* y los barriles vienen en *${litrajes}*. Puedes combinar sabores hasta llegar a esa cantidad (o la que prefieras).`;
+🍹 *${tranquilo}L* (~${cocktailsForLiters(tranquilo)} cócteles) — evento más tranquilo (~3 por persona)
+🎉 *${fiesta}L* (~${cocktailsForLiters(fiesta)} cócteles) — si quieren fiesta (~5 por persona)
+
+El pedido mínimo de este formato es *${minLiters}L* y puedes combinar sabores hasta llegar a esa cantidad (o la que prefieras).`;
 }
 
 /**
@@ -393,12 +406,12 @@ export function getEventDataSummary(session) {
 }
 
 /**
- * getEventFormatRecommendation: Mensaje al salir de confirmación de datos.
- * Recomienda formato según invitados; la pregunta va en segunda burbuja.
+ * getEventFormatRecommendation: Textos al salir de confirmación de datos.
+ * La recomendación va como caption de la imagen; la pregunta, en burbuja aparte.
  *
  * @param {number} guests - Invitados
  * @param {string} instalacionMuroStr - Precio muro ya formateado (ej. $50.000)
- * @returns {string[]} [recomendación, pregunta]
+ * @returns {string[]} [recomendación (caption), pregunta]
  */
 export function getEventFormatRecommendation(guests, instalacionMuroStr) {
   const recomendacion = guests < 100 ? '*Dispensador Portátil*' : '*Muro de Coctelería*';
@@ -409,6 +422,6 @@ Por supuesto, puedes elegir el que prefieras:
 
 1. *Dispensador Portátil* — instalación gratis, pedido mín. 10L
 2. *Muro de Coctelería* — instalación ${instalacionMuroStr}, pedido mín. 30L`,
-    `¿Cuál prefieres: *Dispensador* o *Muro*?`
+    `¿Cuál prefieres: *1* (*Dispensador*) o *2* (*Muro*)?`
   ];
 }

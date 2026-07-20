@@ -12,7 +12,7 @@ import { shouldHandleMessage, stripTriggerPrefix } from './logic/utils.js';
 import { getSession, saveSession, resetSession, findSessionIdsForPhone } from './core/db.js';
 import { assertRuntimeConfigReady, loadBotConfig } from './core/config.js';
 import { AUTH_DIR, PROJECT_ROOT } from './core/paths.js';
-import { isImagePart, isAlbumPart, assertImageExists } from './logic/media.js';
+import { isImagePart, isVideoPart, assertImageExists } from './logic/media.js';
 import { rememberLabel } from './core/business-labels.js';
 import {
   sendTracked,
@@ -643,7 +643,7 @@ async function startBot() {
             continue;
           }
 
-          // Imagen desde assets/ (el engine ya validó que existe; defensa extra aquí)
+          // Imagen / video desde assets/ (el engine ya validó que existe; defensa extra aquí)
           if (isImagePart(part)) {
             const check = assertImageExists(part.file);
             if (!check.ok) {
@@ -654,34 +654,16 @@ async function startBot() {
             const payload = { image: imageBuffer };
             if (part.caption) payload.caption = part.caption;
             await sendTracked(sock, targetJid, payload);
-          } else if (isAlbumPart(part)) {
-            // Envío como álbum
-            const validFiles = part.files.map(f => {
-              const check = assertImageExists(f);
-              if (!check.ok) {
-                 console.error(`Imagen de álbum no encontrada: ${check.expectedPath}`);
-                 return null;
-              }
-              return check.absolutePath;
-            }).filter(Boolean);
-
-            if (validFiles.length > 0) {
-              // 1. Enviar el mensaje padre del álbum
-              const albumMsg = await sendTracked(sock, targetJid, {
-                album: { expectedImageCount: validFiles.length }
-              });
-
-              if (albumMsg) {
-                // 2. Enviar cada imagen asociada al parentKey
-                for (let i = 0; i < validFiles.length; i++) {
-                  const imageBuffer = fs.readFileSync(validFiles[i]);
-                  await sendTracked(sock, targetJid, {
-                    image: imageBuffer,
-                    albumParentKey: albumMsg.key
-                  });
-                }
-              }
+          } else if (isVideoPart(part)) {
+            const check = assertImageExists(part.file);
+            if (!check.ok) {
+              console.error(`Video no encontrado al enviar: ${check.expectedPath}`);
+              continue;
             }
+            const videoBuffer = fs.readFileSync(check.absolutePath);
+            const payload = { video: videoBuffer, mimetype: 'video/mp4' };
+            if (part.caption) payload.caption = part.caption;
+            await sendTracked(sock, targetJid, payload);
           }
         }
 

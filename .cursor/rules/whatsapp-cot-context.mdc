@@ -30,7 +30,7 @@ index.js → engine.js → statesMap (flows/index.js)
 | `src/core/engine.js` | Máquina de estados + red de seguridad + CLI (`test:local`) |
 | `src/core/llm.js` | `generateResponse`, extractores NLU, `classifyStepIntent`, `responderFAQ` |
 | `src/core/db.js` | Sesiones SQLite |
-| `src/flows/index.js` | `statesMap` unificado (12 estados) |
+| `src/flows/index.js` | `statesMap` unificado (13 estados) |
 | `src/flows/router/states/` | `ESPERANDO_INTENCION` |
 | `src/flows/barriles/states/` | Un archivo por `BARRILES_*` |
 | `src/flows/eventos/states/` | Un archivo por `EVENTOS_*` |
@@ -43,7 +43,7 @@ index.js → engine.js → statesMap (flows/index.js)
 | `src/logic/nlu-intent.js` | Cajita 2: clasificador IA |
 | `src/logic/decision-intent.js` | Keywords → NLU en menús / sí-no |
 | `src/logic/order-builder.js` | Cotización programática |
-| `src/logic/media.js` | `img('archivo.ext')` desde `assets/` |
+| `src/logic/media.js` | `img('archivo.ext')` / `vid('archivo.mp4')` desde `assets/` |
 | `src/views/templates.js` | Solo textos **compartidos** (cotización, admin, pitches eventos, dudas) |
 | `src/views/prompts.js` | Solo `readPrompt()` global (prompts por paso van en cada estado) |
 
@@ -78,7 +78,7 @@ Cada estado exporta (vía `defineState`):
 - `id`, `promptQuestion`, `shortQuestion`, `aiContextPrompt`
 - `validateAndProcess(messageText, session)` → `{ success, nextState?, customReply?, customReplies?, mute?, notifyAdmin?, shouldReset? }`
 
-`customReplies` (array) = varias burbujas; puede incluir `img(...)`.
+`customReplies` (array) = varias burbujas; puede incluir `img(...)` o `vid(...)`.
 `customReply` = un mensaje.
 
 **Decisiones de menú / sí-no:** `resolveDecisionIntent` = keywords → NLU. Si fallan → `success: false` → engine: FAQ → LLM corto / plantilla → SOS. **No** usar ese patrón en pasos de datos (fecha, comuna, cócteles).
@@ -93,7 +93,7 @@ Cada estado exporta (vía `defineState`):
 
 **Barriles:** `BARRILES_FILTRO_CANAL` (web + comuna/fecha) → `BARRILES_RECOGIDA_PRODUCTOS` → `BARRILES_REVISION_COTIZACION` (si ya hay datos; si no → `BARRILES_RECOGIDA_DATOS` como red de seguridad) → `BARRILES_ROUTER_MODIFICACION`.
 
-**Eventos:** `EVENTOS_RECOGIDA_DATOS` → `EVENTOS_CONFIRMAR_DATOS` → `EVENTOS_ELECCION_FORMATO` → `EVENTOS_ELECCION_MENU` → `EVENTOS_COTIZACION`.
+**Eventos:** `EVENTOS_RECOGIDA_DATOS` → `EVENTOS_CONFIRMAR_DATOS` → `EVENTOS_ELECCION_FORMATO` → `EVENTOS_INTRO_MENU` → `EVENTOS_ELECCION_MENU` → `EVENTOS_COTIZACION`.
 
 IDs semánticos (`BARRILES_*` / `EVENTOS_*`); transiciones reales en cada `nextState`.
 
@@ -127,6 +127,7 @@ Ver también **`coding-standards.mdc`**.
 9. No commitear `.env`, `auth/`, `conversation-memory.sqlite`.
 10. Sin legacy: no monolitos `barriles.js` / `eventos.js` / `router.js` ni `STATE_PROMPTS` por estado.
 11. Comentarios didácticos (OBJETIVO + JSDoc + pasos importantes).
+12. Si el cambio altera copy, assets o burbujas visibles → actualizar `scripts/verify-flows.mjs` en el mismo cambio.
 
 ## Quirks conocidos
 

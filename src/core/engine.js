@@ -17,7 +17,7 @@ import { statesMap } from '../flows/index.js';
 import { readPrompt } from '../views/prompts.js';
 import { buildFaqCatalogContext, sanitizeCustomerFacingReply } from '../logic/utils.js';
 import { isGreetingOrNoise, wantsExplicitHandoff } from '../logic/interruptions.js';
-import { isImagePart, isAlbumPart, assertImageExists } from '../logic/media.js';
+import { isImagePart, isVideoPart, isMediaPart, assertImageExists } from '../logic/media.js';
 import { buildAdminSosBody } from '../views/templates.js';
 import { FAQ_JSON_PATH } from './paths.js';
 import { enableTestDebug, testLog } from './debug-log.js';
@@ -127,32 +127,33 @@ function appendStepQuestionIfNeeded(body, question) {
 
 /**
  * historyTextForPart: Texto que guardamos en el historial por cada burbuja.
- * Las imágenes no son string: dejamos un marcador legible para la IA y el debug.
+ * Imágenes/videos no son string: dejamos un marcador legible para la IA y el debug.
  *
- * @param {string|{ type: 'image', file: string, caption?: string }} part
+ * @param {string|{ type: string, file: string, caption?: string }} part
  * @returns {string}
  */
 function historyTextForPart(part) {
   if (typeof part === 'string') return part;
   // Marcador fijo: el CLI y la IA ven el nombre del archivo, no un objeto crudo
-  let text = `[IMAGEN] ${part.file}`;
+  const label = part.type === 'video' ? '[VIDEO]' : '[IMAGEN]';
+  let text = `${label} ${part.file}`;
   if (part.caption) text += `\n${part.caption}`;
   return text;
 }
 
 /**
- * normalizeReplyParts: Convierte string, imagen o array mixto en lista limpia de mensajes.
- * Así promptQuestion / customReplies pueden mezclar texto e img('foto.webp').
+ * normalizeReplyParts: Convierte string, imagen, video o array mixto en lista limpia.
+ * Así promptQuestion / customReplies pueden mezclar texto, img() y vid().
  *
  * @param {string|object|Array|null|undefined} reply - Respuesta del estado o customReply(s)
- * @returns {Array<string|{ type: 'image', file: string, caption?: string }>}
+ * @returns {Array<string|{ type: string, file: string, caption?: string }>}
  */
 function normalizeReplyParts(reply) {
   if (reply == null) return [];
   const list = Array.isArray(reply) ? reply : [reply];
   return list.filter((p) => {
     if (typeof p === 'string') return p.trim() !== '';
-    return isImagePart(p) || isAlbumPart(p);
+    return isMediaPart(p);
   });
 }
 
@@ -204,19 +205,12 @@ function commitBotReplies(session, sessionId, reply, alertAdmin = null) {
   const parts = normalizeReplyParts(reply);
   if (parts.length === 0) return null;
 
-  // Validamos todas las imágenes antes de guardar historial o devolver nada
+  // Validamos imágenes/videos antes de guardar historial o devolver nada
   for (const part of parts) {
-    if (isImagePart(part)) {
+    if (isMediaPart(part)) {
       const check = assertImageExists(part.file);
       if (!check.ok) {
         return failMissingImage(session, sessionId, check.expectedPath, alertAdmin);
-      }
-    } else if (isAlbumPart(part)) {
-      for (const f of part.files) {
-        const check = assertImageExists(f);
-        if (!check.ok) {
-          return failMissingImage(session, sessionId, check.expectedPath, alertAdmin);
-        }
       }
     }
   }
@@ -577,9 +571,16 @@ async function processMessageUnlocked(sessionId, messageText, options = {}) {
 
     const conversationalMaxErrors = Math.min(2, maxConsecutiveErrors || 3);
 
+    /**
+     * buildNoInfoReply: Plantilla fija cuando FAQ/IA no ayudan.
+     * Si ya eligió Barriles/Eventos, no preguntamos "¿seguir con X?" (es redundante).
+     */
     const buildNoInfoReply = () => {
-      const userIntentLabel = session.userIntent === 'BARRILES' ? 'Barriles Desechables' : session.userIntent === 'EVENTOS' ? 'Servicio para Eventos' : 'tu cotización';
-      return `Disculpa, soy un *asistente virtual* y no estoy seguro de cómo responder a eso. 😔\n\n¿Quieres seguir con ${userIntentLabel}?\n\n${finalQuestion}\n\nO escribe *NO* o *HUMANO* para hablar con alguien del equipo.`;
+      const hasPath = session.userIntent === 'BARRILES' || session.userIntent === 'EVENTOS';
+      if (hasPath) {
+        return `Disculpa, soy un *asistente virtual* y no estoy seguro de cómo responder a eso. 😔\n\n${finalQuestion}\n\nO escribe *NO* o *HUMANO* para hablar con alguien del equipo.`;
+      }
+      return `Disculpa, soy un *asistente virtual* y no estoy seguro de cómo responder a eso. 😔\n\n¿Quieres seguir con tu cotización?\n\n${finalQuestion}\n\nO escribe *NO* o *HUMANO* para hablar con alguien del equipo.`;
     };
 
     const trimmedMessage = messageText.trim();
@@ -750,11 +751,9 @@ function cliChat() {
           // En el simulador no hay WhatsApp: mostramos el nombre del archivo
           console.log(`\n${label}: [IMAGEN] ${part.file}`);
           if (part.caption) console.log(part.caption);
-        } else if (isAlbumPart(part)) {
-          console.log(`\n${label}: [ÁLBUM DE IMÁGENES]`);
-          for (const f of part.files) {
-            console.log(`  - ${f}`);
-          }
+        } else if (isVideoPart(part)) {
+          console.log(`\n${label}: [VIDEO] ${part.file}`);
+          if (part.caption) console.log(part.caption);
         }
       }
     }

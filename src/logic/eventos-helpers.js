@@ -178,7 +178,8 @@ export function getEventPriceListImage(formatKey, caption = 'Aquí va la lista d
 }
 
 /**
- * buildMenuEntryReplies: Imagen de precios + hint de litros + pregunta (3 burbujas).
+ * buildMenuEntryReplies: Imagen de precios + hint de litros/rendimiento + pregunta (3 burbujas).
+ * Lo usa EVENTOS_INTRO_MENU al confirmar (sí/ok), no al elegir el formato.
  *
  * @param {object} session
  * @param {string} formatKey

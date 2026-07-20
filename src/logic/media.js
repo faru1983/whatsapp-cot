@@ -1,14 +1,14 @@
 // ==============================================================================
-// OBJETIVO: Helper para enviar imágenes en los flujos del bot.
-// Los estados usan img('archivo.ext') dentro de customReplies; engine e index.js
-// resuelven la ruta en assets/ y envían (o silencian + SOS si el archivo no existe).
+// OBJETIVO: Helper para enviar imágenes/videos en los flujos del bot.
+// Los estados usan img('archivo.ext') o vid('archivo.mp4') dentro de customReplies;
+// engine e index.js resuelven la ruta en assets/ y envían (o silencian + SOS si falta).
 // ==============================================================================
 import fs from 'node:fs';
 import path from 'node:path';
 import { ASSETS_DIR } from '../core/paths.js';
 
 // ==============================================================================
-// 1. CONSTRUIR UN BLOQUE DE IMAGEN PARA customReplies
+// 1. CONSTRUIR BLOQUES DE MEDIA PARA customReplies
 // ==============================================================================
 
 /**
@@ -32,6 +32,25 @@ export function img(fileName, caption) {
 }
 
 /**
+ * vid: Arma un objeto video para customReply / customReplies.
+ * Igual que img(), pero para mp4 (u otro video) en assets/.
+ *
+ * Ejemplo:
+ *   customReplies: [vid('eventos_muro.mp4', 'Pitch del muro…')]
+ *
+ * @param {string} fileName - Nombre del archivo en assets/ (ej. "eventos_muro.mp4")
+ * @param {string} [caption] - Texto opcional bajo el video en WhatsApp
+ * @returns {{ type: 'video', file: string, caption?: string }}
+ */
+export function vid(fileName, caption) {
+  const part = { type: 'video', file: String(fileName || '').trim() };
+  if (caption != null && String(caption).trim() !== '') {
+    part.caption = String(caption).trim();
+  }
+  return part;
+}
+
+/**
  * isImagePart: ¿Este ítem de reply es una imagen (no un string de texto)?
  *
  * @param {unknown} part - Elemento de customReplies o customReply
@@ -48,35 +67,29 @@ export function isImagePart(part) {
 }
 
 /**
- * album: Arma un objeto álbum para agrupar múltiples imágenes.
- *
- * Ejemplo:
- *   customReplies: [album(['foto1.webp', 'foto2.webp', 'foto3.webp'])]
- *
- * @param {string[]} fileNames - Nombres de los archivos
- * @returns {{ type: 'album', files: string[] }}
- */
-export function album(fileNames) {
-  return { 
-    type: 'album', 
-    files: (Array.isArray(fileNames) ? fileNames : []).map(f => String(f).trim()).filter(Boolean) 
-  };
-}
-
-/**
- * isAlbumPart: ¿Este ítem de reply es un álbum?
+ * isVideoPart: ¿Este ítem de reply es un video?
  *
  * @param {unknown} part
  * @returns {boolean}
  */
-export function isAlbumPart(part) {
+export function isVideoPart(part) {
   return Boolean(
     part
     && typeof part === 'object'
-    && part.type === 'album'
-    && Array.isArray(part.files)
-    && part.files.length > 0
+    && part.type === 'video'
+    && typeof part.file === 'string'
+    && part.file.trim() !== ''
   );
+}
+
+/**
+ * isMediaPart: ¿Es imagen o video (bloque de archivo desde assets/)?
+ *
+ * @param {unknown} part
+ * @returns {boolean}
+ */
+export function isMediaPart(part) {
+  return isImagePart(part) || isVideoPart(part);
 }
 
 // ==============================================================================
@@ -85,7 +98,7 @@ export function isAlbumPart(part) {
 
 /**
  * resolveImagePath: Une assets/ + nombre de archivo en una ruta absoluta.
- * Así el bot encuentra la foto aunque PM2 arranque desde otra carpeta.
+ * Sirve igual para fotos y videos (cualquier archivo en assets/).
  *
  * @param {string} fileName - Nombre del archivo (ej. "barril_desechable_precios.webp")
  * @returns {string} Ruta absoluta esperada
@@ -99,8 +112,9 @@ export function resolveImagePath(fileName) {
 /**
  * assertImageExists: Comprueba si el archivo está en assets/.
  * Si no está, el engine silencia el chat y avisa al admin (SOS).
+ * Nombre histórico: también valida videos (vid).
  *
- * @param {string} fileName - Nombre del archivo pedido por img()
+ * @param {string} fileName - Nombre del archivo pedido por img()/vid()
  * @returns {{ ok: true, absolutePath: string } | { ok: false, expectedPath: string }}
  */
 export function assertImageExists(fileName) {

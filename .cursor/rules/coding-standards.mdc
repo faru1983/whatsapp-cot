@@ -116,6 +116,7 @@ Al agregar funcionalidad:
 - Sesiones: mutar en el estado; `saveSession` desde `engine.js`.
 - Imports ESM con extensión `.js`.
 - No secrets / `auth/` / sqlite en commits.
+- **Tests (`scripts/verify-flows.mjs`):** si el cambio altera copy visible, assets, burbujas (`img`/`caption`), transiciones o mute, actualizar el smoke/asserts del test en el mismo PR y correr `npm run verify`.
 
 ## Lo que NO hacer
 
@@ -133,4 +134,5 @@ Al agregar funcionalidad:
 - [ ] ¿Barrel / `statesMap` actualizado si hay estado nuevo?
 - [ ] ¿Capa correcta (flows vs logic vs views)?
 - [ ] ¿Código obsoleto eliminado?
+- [ ] ¿Si cambió lo que ve el cliente (texto, imagen, orden de burbujas, estado siguiente), se actualizó `scripts/verify-flows.mjs`?
 - [ ] ¿`npm run verify` pasa (`check` + `test:flows`)?

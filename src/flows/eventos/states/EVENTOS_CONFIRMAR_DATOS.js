@@ -8,7 +8,7 @@ import { formatPrice, preciosData } from '../../../logic/utils.js';
 import { resolveDecisionIntent } from '../../../logic/decision-intent.js';
 import { rulesConfirmarOCorregirDatos } from '../../../logic/keyword-intent.js';
 import { applyEventDataFromMessage } from '../../../logic/eventos-helpers.js';
-import { img, album } from '../../../logic/media.js';
+import { img } from '../../../logic/media.js';
 
 const SHORT_Q = `¿Todo bien? Escribe *ok* para continuar o corrige un dato.`;
 
@@ -63,17 +63,14 @@ export const EVENTOS_CONFIRMAR_DATOS = defineState({
 
     if (intent === 'CONFIRMAR') {
       const instalacionMuro = formatPrice(preciosData.instalacion_muro || 50000);
-      // Primero las 3 fotos de formatos agrupadas; después la recomendación + pregunta
+      // Una sola foto (ambas opciones) con la recomendación de caption; la pregunta va aparte
+      const [recomendacion, pregunta] = getEventFormatRecommendation(session.guests, instalacionMuro);
       return {
         success: true,
         nextState: 'EVENTOS_ELECCION_FORMATO',
         customReplies: [
-          album([
-            'dispensador_portatil.webp',
-            'muro_de_cocteleria.webp',
-            'eventos_formatos1.webp'
-          ]),
-          ...getEventFormatRecommendation(session.guests, instalacionMuro)
+          img('eventos_ambas.webp', recomendacion),
+          pregunta
         ]
       };
     }

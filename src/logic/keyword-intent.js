@@ -213,6 +213,31 @@ export function rulesMenuUnoDos({
 }
 
 /**
+ * rulesContinuarSiOOk: Seguir / ver carta (sí, ok, seguimos, precios…).
+ * Usado tras el pitch de formato, antes de mostrar cócteles y precios.
+ *
+ * @returns {Array<{ label: string, test: Function }>}
+ */
+export function rulesContinuarSiOOk() {
+  return [
+    {
+      label: 'CONFIRMAR',
+      test: ({ lower }) => {
+        if (/^(ok|okay|si|sí|dale|listo|perfecto|vamos|claro|seguimos|continuar)$/i.test(lower)) {
+          return true;
+        }
+        // Frases de avance o de querer ver la carta
+        if (/\b(seguimos|continuar|adelante|quiero ver|ver (la )?carta|ver precios|ver c[oó]cteles)\b/i.test(lower)) {
+          return true;
+        }
+        return /\b(ok|okay|si|sí|dale|listo|perfecto)\b/i.test(lower)
+          && !/\b(no|después|despues|luego|mal)\b/i.test(lower);
+      }
+    }
+  ];
+}
+
+/**
  * rulesConfirmarOCorregirDatos: ok/sí vs quiere corregir (sin dar el valor nuevo).
  *
  * @returns {Array<{ label: string, test: Function }>}
@@ -238,11 +263,24 @@ export function rulesConfirmarOCorregirDatos() {
 
 /**
  * rulesDispensadorOMuro: Elección de formato de evento.
+ * AMBOS va primero: "ambos" / "dispensador y muro" no debe forzar una opción.
  *
  * @returns {Array<{ label: string, test: Function }>}
  */
 export function rulesDispensadorOMuro() {
   return [
+    {
+      label: 'AMBOS',
+      test: ({ lower }) => {
+        // Frases explícitas de "quiero los dos" (ambos, las 2, 1 y 2, etc.)
+        if (/\b(ambas|ambos|los\s*dos|las\s*dos|los\s*2|las\s*2|los2|las2)\b/i.test(lower)) return true;
+        if (/\b(1\s*y\s*2|uno\s*y\s*dos|opci[oó]n\s*1\s*y\s*(opci[oó]n\s*)?2)\b/i.test(lower)) return true;
+        // Menciona las dos opciones en el mismo mensaje
+        const isMuro = /\bmuro\b/i.test(lower);
+        const isDispensador = /\b(dispensador|portatil|portátil)\b/i.test(lower);
+        return isMuro && isDispensador;
+      }
+    },
     {
       label: 'DISPENSADOR',
       test: ({ trimmed, lower }) => {
@@ -259,9 +297,7 @@ export function rulesDispensadorOMuro() {
         if (/^(2|dos|segunda?|opci[oó]n\s*2)$/i.test(trimmed)) return true;
         const isMuro = /\bmuro\b/i.test(lower);
         const isDispensador = /\b(dispensador|portatil|portátil)\b/i.test(lower);
-        // Si dice ambos, preferimos MURO (mismo criterio que el flujo anterior)
-        if (isMuro) return true;
-        if (isDispensador) return false;
+        if (isMuro && !isDispensador) return true;
         return false;
       }
     }
