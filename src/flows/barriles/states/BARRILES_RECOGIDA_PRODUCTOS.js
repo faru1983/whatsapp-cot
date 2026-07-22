@@ -10,6 +10,7 @@ import {
   parseElimination,
   findClosestCatalogMatch,
   resolveDoubtsProgrammatically,
+  interceptBotOptionsAnswer,
   isOnlyBrowsing,
   wantsInstagramOrSocial
 } from '../../../logic/utils.js';
@@ -151,7 +152,20 @@ ${formatCartLines(session.orderBuilder.products)}
       if (botTurns.length > 0) lastBotMessage = botTurns[botTurns.length - 1].text;
     }
 
-    let { productos: extractedList, dudas, quiere_avanzar } = await extractProductsWithAI(messageText, catalogNames, lastBotMessage);
+    let extractedList = [];
+    let dudas = [];
+    let quiere_avanzar = false;
+
+    // INTERCEPTOR: Si el bot dio opciones en el turno anterior y el usuario elige una, la capturamos sin ir a la IA.
+    const interceptedOption = interceptBotOptionsAnswer(messageText, lastBotMessage);
+    if (interceptedOption) {
+      extractedList.push(interceptedOption);
+    } else {
+      const result = await extractProductsWithAI(messageText, catalogNames, lastBotMessage);
+      extractedList = result.productos;
+      dudas = result.dudas;
+      quiere_avanzar = result.quiere_avanzar;
+    }
     const wantsAdvance = quiere_avanzar || wantsAdvanceProductsOrder(messageText);
 
     // "seguimos" solo (o NLU dice avanzar) con carrito ya lleno → siguiente paso
@@ -160,7 +174,7 @@ ${formatCartLines(session.orderBuilder.products)}
     }
 
     if (dudas?.length > 0) {
-      const { resolved, remaining } = resolveDoubtsProgrammatically(dudas);
+      const { resolved, remaining } = resolveDoubtsProgrammatically(dudas, lastBotMessage);
       if (resolved.length > 0) {
         for (const item of resolved) {
           if (!extractedList.find((p) => p.name === item.name)) extractedList.push(item);

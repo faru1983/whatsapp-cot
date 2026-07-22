@@ -39,6 +39,19 @@ const ADMIN_COMMANDS = ['/detenerbot', '/iniciarbot', '/reiniciarbot'];
 let isConnecting = false;
 let reconnectTimer = null;
 
+// Caché deduplicador de mensajes entrantes (evita doble procesamiento por reintentos ACK de WhatsApp)
+const processedIncomingMsgIds = new Set();
+function isRecentlyProcessedMessage(msgId) {
+  if (!msgId) return false;
+  if (processedIncomingMsgIds.has(msgId)) return true;
+  processedIncomingMsgIds.add(msgId);
+  if (processedIncomingMsgIds.size > 1000) {
+    const first = processedIncomingMsgIds.values().next().value;
+    processedIncomingMsgIds.delete(first);
+  }
+  return false;
+}
+
 /**
  * unwrapMessageContent: Saca el contenido real de un mensaje.
  * Los chats con "mensajes temporales" envuelven el texto en ephemeralMessage;
@@ -448,6 +461,13 @@ async function startBot() {
         return;
       }
 
+      const isFromMe = message.key.fromMe;
+
+      // Omite mensajes entrantes duplicados por reintentos de red ACK
+      if (!isFromMe && message.key?.id && isRecentlyProcessedMessage(message.key.id)) {
+        return;
+      }
+
       // Guardamos el contenido por si WhatsApp pide reintento de descifrado (getMessage)
       if (message.message && message.key?.id) {
         rememberMessage(message.key.id, message.message);
@@ -461,7 +481,6 @@ async function startBot() {
       const botConfig = loadBotConfig();
       const adminList = botConfig.numeros_notificar || [];
 
-      const isFromMe = message.key.fromMe;
       const remoteJid = message.key.remoteJid;
 
       // Admin = mensaje desde un chat de ADMIN_NUMBERS, o participant admin en grupo
@@ -552,21 +571,17 @@ async function startBot() {
         // Solo si hay texto/multimedia. Borrados y cambios de temporales ya se filtraron.
         // --------------------------------------------------------------------------
         if (isClientCustomerChat(remoteJid, adminList, sock) && hasHumanChatContent(content)) {
-          const sessionId = getPreferredSessionId(message);
-          const session = getSession(sessionId);
-          if (!session.isMuted) {
-            session.isMuted = true;
-            session.silenciado_timestamp = Date.now();
-            saveSession(sessionId, session);
-            // Si llegó como @lid, muteamos también el PN (y viceversa) para no dejar huecos
-            if (sessionId !== remoteJid) {
-              const altSession = getSession(remoteJid);
-              altSession.isMuted = true;
-              altSession.silenciado_timestamp = Date.now();
-              saveSession(remoteJid, altSession);
-            }
-            console.log(`🔇 Bot SILENCIADO automáticamente (Intervención humana en ${sessionId})`);
+          const targetIds = await resolveSessionIdsForCommand(sock, remoteJid);
+          const preferredId = getPreferredSessionId(message);
+          if (!targetIds.includes(preferredId)) targetIds.push(preferredId);
+
+          for (const id of targetIds) {
+            const tgtSession = getSession(id);
+            tgtSession.isMuted = true;
+            tgtSession.silenciado_timestamp = Date.now();
+            saveSession(id, tgtSession);
           }
+          console.log(`🔇 Bot SILENCIADO automáticamente por intervención humana en: ${targetIds.join(', ')}`);
           return;
         }
 

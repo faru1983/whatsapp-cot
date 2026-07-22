@@ -174,7 +174,7 @@ async function runCase(name, steps) {
     }
     if (step.expectIncludes) {
       const ok = step.expectIncludes.every((s) => text.toLowerCase().includes(String(s).toLowerCase()));
-      assert(ok, `reply incluye ${JSON.stringify(step.expectIncludes)}`);
+      assert(ok, `reply incluye ${JSON.stringify(step.expectIncludes)}${!ok ? ` | Actual: ${JSON.stringify(text)}` : ''}`);
     }
     if (step.expectNotIncludes) {
       const bad = step.expectNotIncludes.some((s) => text.toLowerCase().includes(String(s).toLowerCase()));
@@ -383,6 +383,15 @@ try {
   await runCase('Handoff global por frase', [
     {
       input: 'quiero hablar con un humano',
+      expectState: 'CERRADO',
+      expectMuted: true,
+      expectIncludes: ['comunico con alguien del equipo']
+    }
+  ]);
+
+  await runCase('Handoff global por rol suelto - humano', [
+    {
+      input: 'humano',
       expectState: 'CERRADO',
       expectMuted: true,
       expectIncludes: ['comunico con alguien del equipo']

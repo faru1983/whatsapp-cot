@@ -966,7 +966,7 @@ export function parseElimination(text, currentItems, allAvailableItemNames) {
  * @returns {boolean}
  */
 export function isEventMenuCorrection(text) {
-	return /\b(me\s+equivoc|equivoc|correg|en\s+vez|en\s+realidad|no\s+son|no\s+es|no\s+era|mejor\s+(pon|deja|cambia)|reemplaz|cambia(r)?\s+(el|la|a)|no\s+\d+\s*x)\b/i.test(
+	return /\b(me\s+equivoc|equivoc|correg|en\s+vez|en\s+realidad|no\s+son|no\s+es|no\s+era|mejor\s+(pon|deja|cambia)|reemplaz|cambia(r)?\s+(el|la|a)|no\s+\d+\s*x|\d+\s*x|son\s+solo|solo\s+(\d+|quiero|deja|pon|poner|1|10l|5l|20l)|deja(lo)?\s+en|solamente|era\s+solo|en\s+verdad)\b/i.test(
 		String(text || '')
 	);
 }
@@ -1034,37 +1034,69 @@ export function parseEventElimination(text, currentItems) {
  * @returns {{ name: string, quantity: number, litrage: string }}
  */
 export function fixEventLitrageShorthand(userMessage, product, allowedLitrages, defaultLitrage) {
-	if (!product?.name || !product.quantity) return product;
+	if (!product?.name || !product.quantity) return [product];
 
 	const qty = product.quantity;
 	const qtyAsLitrage = `${qty}L`;
-	// Solo reinterpretamos si la "cantidad" es un tamaño de barril válido
-	if (!allowedLitrages.includes(qtyAsLitrage)) return product;
-	// Si ya trae un litraje distinto al default, confiamos en el NLU
-	if (product.litrage && product.litrage !== defaultLitrage && product.litrage !== qtyAsLitrage) {
-		return product;
-	}
-
 	const msg = String(userMessage || '');
-	// Explicó unidades: "10x", "10 unidades", "10 barriles" → sí es cantidad
-	if (new RegExp(`\\b${qty}\\s*x\\b`, 'i').test(msg)) return product;
-	if (/\b(unidades?|barriles?)\b/i.test(msg) && new RegExp(`\\b${qty}\\b`).test(msg)) return product;
 
-	// Atajo típico: "10 de mojito", "10 mojito", "10L de mojito"
-	const looksLikeLitrage = new RegExp(
-		`\\b${qty}\\s*(l\\b|de\\s+)?[a-záéíóúñ]`,
-		'i'
-	).test(msg);
+	// Explicó unidades: "10x", "10 unidades", "10 barriles", "10 cajas" → sí es cantidad explícita
+	const hasExplicitUnits = new RegExp(`\\b${qty}\\s*x\\b`, 'i').test(msg)
+		|| (/\b(unidades?|barriles?|cajas?)\b/i.test(msg) && new RegExp(`\\b${qty}\\b`).test(msg));
 
-	if (looksLikeLitrage || product.litrage === defaultLitrage) {
-		return { ...product, quantity: 1, litrage: qtyAsLitrage };
+	if (hasExplicitUnits) {
+		return [product];
 	}
-	return product;
+
+	// 1) Si qtyAsLitrage está directamente en allowedLitrages (ej. 10L o 20L es un barril válido):
+	if (allowedLitrages.includes(qtyAsLitrage)) {
+		return [{ ...product, quantity: 1, litrage: qtyAsLitrage }];
+	}
+
+	// 2) Partición óptima (ej. 35L en formato [10L, 5L] → 3x 10L y 1x 5L)
+	const numericAllowed = allowedLitrages
+		.map((l) => parseInt(l, 10))
+		.filter((n) => !isNaN(n) && n > 0)
+		.sort((a, b) => b - a);
+
+	let tempRemaining = qty;
+	const tempResults = [];
+	for (const size of numericAllowed) {
+		if (tempRemaining >= size) {
+			const count = Math.floor(tempRemaining / size);
+			tempResults.push({ ...product, quantity: count, litrage: `${size}L` });
+			tempRemaining %= size;
+		}
+	}
+
+	if (tempRemaining === 0 && tempResults.length > 0) {
+		return tempResults;
+	}
+
+	// 3) Si es una cantidad > 3 o litraje no estándar (ej. "15 mojito" sin partición exacta), NUNCA asumir error.
+	// Asignar quantity=1 y litrage=qtyAsLitrage (ej: 1x 15L), para que la validación notifique el litraje inválido.
+	if (product.litrage && product.litrage !== defaultLitrage && product.litrage !== qtyAsLitrage) {
+		return [product];
+	}
+
+	return [{ ...product, quantity: 1, litrage: qtyAsLitrage }];
 }
 
-export function resolveDoubtsProgrammatically(dudas) {
+export function resolveDoubtsProgrammatically(dudas, lastBotMessage = '') {
 	const resolved = [];
 	const remaining = [];
+
+	// Extraer opciones que el bot ofreció en su último mensaje (líneas "- Nombre")
+	const botOfferedOptions = [];
+	if (lastBotMessage) {
+		const lines = String(lastBotMessage).split('\n');
+		for (const line of lines) {
+			const m = line.match(/^\s*-\s*([A-Za-záéíóúÁÉÍÓÚñÑ0-9°º\s]+)/);
+			if (m && m[1]) {
+				botOfferedOptions.push(normalizeString(m[1].trim()));
+			}
+		}
+	}
 
 	for (const duda of dudas) {
 		if (!duda || !duda.opciones || duda.opciones.length <= 1) {
@@ -1074,14 +1106,29 @@ export function resolveDoubtsProgrammatically(dudas) {
 			continue;
 		}
 
+		let opciones = duda.opciones;
+
+		// Si el bot ofreció opciones en el turno anterior, y de la duda actual solo 1 opción coincide con la lista previa del bot:
+		if (botOfferedOptions.length > 0) {
+			const matchingBotOptions = opciones.filter((op) =>
+				botOfferedOptions.some((botOp) => botOp === normalizeString(op) || botOp.includes(normalizeString(op)))
+			);
+			if (matchingBotOptions.length === 1) {
+				testLog(`duda resuelta por contexto previo del bot: "${duda.mencionado}" → "${matchingBotOptions[0]}"`);
+				resolved.push({ name: matchingBotOptions[0], quantity: 1 });
+				continue;
+			} else if (matchingBotOptions.length > 1) {
+				opciones = matchingBotOptions;
+			}
+		}
+
 		const mencionado = duda.mencionado || '';
-		const opciones = duda.opciones;
 
 		const normMencionado = normalizeString(mencionado);
 		const userWords = normMencionado.split(/\s+/).filter((w) => w.length > 2);
 
 		if (userWords.length === 0) {
-			remaining.push(duda);
+			remaining.push({ ...duda, opciones });
 			continue;
 		}
 
@@ -1114,11 +1161,31 @@ export function resolveDoubtsProgrammatically(dudas) {
 			testLog(`duda resuelta: "${mencionado}" → "${resolvedOption.opcion}"`);
 			resolved.push({ name: resolvedOption.opcion, quantity: 1 });
 		} else {
-			remaining.push(duda);
+			remaining.push({ ...duda, opciones });
 		}
 	}
 
 	return { resolved, remaining };
+}
+
+export function interceptBotOptionsAnswer(messageText, lastBotMessage) {
+	if (!lastBotMessage || !messageText) return null;
+	const botOfferedOptions = [];
+	const lines = String(lastBotMessage).split('\n');
+	for (const line of lines) {
+		const m = line.match(/^\s*-\s*([A-Za-záéíóúÁÉÍÓÚñÑ0-9°º\s]+)/);
+		if (m && m[1]) {
+			botOfferedOptions.push(m[1].trim());
+		}
+	}
+	if (botOfferedOptions.length === 0) return null;
+
+	const fakeDuda = { mencionado: messageText, opciones: botOfferedOptions };
+	const { resolved } = resolveDoubtsProgrammatically([fakeDuda]);
+	if (resolved.length === 1) {
+		return { name: resolved[0].name, quantity: 1 };
+	}
+	return null;
 }
 
 function getLevenshteinDistance(a, b) {
@@ -1141,25 +1208,44 @@ function getLevenshteinDistance(a, b) {
 
 export function findClosestCatalogMatch(name, catalogNames) {
 	if (!name) return null;
-	const normName = normalizeString(name);
 
-	let bestMatch = catalogNames.find((c) => normalizeString(c) === normName);
+	const cleanName = (str) => normalizeString(str)
+		.replace(/\b(clasico|clasica|tradicional|original|sabores|sabor)\b/gi, '')
+		.replace(/\s+/g, ' ')
+		.trim();
+
+	const normName = normalizeString(name);
+	const cleanedNormName = cleanName(name);
+
+	// 1) Match exacto con o sin palabras descriptivas de relleno
+	let bestMatch = catalogNames.find((c) => {
+		const normC = normalizeString(c);
+		return normC === normName || normC === cleanedNormName;
+	});
 	if (bestMatch) return bestMatch;
 
+	// 2) Substring / palabra clave principal
+	bestMatch = catalogNames.find((c) => {
+		const cleanedC = cleanName(c);
+		return cleanedNormName && (cleanedC.includes(cleanedNormName) || cleanedNormName.includes(cleanedC));
+	});
+	if (bestMatch) return bestMatch;
+
+	// 3) Levenshtein sobre la cadena limpia
 	let minDistance = Infinity;
 	let closest = null;
+	const target = cleanedNormName || normName;
 
 	for (const catalogName of catalogNames) {
-		const normCatalog = normalizeString(catalogName);
-		const dist = getLevenshteinDistance(normName, normCatalog);
+		const normCatalog = cleanName(catalogName) || normalizeString(catalogName);
+		const dist = getLevenshteinDistance(target, normCatalog);
 
-		const threshold = Math.max(2, Math.floor(normCatalog.length * 0.25));
+		const threshold = Math.max(2, Math.floor(normCatalog.length * 0.3));
 		if (dist <= threshold && dist < minDistance) {
 			minDistance = dist;
 			closest = catalogName;
 		}
 	}
 
-	bestMatch = closest;
-	return bestMatch;
+	return closest;
 }

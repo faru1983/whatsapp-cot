@@ -11,6 +11,7 @@ import {
   preciosData,
   findClosestCatalogMatch,
   resolveDoubtsProgrammatically,
+  interceptBotOptionsAnswer,
   parseEventElimination,
   isEventMenuCorrection,
   fixEventLitrageShorthand
@@ -171,12 +172,21 @@ Dime sabor y litros (ej. *10L de mojito*), o escribe *lista* para ver precios.`
     }
 
     // Rama: agregar / confirmar con NLU de eventos
-    let { productos: extractedList, dudas, quiere_avanzar } = await extractEventProductsWithAI(
-      messageText,
-      catalogNames,
-      formatKey,
-      lastBotMessage
-    );
+    let extractedList = [];
+    let dudas = [];
+    let quiere_avanzar = false;
+
+    // INTERCEPTOR: Si el bot dio opciones en el turno anterior y el usuario elige una, la capturamos sin ir a la IA.
+    const interceptedOption = interceptBotOptionsAnswer(messageText, lastBotMessage);
+    if (interceptedOption) {
+      const defaultLitrage = formatKey === 'muro' ? '10L' : '5L';
+      extractedList.push({ ...interceptedOption, litrage: defaultLitrage });
+    } else {
+      const result = await extractEventProductsWithAI(messageText, catalogNames, formatKey, lastBotMessage);
+      extractedList = result.productos;
+      dudas = result.dudas;
+      quiere_avanzar = result.quiere_avanzar;
+    }
 
     const cartHasItems = Object.keys(session.orderBuilder.products).length > 0;
     const wantsAdvance = quiere_avanzar || wantsAdvanceProductsOrder(messageText);
@@ -206,7 +216,7 @@ Dime sabor y litros (ej. *10L de mojito*), o escribe *lista* para ver precios.`
 
     // Intentar resolver dudas sin preguntar (ej. "piscola alto" → una sola opción clara)
     if (dudas?.length > 0) {
-      const { resolved, remaining } = resolveDoubtsProgrammatically(dudas);
+      const { resolved, remaining } = resolveDoubtsProgrammatically(dudas, lastBotMessage);
       if (resolved.length > 0) {
         for (const item of resolved) {
           const defaultLitrage = formatKey === 'muro' ? '10L' : '5L';
@@ -234,27 +244,30 @@ Dime sabor y litros (ej. *10L de mojito*), o escribe *lista* para ver precios.`
       const matchedName = findClosestCatalogMatch(item.name, catalogNames);
       if (!matchedName) continue;
 
-      const fixed = fixEventLitrageShorthand(
+      const fixedProducts = fixEventLitrageShorthand(
         messageText,
         { name: matchedName, quantity: item.quantity, litrage: item.litrage || defaultLitrage },
         allowedLitrages,
         defaultLitrage
       );
-      const litrage = fixed.litrage;
-      const quantity = fixed.quantity;
+      
+      for (const fixed of fixedProducts) {
+        const litrage = fixed.litrage;
+        const quantity = fixed.quantity;
 
-      if (!allowedLitrages.includes(litrage)) {
-        invalidLitrages.push({ name: matchedName, litrage });
-        continue;
+        if (!allowedLitrages.includes(litrage)) {
+          invalidLitrages.push({ name: matchedName, litrage });
+          continue;
+        }
+
+        const price = preciosData.cocteles[matchedName]?.[formatKey]?.[litrage];
+        if (price == null) {
+          invalidLitrages.push({ name: matchedName, litrage });
+          continue;
+        }
+
+        parsedProducts.push({ name: matchedName, quantity, litrage });
       }
-
-      const price = preciosData.cocteles[matchedName]?.[formatKey]?.[litrage];
-      if (price == null) {
-        invalidLitrages.push({ name: matchedName, litrage });
-        continue;
-      }
-
-      parsedProducts.push({ name: matchedName, quantity, litrage });
     }
 
     const isCorrection = isEventMenuCorrection(messageText);

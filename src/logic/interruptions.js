@@ -185,7 +185,8 @@ export function wantsExplicitHandoff(messageText) {
     .replace(/[^a-z]/g, ''); // deja solo letras de la palabra suelta
 
   const rolesSeguros = new Set([
-    'asesor', 'asesora', 'ejecutivo', 'ejecutiva', 'vendedor', 'vendedora', 'ejecutivos', 'soporte'
+    'humano', 'humana', 'humanos', 'humanas',
+    'asesor', 'asesora', 'ejecutivo', 'ejecutiva', 'vendedor', 'vendedora', 'soporte'
   ]);
 
   if (rolesSeguros.has(norm)) {

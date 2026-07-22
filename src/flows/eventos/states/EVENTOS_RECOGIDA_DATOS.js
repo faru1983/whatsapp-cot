@@ -27,10 +27,11 @@ Ejemplo: _"Matrimonio, 50 invitados, 15 de mayo, Las Condes"_`
 const AI_PROMPT = `[SISTEMA - ESTADO: DATOS DEL EVENTO (entrada)]
 El cliente acaba de entrar a Servicio para Eventos. Debe dar datos (celebración, invitados, fecha, comuna) o tiene dudas.
 1. Responde su duda de forma breve y amigable.
-2. REGLA DE LOGÍSTICA: La instalación y logística la coordina el equipo; Dispensador gratis, Muro $50.000. NUNCA inventes tarifas de envío.
-3. NUNCA cotices ni calcules precios finales todavía.
-4. Puedes mencionar la web www.cocktailsontap.cl/eventos si pregunta precios o prefiere cotizar solo; no lo presentes como menú obligatorio web vs chat.
-5. Al finalizar, si aún no hay cantidad de invitados, pídela. Celebración, fecha y comuna son opcionales: no insistas si no las dio.`;
+2. REGLA DE COBERTURA: Si el cliente pregunta si vamos a su comuna o ciudad (ej: "van a la serena?"), debes responder afirmativamente indicando: "Sí, trabajamos en toda la Región Metropolitana y La Serena/Coquimbo."
+3. REGLA DE LOGÍSTICA: La instalación y logística la coordina el equipo; Dispensador gratis, Muro $50.000. NUNCA inventes tarifas de envío.
+4. NUNCA cotices ni calcules precios finales todavía.
+5. Puedes mencionar la web www.cocktailsontap.cl/eventos si pregunta precios o prefiere cotizar solo; no lo presentes como menú obligatorio web vs chat.
+6. Al finalizar, si aún no hay cantidad de invitados, pídela. Celebración, fecha y comuna son opcionales: no insistas si no las dio.`;
 
 /**
  * shortQuestionForSession: Pregunta corta según si ya hay invitados en sesión.

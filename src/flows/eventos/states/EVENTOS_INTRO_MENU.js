@@ -10,7 +10,7 @@ import {
   buildMenuEntryReplies
 } from '../../../logic/eventos-helpers.js';
 
-const SHORT_Q = `¿Quieres ver los *cócteles* disponibles y *precios*? Escribe *sí* o *ok* para continuar.`;
+const SHORT_Q = `¿Quieres ver los cócteles disponibles y precios? Escribe *OK* para continuar.`;
 
 const AI_PROMPT = `[SISTEMA - ESTADO: INTRO MENÚ DE EVENTO]
 El cliente ya eligió Dispensador o Muro y recibió el pitch de lo incluido.

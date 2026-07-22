@@ -103,6 +103,9 @@ export function getSession(sessionId) {
  * @param {object} session - Datos de la conversación
  */
 export function saveSession(sessionId, session) {
+  if (session?.history && Array.isArray(session.history.turns) && session.history.turns.length > 16) {
+    session.history.turns = session.history.turns.slice(-16);
+  }
   const data = JSON.stringify(session);
   // INSERT OR REPLACE: Si el cliente ya existe en SQLite, sobrescribe sus datos. Si es nuevo, lo crea.
   db.prepare('INSERT OR REPLACE INTO sessions (id, data) VALUES (?, ?)').run(sessionId, data);

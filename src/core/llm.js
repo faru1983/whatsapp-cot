@@ -126,14 +126,20 @@ USA ESTE CONTEXTO para entender si el usuario está respondiendo a una duda prev
 El formato debe ser un objeto JSON con 4 llaves: "analisis", "productos", "dudas" y "quiere_avanzar".
 1. "analisis": Escribe un breve razonamiento de lo que pidió el usuario.
 2. "productos": Array de objetos con "name" y "quantity". Úsalo para los productos que el usuario especificó claramente.
-3. "dudas": Array de objetos con "mencionado" y "opciones" (nombres exactos del catálogo). Úsalo si el usuario menciona un término genérico y existen varias opciones posibles.
+3. "dudas": Array de objetos con "mencionado" y "opciones" (nombres exactos del catálogo). Úsalo si el usuario menciona un término genérico, categoría de sabores o existen varias opciones posibles.
 4. "quiere_avanzar": Booleano (true o false). Ponlo en true si el usuario indica que NO quiere más cócteles, que está listo, o escribe "seguimos", "solo estos", "listo", "continuar", "no".
 
+REGLAS CRÍTICAS DE DUDAS Y SABORES:
+- MOJITO SABORES: Si el usuario menciona "mojito sabores", "mojitos de sabores", "mojito de sabor" o pide ver/elegir sabores de mojito, DEBES generar un objeto en "dudas" con:
+  {"mencionado": "mojito sabores", "opciones": ["Mojito Maracuyá", "Mojito Frambuesa", "Mojito Mango"]}
+  NO agregues "Mojito" a productos cuando solicita sabores explícitamente.
+- NOMBRES DESCRIPTIVOS Y DE RELLENO: Si el cliente escribe "Pisco sour clásico", "Mojito clásico", "Sangría tradicional", el nombre oficial del catálogo es "Pisco Sour", "Mojito", "Sangría".
+
 Ejemplo 1 (Duda real): {"analisis": "Pidió piscola (hay varias marcas).", "productos": [], "dudas": [{"mencionado": "piscola", "opciones": ["Piscola Alto 35°", "Piscola Mistral 35°"]}], "quiere_avanzar": false}
-Ejemplo 2 (Sin duda): {"analisis": "Pidió margarita.", "productos": [{"name": "Tequila Margarita", "quantity": 1}], "dudas": [], "quiere_avanzar": false}
-Ejemplo 3 (Múltiple pedido): {"analisis": "Pidió 2 mojitos y piscola.", "productos": [{"name": "Mojito", "quantity": 2}], "dudas": [{"mencionado": "piscola", "opciones": ["Piscola Alto 35°", "Piscola Mistral 35°"]}], "quiere_avanzar": false}
-Ejemplo 4 (Avance): {"analisis": "Dijo que no quiere agregar más nada.", "productos": [], "dudas": [], "quiere_avanzar": true}
-Ejemplo 5 (Solo "seguimos"): {"analisis": "Confirmó el pedido con seguimos; no agrega productos nuevos.", "productos": [], "dudas": [], "quiere_avanzar": true}
+Ejemplo 2 (Duda de sabores): {"analisis": "Pidió 1 mojito sabores (hay varios sabores).", "productos": [], "dudas": [{"mencionado": "mojito sabores", "opciones": ["Mojito Maracuyá", "Mojito Frambuesa", "Mojito Mango"]}], "quiere_avanzar": false}
+Ejemplo 3 (Sin duda): {"analisis": "Pidió 1 mojito maracuyá.", "productos": [{"name": "Mojito Maracuyá", "quantity": 1}], "dudas": [], "quiere_avanzar": false}
+Ejemplo 4 (Múltiple pedido): {"analisis": "Pidió 2 mojitos y 1 mojito sabores.", "productos": [{"name": "Mojito", "quantity": 2}], "dudas": [{"mencionado": "mojito sabores", "opciones": ["Mojito Maracuyá", "Mojito Frambuesa", "Mojito Mango"]}], "quiere_avanzar": false}
+Ejemplo 5 (Avance): {"analisis": "Dijo que no quiere agregar más nada.", "productos": [], "dudas": [], "quiere_avanzar": true}
 
 IMPORTANTE: Si el usuario solo dice "seguimos", "listo", "solo estos" o similar, productos DEBE ser [] (nunca copies el carrito del mensaje anterior del bot).
 Si no pide nada o pide cosas que no existen, devuelve arrays vacíos.
@@ -222,7 +228,7 @@ USA ESTE CONTEXTO para entender si el usuario está respondiendo a una duda prev
 
 Formato del evento: "${formatType}".
 Litrajes VÁLIDOS para este formato: ${allowedLitrages.join(', ')}.
-Litraje por defecto si el cliente NO indica tamaño: ${defaultLitrage}.
+Litrage por defecto si el cliente NO indica tamaño: ${defaultLitrage}.
 
 El formato debe ser un objeto JSON con 4 llaves: "analisis", "productos", "dudas" y "quiere_avanzar".
 1. "analisis": Breve razonamiento de lo que pidió el usuario.
@@ -230,22 +236,26 @@ El formato debe ser un objeto JSON con 4 llaves: "analisis", "productos", "dudas
    - "name": nombre EXACTO del catálogo.
    - "quantity": cantidad de barriles (unidades). Si no dice cuántos, asume 1.
    - "litrage": tamaño del barril como string ("5L", "10L", "20L" o "30L").
-3. "dudas": Array de objetos con "mencionado" y "opciones" (nombres exactos del catálogo) si hay ambigüedad (ej. "piscola").
+3. "dudas": Array de objetos con "mencionado" y "opciones" (nombres exactos del catálogo) si hay ambigüedad o solicitud de sabores.
 4. "quiere_avanzar": true SOLO si el usuario indica que NO quiere más, que está listo, o escribe "no" / "solo estos" / "listo" / "seguimos".
 
-REGLA CRÍTICA DE LITRAJE (léela con cuidado):
-- En eventos, el número suele ser el TAMAÑO del barril (5/10/20/30), NO la cantidad de unidades.
-- "Mojito de 20L", "20L de Mojito", "10 de mojito", "10 mojito" → quantity=1, litrage="10L" o "20L".
-  Correcto: {"name":"Mojito","quantity":1,"litrage":"10L"}
-  Incorrecto: quantity=10 con litrage="5L" (eso es el error más común).
-- Solo usa quantity>1 si dice explícitamente unidades: "2 barriles de Mojito 10L", "2x Mojito 10L", "dos Mojitos de 10L".
-- Si en el mismo mensaje hay "5L de sangría" y "10 de mojito", ambos son litrajes: 1x Sangría 5L + 1x Mojito 10L.
-- Si pide un litraje NO válido para este formato, igual extráelo (el sistema validará después).
+REGLAS CRÍTICAS DE EXTRACCIÓN Y SINTAXIS:
+- DUDAS Y SABORES DE MOJITO: Si el usuario menciona "mojito sabores", "mojitos de sabores", "mojito de sabor" o pide ver/elegir sabores de mojito, DEBES generar un objeto en "dudas" con:
+  {"mencionado": "mojito sabores", "opciones": ["Mojito Maracuyá", "Mojito Frambuesa", "Mojito Mango"]}
+  NO agregues "Mojito" a productos cuando solicita sabores explícitamente.
+- NOMBRES DESCRIPTIVOS Y DE RELLENO: Si el cliente escribe "Pisco sour clásico", "Mojito clásico", "Sangría tradicional", el nombre oficial del catálogo es "Pisco Sour", "Mojito", "Sangría".
+- LITROS VS UNIDADES Y CANTIDADES MÚLTIPLES:
+  * "10 de mojito", "10 mojito", "10L mojito", "mojito 10L" -> quantity=1, litrage="10L".
+  * "2 mojitos 10L", "2 10L mojito", "2 barriles de 10L mojito" -> quantity=2, litrage="10L".
+  * Si el usuario pide un volumen total en litros superior al tamaño máximo de barril disponible para el formato (ej: pedir 20L en dispensador donde el máximo es 10L), calcula el número de barriles necesarios: quantity=2, litrage="10L".
+  * NUNCA extraigas de forma ciega quantity=15 o 20 si el mensaje dice "15 mojito" o "15L mojito" a menos que diga explícitamente "x" o "unidades".
+- Si en un mismo mensaje hay varios ítems (ej. "Pisco sour clásico 10L y mojito sabores 10L"), extrae los productos claros en "productos" y los ambiguos/sabores en "dudas".
 
 Ejemplo 1: {"analisis":"Pidió 1 mojito de 10L.","productos":[{"name":"Mojito","quantity":1,"litrage":"10L"}],"dudas":[],"quiere_avanzar":false}
-Ejemplo 2: {"analisis":"Pidió aperol 20L y piscola (ambigua).","productos":[{"name":"Aperol Spritz","quantity":1,"litrage":"20L"}],"dudas":[{"mencionado":"piscola","opciones":["Piscola Alto 35°","Piscola Mistral 35°"]}],"quiere_avanzar":false}
-Ejemplo 3: {"analisis":"Dijo que solo esos.","productos":[],"dudas":[],"quiere_avanzar":true}
-Ejemplo 4: {"analisis":"Pidió 10 de mojito y 5L de sangría (ambos litrajes).","productos":[{"name":"Mojito","quantity":1,"litrage":"10L"},{"name":"Sangría","quantity":1,"litrage":"5L"}],"dudas":[],"quiere_avanzar":false}
+Ejemplo 2: {"analisis":"Pidió mojito sabores (ambigüedad de sabores).","productos":[],"dudas":[{"mencionado":"mojito sabores","opciones":["Mojito Maracuyá","Mojito Frambuesa","Mojito Mango"]}],"quiere_avanzar":false}
+Ejemplo 3: {"analisis":"Pidió 2 10L mojito y pisco sour clásico 10L.","productos":[{"name":"Mojito","quantity":2,"litrage":"10L"},{"name":"Pisco Sour","quantity":1,"litrage":"10L"}],"dudas":[],"quiere_avanzar":false}
+Ejemplo 4: {"analisis":"Pidió pisco sour clásico 10L y solicitó mojito sabores 10L.","productos":[{"name":"Pisco Sour","quantity":1,"litrage":"10L"}],"dudas":[{"mencionado":"mojito sabores 10L","opciones":["Mojito Maracuyá","Mojito Frambuesa","Mojito Mango"]}],"quiere_avanzar":false}
+Ejemplo 5: {"analisis":"Dijo que solo esos.","productos":[],"dudas":[],"quiere_avanzar":true}
 
 Si no pide nada o pide cosas que no existen, devuelve arrays vacíos.
 REGLA CRÍTICA: En "name" y "opciones" usa EXACTAMENTE el nombre del catálogo. Copia y pega letra por letra.
