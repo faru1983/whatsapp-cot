@@ -20,6 +20,15 @@ import { getEventLitersSuggestion } from '../views/templates.js';
  */
 export function parseCelebrationType(messageText) {
   const lower = String(messageText || '').toLowerCase();
+
+  // Buscar cumpleaños con edad específica (ej: "15 años", "mis 40", "cumple de 30")
+  const ageMatch = lower.match(/\b(?:cumplea[nñ]os|cumple|mis?)?\s*(?:de\s+)?(\d+)\s*(?:añitos|años?|anos?)\b/i) 
+                || lower.match(/\b(?:cumplea[nñ]os|cumple|mis)\s+(?:de\s+)?(\d+)\b/i);
+  
+  if (ageMatch && parseInt(ageMatch[1], 10) > 0 && parseInt(ageMatch[1], 10) < 150) {
+    return `Cumpleaños ${ageMatch[1]} años`;
+  }
+
   const map = [
     [/matrimonio|casamiento|boda|wedding/i, 'Matrimonio'],
     [/cumplea[nñ]os|cumple/i, 'Cumpleaños'],
@@ -32,6 +41,44 @@ export function parseCelebrationType(messageText) {
   for (const [re, label] of map) {
     if (re.test(lower)) return label;
   }
+  return null;
+}
+
+/**
+ * extractGuestsFromMessage: Extrae el número de invitados filtrando fechas, edades, horas, etc.
+ * @param {string} messageText
+ * @returns {number|null}
+ */
+export function extractGuestsFromMessage(messageText) {
+  let clean = String(messageText || '');
+
+  // 1. Quitar fechas (ej. 15 de mayo)
+  clean = clean.replace(/\b\d+\s*de\s*(enero|febrero|marzo|abril|mayo|junio|julio|agosto|septiembre|octubre|noviembre|diciembre)\b/gi, '');
+  
+  // 2. Quitar edades/años (ej. 15 años, cumple 50, cumpleaños de 40)
+  clean = clean.replace(/\b\d+\s*(añitos|años?|anos?)\b/gi, '');
+  clean = clean.replace(/\b(cumpleaños|cumple)\s+(de\s+)?\d+\b/gi, '');
+  
+  // 3. Quitar horas (ej. 15:00, 20 hrs, a las 15)
+  clean = clean.replace(/\b\d{1,2}:\d{2}\b/gi, '');
+  clean = clean.replace(/\b\d{1,2}\s*(hrs?|horas?)\b/gi, '');
+  clean = clean.replace(/\ba\s+las\s+\d{1,2}\b/gi, '');
+  
+  // 4. Quitar litrajes (ej. 10L, 20 litros)
+  clean = clean.replace(/\b\d+\s*(l|lt|lts|litros?)\b/gi, '');
+
+  // Primero buscar mención explícita de invitados (prioritario)
+  const explicitMatch = clean.match(/\b(\d+)\s*(personas|invitados|pax|inv)\b/i);
+  if (explicitMatch) {
+    return parseInt(explicitMatch[1], 10);
+  }
+
+  // Si no, agarrar el primer número aislado que haya quedado
+  const implicitMatch = clean.match(/\b(\d+)\b/i);
+  if (implicitMatch) {
+    return parseInt(implicitMatch[1], 10);
+  }
+
   return null;
 }
 
@@ -85,10 +132,9 @@ export function applyEventDataFromMessage(messageText, session) {
     hasNewInfo = true;
   }
 
-  const cleanText = messageText.replace(/\b\d+\s*de\s*(enero|febrero|marzo|abril|mayo|junio|julio|agosto|septiembre|octubre|noviembre|diciembre)/gi, '');
-  const guestsMatch = cleanText.match(/\b(\d+)\s*(personas|invitados|pax|inv)?\b/i);
-  if (guestsMatch) {
-    session.guests = parseInt(guestsMatch[1], 10);
+  const guests = extractGuestsFromMessage(messageText);
+  if (guests !== null) {
+    session.guests = guests;
     hasNewInfo = true;
   }
 

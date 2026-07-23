@@ -10,7 +10,7 @@ import {
   wantsBrowseOnlyClose
 } from '../../../logic/interruptions.js';
 import { matchKeywordIntent, rulesWebVsChat } from '../../../logic/keyword-intent.js';
-import { applyEventDataFromMessage } from '../../../logic/eventos-helpers.js';
+import { applyEventDataFromMessage, extractGuestsFromMessage } from '../../../logic/eventos-helpers.js';
 
 // Bienvenida en 2 burbujas: primero el servicio + web; luego pedimos los datos
 const WELCOME_TEXTS = [
@@ -54,11 +54,7 @@ function shortQuestionForSession(session) {
  * @returns {boolean}
  */
 function messageLooksLikeGuests(messageText) {
-  const clean = String(messageText || '').replace(
-    /\b\d+\s*de\s*(enero|febrero|marzo|abril|mayo|junio|julio|agosto|septiembre|octubre|noviembre|diciembre)/gi,
-    ''
-  );
-  return /\b(\d+)\s*(personas|invitados|pax|inv)?\b/i.test(clean);
+  return extractGuestsFromMessage(messageText) !== null;
 }
 
 export const EVENTOS_RECOGIDA_DATOS = defineState({
