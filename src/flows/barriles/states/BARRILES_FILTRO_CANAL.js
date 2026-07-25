@@ -17,12 +17,13 @@ import {
   wantsBrowseOnlyClose
 } from '../../../logic/interruptions.js';
 import { getBrowseOnlyGoodbye } from '../../../views/templates.js';
+import { withAssistantFooter } from '../../../logic/flow-rails.js';
 import { matchKeywordIntent, rulesWebVsChat } from '../../../logic/keyword-intent.js';
 import { BARRILES_RECOGIDA_PRODUCTOS } from './BARRILES_RECOGIDA_PRODUCTOS.js';
 
-const SHORT_Q = `¿De *qué comuna* nos escribes y *para cuándo* lo quieres?
+const SHORT_Q = withAssistantFooter(`¿De *qué comuna* nos escribes y *para cuándo* lo quieres?
 
-Ejemplo: _"Providencia, para este sábado"_`;
+Ejemplo: _"Providencia, para este sábado"_`);
 
 // Burbuja 1: producto + web. Burbuja 2: pide datos (filtro de interés).
 const WELCOME_TEXTS = [
@@ -213,9 +214,13 @@ En la *web* encuentras sabores, fotos y precios, y puedes comprar cuando quieras
       };
     }
 
-    // "aquí" / "sigamos" / "ok" sin datos → re-preguntamos (evita caer al LLM)
+    // "aquí" / "sigamos" / "ok" / "después te confirmo…" sin datos → re-preguntamos
     if (/^(aqui|acá|aka|chat|whatsapp|sigamos|seguimos|dale|ok|okay|si|sí|claro)$/i.test(
       String(messageText || '').trim()
+    ) || (
+      /\bdespu[eé]s\b/i.test(messageText)
+      && /\b(confirmo|confirmar|te\s+(digo|aviso|paso))\b/i.test(messageText)
+      && /\b(comuna|fecha|cu[aá]ndo)\b/i.test(messageText)
     )) {
       return {
         success: true,

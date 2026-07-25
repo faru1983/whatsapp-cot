@@ -2,6 +2,13 @@
 // OBJETIVO: Detectar interrupciones en el chat (ruido, mirón, precio/carta).
 // Evita que saludos o "después" se clasifiquen como WEB/CHAT por error.
 // Lo usan decision-intent.js, engine.js y los filtros de canal (barriles/eventos).
+//
+// ORDEN CANÓNICO (engine + estados):
+// 1. Handoff explícito (NO / HUMANO / hablar con…)
+// 2. Mirón estricto (solo mirando / redes, no "después te confirmo")
+// 3. Precio / carta → tip + re-pregunta del dato pendiente
+// 4. Estado (validateAndProcess)
+// 5. Stall / FAQ acotada (máx. 1) / strikes → handoff hablado
 // ==============================================================================
 import {
   normalizeString,

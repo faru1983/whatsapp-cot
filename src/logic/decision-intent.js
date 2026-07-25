@@ -64,19 +64,16 @@ export async function resolveDecisionIntent({
   }
 
   if (fromKeywords) {
-    testLog(`decisión: keywords → ${fromKeywords} (opciones: ${labelsHint})`);
+    testLog(`decisión: keyword → ${fromKeywords} (opciones: ${labelsHint})`);
     return fromKeywords;
   }
 
-  // --- Ruido / cortesía sin elección → no llamar NLU (evita alucinaciones) ---
-  // Ej.: "gracias" no debe volverse EVENTOS solo porque el último mensaje habló de eventos.
   if (isDecisionNoise(messageText)) {
-    testLog(`decisión: ruido/cortesía ("${String(messageText).trim()}") → sin NLU → fallback engine`);
+    testLog(`decisión: miss → ruido/cortesía (sin NLU) → fallback engine`);
     return null;
   }
 
-  // --- Cajita 2: clasificador NLU (typos / sinónimos / frases naturales) ---
-  testLog(`decisión: keywords sin match → NLU (opciones: ${labelsHint})`);
+  testLog(`decisión: keyword miss → NLU (opciones: ${labelsHint})`);
   const fromAi = await classifyStepIntent({
     userMessage: messageText,
     stepQuestion,
@@ -86,9 +83,9 @@ export async function resolveDecisionIntent({
   });
 
   if (fromAi) {
-    testLog(`decisión: NLU → ${fromAi}`);
+    testLog(`decisión: nlu → ${fromAi}`);
   } else {
-    testLog(`decisión: NLU sin certeza → fallback engine (FAQ/IA/re-pregunta)`);
+    testLog(`decisión: miss → NLU sin certeza → fallback engine`);
   }
 
   return fromAi;

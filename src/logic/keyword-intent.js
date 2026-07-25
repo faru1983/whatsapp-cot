@@ -170,14 +170,14 @@ export function rulesConfirmarOModificar() {
   return [
     {
       label: 'MODIFICAR',
-      // Cubre barriles y eventos (agrega/agregar, quita/quitar, litraje, elimina…)
       test: ({ lower }) =>
-        /cambi|sacar|agrega|agregar|quitar|quita|elimina|modif|ajust|cantidad|litro|litraje|cóctel|coctel|producto|extra|otro/i.test(lower)
+        /cambi|sacar|agrega|agregar|quitar|quita|elimina|modif|ajust|cantidad|litro|litraje|\bextra\b|\botro\b/i.test(lower)
+        || /\b(cambiar|modificar|ajustar)\s+(el\s+)?(producto|sabor|coctel|cóctel|fecha|comuna|pedido)/i.test(lower)
     },
     {
       label: 'CONFIRMAR',
       test: ({ lower }) =>
-        /(si|sí|ok|perfecto|listo|dale|confirm|esta bien|está bien|todo bien|vamos|súper|super|correcto|excelente|genial|aprob|bueno)/i.test(lower)
+        /\b(si|sí|ok|perfecto|listo|dale|confirm|esta bien|está bien|todo bien|vamos|súper|super|correcto|excelente|genial|aprobado|aprob|bueno)\b/i.test(lower)
     }
   ];
 }
@@ -195,19 +195,25 @@ export function rulesConfirmarOModificar() {
 export function rulesMenuUnoDos({
   labelUno,
   labelDos,
-  extraUno = /1|coctel|cóctel|bebida|trago/i,
-  extraDos = /2|3|dato|fecha|ubicacion|ubicación/i
+  extraUno = /coctel|cóctel|bebida|trago/i,
+  extraDos = /dato|fecha|ubicacion|ubicación/i
 } = {}) {
   return [
     {
       label: labelUno,
-      // Mismo criterio histórico: "1" o palabras de cócteles
-      test: ({ raw }) => extraUno.test(raw)
+      test: ({ raw, trimmed }) => {
+        if (/^\s*1\s*$/.test(trimmed)) return true;
+        if (/\d{2,}/.test(trimmed)) return false;
+        return extraUno.test(raw);
+      }
     },
     {
       label: labelDos,
-      // "3" por compatibilidad histórica en router de modificación barriles
-      test: ({ raw }) => extraDos.test(raw)
+      test: ({ raw, trimmed }) => {
+        if (/^\s*[23]\s*$/.test(trimmed)) return true;
+        if (/\d{2,}/.test(trimmed)) return false;
+        return extraDos.test(raw);
+      }
     }
   ];
 }
@@ -312,19 +318,29 @@ export function rulesDispensadorOMuro() {
 export function rulesRouterIntencion() {
   return [
     {
-      label: 'BARRILES',
+      label: 'AMBAS',
       test: ({ lower }) =>
-        /\b(barril desechable|barriles desechables|barril portable|barril portables|barriles portable|barriles portables|desechable|desechables|bidon|bidones)\b/i.test(lower)
+        /\b(ambas|ambos|los dos|los 2|las dos|las 2)\b/i.test(lower)
+    },
+    {
+      label: 'MIRON',
+      test: ({ raw, trimmed }) => {
+        if (/^(no|nop|nope|nah)$/i.test(trimmed)) return false;
+        return isOnlyBrowsing(raw) || wantsInstagramOrSocial(raw);
+      }
     },
     {
       label: 'EVENTOS',
       test: ({ lower }) =>
-        /\b(servicio para eventos|evento|eventos|dispensador portatil|dispensador portátil|muro|matrimonio|matrimonios|cumplea[nñ]os)\b/i.test(lower)
+        /\b(servicio para eventos|para un evento|evento|eventos|dispensador portatil|dispensador portátil|muro|matrimonio|matrimonios|cumplea[nñ]os)\b/i.test(lower)
     },
     {
-      label: 'AMBAS',
-      test: ({ lower }) =>
-        /\b(ambas|ambos|los dos|los 2|las dos|las 2)\b/i.test(lower)
+      label: 'BARRILES',
+      test: ({ lower }) => {
+        const hasEventos = /\b(servicio para eventos|para un evento|evento|eventos|matrimonio|cumplea|dispensador|muro)\b/i.test(lower);
+        if (hasEventos) return false;
+        return /\b(barril|barriles|barril desechable|barriles desechables|desechable|desechables|bidon|bidones|para la casa|para el hogar|regalo|llevar)\b/i.test(lower);
+      }
     }
   ];
 }

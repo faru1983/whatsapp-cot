@@ -19,9 +19,19 @@ import { buildFaqCatalogContext, sanitizeCustomerFacingReply } from '../logic/ut
 import { isGreetingOrNoise, wantsExplicitHandoff } from '../logic/interruptions.js';
 import { getPendingFlowRequirement } from '../logic/flow-stall.js';
 import { isImagePart, isVideoPart, isMediaPart, assertImageExists } from '../logic/media.js';
-import { buildAdminSosBody } from '../views/templates.js';
+import { buildAdminSosBody, HANDOFF_CLIENT_REPLY, getBrowseOnlyGoodbye } from '../views/templates.js';
 import { FAQ_JSON_PATH } from './paths.js';
 import { enableTestDebug, testLog } from './debug-log.js';
+import {
+  getOnMissHint,
+  canUseFaqSidequest,
+  getFaqSidequestCount,
+  incrementFaqSidequest,
+  buildGuidedStepQuestion,
+  withoutAssistantFooter,
+  stepQuestionAfterIdentityBody
+} from '../logic/flow-rails.js';
+import { wantsBrowseOnlyClose } from '../logic/interruptions.js';
 
 const isMainModule = process.argv[1] === fileURLToPath(import.meta.url);
 
@@ -346,10 +356,10 @@ async function processMessageUnlocked(sessionId, messageText, options = {}) {
 
   /**
    * registerFlowStallStrike: Suma strike cuando el cliente no avanza el paso actual.
-   * Al llegar a SECURITY_MAX_CONSECUTIVE_ERRORS → mute + SOS sin mensaje al cliente.
+   * Al llegar a SECURITY_MAX_CONSECUTIVE_ERRORS → mute + SOS con mensaje al cliente.
    *
    * @param {string} reason - Motivo corto para logs/admin
-   * @returns {string|null|undefined} Respuesta al cliente si hubo SOS; null si silencio
+   * @returns {string|null|undefined} Respuesta al cliente si hubo SOS; null si aún no
    */
   const registerFlowStallStrike = (reason) => {
     session.consecutiveErrors = (session.consecutiveErrors || 0) + 1;
@@ -359,7 +369,7 @@ async function processMessageUnlocked(sessionId, messageText, options = {}) {
       return triggerSosMute(
         'ANTI-LOOP',
         'Varios mensajes seguidos sin avanzar el paso de cotización.',
-        null
+        HANDOFF_CLIENT_REPLY
       );
     }
     return null;
@@ -382,6 +392,18 @@ async function processMessageUnlocked(sessionId, messageText, options = {}) {
   }
 
   session.history.turns.push({ role: 'user', text: messageText });
+
+  // 2.5 Mirón en router (antes del estado, evita quemar FAQ/strikes en entrada Meta)
+  if (currentStateId === 'ESPERANDO_INTENCION' && wantsBrowseOnlyClose(messageText)) {
+    cliLog('router: mirón → cierre suave + mute');
+    session.isMuted = true;
+    session.silenciado_timestamp = Date.now();
+    session.currentState = 'CERRADO';
+    const goodbye = getBrowseOnlyGoodbye();
+    session.history.turns.push({ role: 'model', text: goodbye });
+    saveSession(sessionId, session);
+    return goodbye;
+  }
 
   let currentState = statesMap[currentStateId];
   cliLog(`paso actual: ${currentStateId}`);
@@ -420,8 +442,8 @@ async function processMessageUnlocked(sessionId, messageText, options = {}) {
       const isCurrentlyEventos = currentStateId.startsWith('EVENTOS_');
       const isCurrentlyBarriles = currentStateId.startsWith('BARRILES_');
       
-      const wantsBarriles = /(desechable|barril desechable|para la casa|para el hogar|llevarse)/i.test(messageText);
-      const wantsEventos = /(servicio para eventos|para un evento|evento|para mi matrimonio|dispensador port[aá]til|muro de cocteler[ií]a)/i.test(messageText) && !/sin evento/i.test(messageText);
+      const wantsBarriles = /(desechable|barril desechable|para la casa|para el hogar|llevarse|\bbarriles?\b)/i.test(messageText);
+      const wantsEventos = /(servicio para eventos|para un evento|para mi matrimonio|dispensador port[aá]til|muro de cocteler[ií]a|matrimonio|cumplea[nñ]os)/i.test(messageText) && !/sin evento/i.test(messageText);
 
       let switchIntent = false;
       if (isCurrentlyEventos && wantsBarriles && !wantsEventos) switchIntent = 'BARRILES';
@@ -466,9 +488,10 @@ async function processMessageUnlocked(sessionId, messageText, options = {}) {
 
   const pendingFlow = getPendingFlowRequirement(session, currentStateId);
   const flowAlreadyStalling = Boolean(pendingFlow && (session.consecutiveErrors || 0) > 0);
+  const faqSidequestAllowed = canUseFaqSidequest(session, pendingFlow);
 
   // Si ya hubo un strike y el paso sigue pendiente, no usamos FAQ: dejamos que el fallback cuente el strike
-  if (isQuestion && currentStateId !== 'CERRADO' && !flowAlreadyStalling) {
+  if (isQuestion && currentStateId !== 'CERRADO' && !flowAlreadyStalling && faqSidequestAllowed) {
     cliLog(`FAQ PRE-CHECK: Detectada posible pregunta en '${messageText}'`);
     const faqData = JSON.parse(fs.readFileSync(FAQ_JSON_PATH, 'utf8'));
     const faqResponse = await responderFAQ(messageText, faqData, {
@@ -487,14 +510,21 @@ async function processMessageUnlocked(sessionId, messageText, options = {}) {
 
     if (faqResponse !== 'NO_FAQ') {
       cliLog('FAQ PRE-CHECK: Match con FAQ → respondiendo antes de extraer datos');
-      session.consecutiveErrors = 0; // se reinicia por respuesta exitosa
+      if (pendingFlow) {
+        incrementFaqSidequest(session, pendingFlow);
+        cliLog(`FAQ sidequest (${pendingFlow}) → strikes sin reset`);
+      } else {
+        session.consecutiveErrors = 0;
+      }
 
       // Si promptQuestion es array (info + pregunta), usamos solo la última parte
       const questionText = lastPromptPart(resolvePromptQuestion(currentState, session));
       const shortQ = typeof currentState.shortQuestion === 'function' ? currentState.shortQuestion(session) : currentState.shortQuestion;
+      const onMissHint = getOnMissHint(currentStateId, session, pendingFlow);
       const finalQuestion = shortQ || questionText;
+      const guidedQuestion = buildGuidedStepQuestion(finalQuestion, onMissHint);
 
-      const reply = appendStepQuestionIfNeeded(sanitizeCustomerFacingReply(faqResponse), finalQuestion);
+      const reply = appendStepQuestionIfNeeded(sanitizeCustomerFacingReply(faqResponse), guidedQuestion);
       session.history.turns.push({ role: 'model', text: reply });
       saveSession(sessionId, session);
       return reply;
@@ -603,18 +633,22 @@ async function processMessageUnlocked(sessionId, messageText, options = {}) {
     const questionText = lastPromptPart(resolvePromptQuestion(currentState, session));
     const shortQ = typeof currentState.shortQuestion === 'function' ? currentState.shortQuestion(session) : currentState.shortQuestion;
     // Preferimos la pregunta corta para no re-pegar el prompt largo del estado
-    const finalQuestion = shortQ || questionText;
+    const onMissHint = getOnMissHint(currentStateId, session, pendingFlow);
+    const baseQuestion = shortQ || questionText;
+    const finalQuestion = buildGuidedStepQuestion(baseQuestion, onMissHint);
 
     /**
      * buildNoInfoReply: Plantilla fija cuando FAQ/IA no ayudan.
      * Si ya eligió Barriles/Eventos, no preguntamos "¿seguir con X?" (es redundante).
      */
     const buildNoInfoReply = () => {
+      const q = withoutAssistantFooter(finalQuestion);
+      const handoff = 'O escribe *NO* o *HUMANO* para hablar con alguien del equipo.';
       const hasPath = session.userIntent === 'BARRILES' || session.userIntent === 'EVENTOS';
       if (hasPath) {
-        return `Disculpa, soy un *asistente virtual* y no estoy seguro de cómo responder a eso. 😔\n\n${finalQuestion}\n\nO escribe *NO* o *HUMANO* para hablar con alguien del equipo.`;
+        return `Disculpa, soy un *asistente virtual* y no estoy seguro de cómo responder a eso. 😔\n\n${q}\n\n${handoff}`;
       }
-      return `Disculpa, soy un *asistente virtual* y no estoy seguro de cómo responder a eso. 😔\n\n¿Quieres seguir con tu cotización?\n\n${finalQuestion}\n\nO escribe *NO* o *HUMANO* para hablar con alguien del equipo.`;
+      return `Disculpa, soy un *asistente virtual* y no estoy seguro de cómo responder a eso. 😔\n\n¿Quieres seguir con tu cotización?\n\n${q}\n\n${handoff}`;
     };
 
     const trimmedMessage = messageText.trim();
@@ -635,7 +669,10 @@ async function processMessageUnlocked(sessionId, messageText, options = {}) {
     if (isGreetingOrNoise(trimmedMessage)) {
       cliLog('ruido/cortesía → re-pregunta fija (sin strike, sin IA)');
       reply = currentStateId === 'ESPERANDO_INTENCION'
-        ? `¡Hola! 🍸 Soy el *asistente virtual* de Cocktails on Tap.\n\n${finalQuestion}`
+        ? stepQuestionAfterIdentityBody(
+          '¡Hola! 🍸 Soy el *asistente virtual* de Cocktails on Tap.',
+          finalQuestion
+        )
         : `Disculpa, no te entendí bien 😊\nResponde con la palabra en *negrita* si puedes.\n\n${finalQuestion}`;
       session.history.turns.push({ role: 'model', text: reply });
       saveSession(sessionId, session);
@@ -660,7 +697,7 @@ async function processMessageUnlocked(sessionId, messageText, options = {}) {
         );
       }
 
-      reply = `Disculpa, soy un *asistente virtual* y estoy para ayudarte a cotizar 🍸\nResponde con la palabra en *negrita* si puedes.\n\n${finalQuestion}\n\nO escribe *NO* o *HUMANO* para hablar con alguien del equipo.`;
+      reply = `Disculpa, soy un *asistente virtual* y estoy para ayudarte a cotizar 🍸\nResponde con la palabra en *negrita* si puedes.\n\n${withoutAssistantFooter(finalQuestion)}\n\nO escribe *NO* o *HUMANO* para hablar con alguien del equipo.`;
       session.history.turns.push({ role: 'model', text: reply });
       saveSession(sessionId, session);
       return reply;
@@ -668,12 +705,16 @@ async function processMessageUnlocked(sessionId, messageText, options = {}) {
 
     // 4.3 FAQ (precios, despacho, ingredientes oficiales…)
     let faqResponse = 'NO_FAQ';
-    cliLog('FAQ: consultando faq.json + catálogo/despachos (datos.json) con IA...');
-    const faqData = JSON.parse(fs.readFileSync(FAQ_JSON_PATH, 'utf8'));
-    faqResponse = await responderFAQ(messageText, faqData, {
-      userIntent: session.userIntent,
-      eventoFormato: session.eventoFormato
-    });
+    if (faqSidequestAllowed) {
+      cliLog('FAQ: consultando faq.json + catálogo/despachos (datos.json) con IA...');
+      const faqData = JSON.parse(fs.readFileSync(FAQ_JSON_PATH, 'utf8'));
+      faqResponse = await responderFAQ(messageText, faqData, {
+        userIntent: session.userIntent,
+        eventoFormato: session.eventoFormato
+      });
+    } else {
+      cliLog(`FAQ: sidequest agotado para "${pendingFlow}" → plantilla on-miss`);
+    }
 
     if (faqResponse === 'SOS_HANDOFF') {
       cliLog('FAQ: Match con SOS_HANDOFF (frustración o fuera de alcance) → handoff inmediato');
@@ -685,9 +726,13 @@ async function processMessageUnlocked(sessionId, messageText, options = {}) {
     }
 
     if (faqResponse !== 'NO_FAQ') {
-      // FAQ OK sin bloqueo previo: ayudamos y reseteamos strikes
-      session.consecutiveErrors = 0;
-      cliLog('FAQ: match → respondiendo (strikes en 0)');
+      if (pendingFlow) {
+        incrementFaqSidequest(session, pendingFlow);
+        cliLog(`FAQ: match con dato pendiente (${pendingFlow}) → strikes sin reset`);
+      } else {
+        session.consecutiveErrors = 0;
+        cliLog('FAQ: match → respondiendo (strikes en 0)');
+      }
       reply = appendStepQuestionIfNeeded(sanitizeCustomerFacingReply(faqResponse), finalQuestion);
       session.history.turns.push({ role: 'model', text: reply });
       saveSession(sessionId, session);
@@ -698,20 +743,21 @@ async function processMessageUnlocked(sessionId, messageText, options = {}) {
     session.consecutiveErrors = (session.consecutiveErrors || 0) + 1;
     cliLog(`sin ayuda clara → strike ${session.consecutiveErrors}/${stallThreshold}`);
 
-    // Anti-loop: umbral SECURITY_MAX_CONSECUTIVE_ERRORS → mute + SOS (sin mensaje al cliente)
+    // Anti-loop: umbral SECURITY_MAX_CONSECUTIVE_ERRORS → mute + SOS con mensaje al cliente
     if (session.consecutiveErrors >= stallThreshold) {
       return triggerSosMute(
         'ANTI-LOOP',
         'Varias respuestas seguidas que el bot no entendió.',
-        null
+        HANDOFF_CLIENT_REPLY
       );
     }
 
-    // ¿Parece una pregunta real? Intentamos LLM ultra-corto; si no, plantilla fija
+    // ¿Parece una pregunta real? LLM corto solo sin dato pendiente o con sidequest disponible
     const looksLikeRealQuestion = /\?/.test(trimmedMessage)
       || /\b(como|cómo|donde|dónde|cuando|cuándo|quien|quién|porque|por\s*qu[eé]|que\s+es|qué\s+es)\b/i.test(trimmedMessage);
+    const allowShortLlm = looksLikeRealQuestion && (!pendingFlow || faqSidequestAllowed);
 
-    if (looksLikeRealQuestion) {
+    if (allowShortLlm) {
       cliLog('FAQ: NO_FAQ → LLM corto disciplinado');
       let systemInstruction = readPrompt();
       if (currentState.aiContextPrompt) {
@@ -754,8 +800,145 @@ REGLA ANTI-JERGA: NUNCA digas "DATOS OFICIALES", "FAQ" ni "datos.json".`;
 let rl = null;
 
 /**
+ * formatCartSummary: Resumen corto del carrito para el panel [TEST].
+ *
+ * @param {object} session
+ * @returns {string}
+ */
+function formatCartSummary(session) {
+  const products = session.orderBuilder?.products;
+  if (!products || Object.keys(products).length === 0) return '(vacío)';
+  return Object.entries(products)
+    .map(([k, v]) => `${k}=${v}`)
+    .join(', ');
+}
+
+/**
+ * formatCliSnapshotLines: Líneas del panel interno (sin imprimir).
+ *
+ * @param {object} session
+ * @param {object} [opts]
+ * @param {string} [opts.stateBefore]
+ * @returns {string[]}
+ */
+function formatCliSnapshotLines(session, opts = {}) {
+  const stateId = session.currentState || '(sin estado)';
+  const pending = getPendingFlowRequirement(session, stateId);
+  const strikes = session.consecutiveErrors || 0;
+  const threshold = maxConsecutiveErrors || 2;
+  const faqUsed = pending ? getFaqSidequestCount(session, pending) : 0;
+  const onMiss = pending ? getOnMissHint(stateId, session, pending) : null;
+  const cd = session.orderBuilder?.clientData;
+  const lines = [];
+
+  if (opts.stateBefore && opts.stateBefore !== stateId) {
+    lines.push(`Estado: ${opts.stateBefore} → ${stateId}`);
+  } else {
+    lines.push(`Estado: ${stateId}`);
+  }
+  lines.push(`Mute: ${session.isMuted ? 'SÍ (bot silenciado)' : 'no'}`);
+  lines.push(`Intención: ${session.userIntent || '(sin elegir)'}`);
+  lines.push(`Strikes: ${strikes}/${threshold}${strikes >= threshold ? ' → SOS/handoff' : ''}`);
+  lines.push(`Dato pendiente (stall): ${pending || '(ninguno — paso libre o ya completo)'}`);
+  if (pending) {
+    lines.push(`FAQ sidequest (${pending}): ${faqUsed}/1 usada${faqUsed >= 1 ? ' (agotada → solo plantilla)' : ''}`);
+    if (onMiss) lines.push(`Hint on-miss: ${onMiss}`);
+  }
+  if (session.intentSwitchCount) {
+    lines.push(`Cambios Barriles↔Eventos: ${session.intentSwitchCount}/${maxIntentSwitches}`);
+  }
+  if (session.userIntent === 'EVENTOS' || stateId.startsWith('EVENTOS_')) {
+    lines.push(`Evento: invitados=${session.guests || '—'} | fecha=${session.date || '—'} | comuna=${session.location || '—'} | formato=${session.eventoFormato || '—'}`);
+    if (session.celebrationType) lines.push(`Celebración: ${session.celebrationType}`);
+  }
+  if (session.userIntent === 'BARRILES' || stateId.startsWith('BARRILES_')) {
+    lines.push(`Entrega: fecha=${cd?.date || '—'} | comuna=${cd?.location || '—'}`);
+  }
+  if (session.orderBuilder?.products) {
+    lines.push(`Carrito: ${formatCartSummary(session)}`);
+  }
+  if (opts.wasMuted && session.isMuted) {
+    lines.push('Mensaje ignorado (sigue en mute). Usa /unmute o /reset.');
+  } else if (!opts.wasMuted && session.isMuted) {
+    lines.push('MUTE recién activado. Los siguientes mensajes se ignoran hasta /unmute o /reset.');
+  } else if (opts.hadReply === false && !session.isMuted) {
+    lines.push('Sin respuesta del bot en este turno.');
+  }
+  return lines;
+}
+
+/**
+ * printCliStartupIntro: Un solo bloque de bienvenida + panel inicial.
+ *
+ * @param {object} session
+ */
+function printCliStartupIntro(session) {
+  const snapshot = formatCliSnapshotLines(session).map((l) => `  ${l}`).join('\n');
+  console.log(`
+─────────────────────────────────────────
+  Simulador Local — WhatsApp Lite Bot
+  Rails: estado · stall · strikes · FAQ
+
+  Escribe como cliente. Tras cada mensaje verás
+  solo el estado; el panel completo: /status
+
+  Comandos: /status /help /reset /mute /unmute /exit
+
+  Panel interno (inicio):
+${snapshot}
+─────────────────────────────────────────
+`);
+}
+
+/**
+ * printCliSessionSnapshot: Panel interno bajo demanda (/status).
+ *
+ * @param {object} session
+ * @param {object} [opts]
+ */
+function printCliSessionSnapshot(session, opts = {}) {
+  const lines = formatCliSnapshotLines(session, opts);
+  console.log('\n────────── PANEL INTERNO [TEST] ──────────');
+  for (const line of lines) cliLog(line);
+  cliLog('Comandos: /status /help /reset /mute /unmute /exit');
+  console.log('─────────────────────────────────────────\n');
+}
+
+/**
+ * printCliHelp: Guía corta del simulador y ejemplos para probar rails.
+ */
+function printCliHelp() {
+  console.log(`
+── Ayuda del simulador ──────────────────────
+Comandos:
+  /status  — panel interno sin enviar mensaje
+  /help    — esta ayuda
+  /reset   — borrar sesión
+  /mute    — silenciar a mano
+  /unmute  — reactivar
+  /exit    — salir
+
+Qué mirar en el PANEL INTERNO:
+  • Estado          → paso actual de la máquina
+  • Dato pendiente  → qué falta para avanzar (stall)
+  • Strikes         → fallos seguidos; a ${maxConsecutiveErrors || 2} → handoff hablado
+  • FAQ sidequest   → máx. 1 duda lateral por dato pendiente
+  • Mute            → bot callado (mirón / SOS / humano)
+
+Ejemplos para probar:
+  barriles
+  solo estoy mirando
+  ¡Hola! Quiero más información
+  eventos → van a la serena? → texto raro
+  desechables → después te confirmo la comuna
+  HUMANO
+─────────────────────────────────────────────
+`);
+}
+
+/**
  * cliChat: Bucle del simulador local.
- * Tras cada mensaje imprime feedback [TEST] uniforme (mute, estado, IA, etc.).
+ * Tras cada mensaje imprime la respuesta del bot + panel interno completo.
  */
 function cliChat() {
   const sessionId = 'cli-test@s.whatsapp.net';
@@ -767,9 +950,23 @@ function cliChat() {
     });
   }
 
-  rl.question('\nTú: ', async (message) => {
-    if (message.toLowerCase() === '/exit') {
+  rl.question('Tú: ', async (message) => {
+    const cmd = message.trim().toLowerCase();
+
+    if (cmd === '/exit') {
       rl.close();
+      return;
+    }
+
+    // Comandos de inspección: no pasan por processMessage
+    if (cmd === '/help') {
+      printCliHelp();
+      cliChat();
+      return;
+    }
+    if (cmd === '/status') {
+      printCliSessionSnapshot(getSession(sessionId), { hadReply: true });
+      cliChat();
       return;
     }
 
@@ -780,11 +977,8 @@ function cliChat() {
     const response = await processMessage(sessionId, message);
 
     const sessionAfter = getSession(sessionId);
-    const isMutedNow = !!sessionAfter.isMuted;
-    const stateAfter = sessionAfter.currentState || '(sin estado)';
 
     // --- Respuesta del bot (si hubo) ---
-    // Puede ser string, imagen (img) o array mixto (carta/foto + pregunta, etc.)
     if (response) {
       const replies = Array.isArray(response) ? response : [response];
       for (let i = 0; i < replies.length; i++) {
@@ -793,7 +987,6 @@ function cliChat() {
         if (typeof part === 'string') {
           console.log(`\n${label}: ${part}`);
         } else if (isImagePart(part)) {
-          // En el simulador no hay WhatsApp: mostramos el nombre del archivo
           console.log(`\n${label}: [IMAGEN] ${part.file}`);
           if (part.caption) console.log(part.caption);
         } else if (isVideoPart(part)) {
@@ -803,44 +996,32 @@ function cliChat() {
       }
     }
 
-    // --- Feedback [TEST] siempre, mismo formato ---
-    console.log(''); // línea en blanco antes del bloque de debug
-
-    const cmd = message.trim().toLowerCase();
-
-    // /reset: mensaje explícito para no confundir "estado viejo → limpio" con un salto de flujo
     if (cmd === '/reset') {
       cliLog(`/reset: memoria borrada (antes: ${stateBefore})`);
-      cliLog(`Estado actual: ${stateAfter}`);
-    } else if (!wasMuted && isMutedNow) {
+    }
+
+    // Feedback corto por turno (el panel completo solo al inicio o con /status)
+    const stateAfter = sessionAfter.currentState || '(sin estado)';
+    const isMutedNow = !!sessionAfter.isMuted;
+    if (!wasMuted && isMutedNow) {
       cliLog(`MUTE activado → estado: ${stateAfter}`);
       cliLog(`Los siguientes mensajes se ignoran. Usa /unmute o /reset.`);
     } else if (wasMuted && isMutedNow) {
-      cliLog(`MUTE activo — mensaje ignorado.`);
-      cliLog(`Estado: ${stateAfter}. Usa /unmute o /reset.`);
+      cliLog(`MUTE activo — mensaje ignorado. Estado: ${stateAfter}`);
     } else if (wasMuted && !isMutedNow) {
-      cliLog(`MUTE desactivado. Bot reactivado.`);
-      cliLog(`Estado: ${stateAfter}`);
-    } else if (!response) {
-      cliLog(`Sin respuesta del bot.`);
-      cliLog(`Estado: ${stateAfter}`);
+      cliLog(`MUTE desactivado. Estado: ${stateAfter}`);
     } else if (stateBefore !== stateAfter) {
       cliLog(`Estado: ${stateBefore} → ${stateAfter}`);
     } else {
       cliLog(`Estado: ${stateAfter}`);
     }
+    console.log('');
 
     cliChat();
   });
 }
 
 if (isMainModule) {
-  console.log('\n─────────────────────────────────────────');
-  console.log('  Simulador Local — WhatsApp Lite Bot');
-  console.log('  /reset   — borrar memoria');
-  console.log('  /unmute  — reactivar si quedó en mute');
-  console.log('  /mute    — silenciar a mano');
-  console.log('  /exit    — cerrar el programa');
-  console.log('─────────────────────────────────────────');
+  printCliStartupIntro(getSession('cli-test@s.whatsapp.net'));
   cliChat();
 }

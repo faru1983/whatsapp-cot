@@ -126,6 +126,26 @@ export function asksEventServiceFormatQuestion(messageText) {
 }
 
 /**
+ * asksCoverageAreaQuestion: ¿Pregunta si atendemos una ciudad/comuna (no está dando su dato)?
+ * Ej.: "¿van a la serena?", "¿llegan a concepción?". Debe ir a FAQ, no extraer comuna.
+ *
+ * @param {string} messageText
+ * @returns {boolean}
+ */
+export function asksCoverageAreaQuestion(messageText) {
+  const trimmed = String(messageText || '').trim();
+  if (!trimmed) return false;
+  const lower = trimmed.toLowerCase();
+
+  const looksLikeQuestion = /\?/.test(trimmed)
+    || /\b(van|llegan|atienden|despachan|hacen|realizan|trabajan|pueden)\b/i.test(lower);
+  if (!looksLikeQuestion) return false;
+
+  return /\b(van\s+a|llegan\s+a|atienden\s+en|despachan\s+a|hacen\s+en|trabajan\s+en)\b/i.test(lower)
+    || /\b(serena|concepci[oó]n|valpara[ií]so|vi[nñ]a|temuco|antofagasta|iquique|fuera\s+de\s+santiago|region|regi[oó]n)\b/i.test(lower);
+}
+
+/**
  * applyEventDataFromMessage: Extrae celebración, comuna, fecha, invitados y guarda en sesión.
  *
  * @param {string} messageText

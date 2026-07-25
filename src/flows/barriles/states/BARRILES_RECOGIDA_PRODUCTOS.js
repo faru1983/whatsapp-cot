@@ -18,6 +18,7 @@ import { wantsAdvanceProductsOrder, isOnlyAdvanceProductsOrder } from '../../../
 import { extractProductsWithAI } from '../../../core/llm.js';
 import { OrderBuilder } from '../../../logic/order-builder.js';
 import { getDoubtClarificationTemplate, getBrowseOnlyGoodbye } from '../../../views/templates.js';
+import { withAssistantFooter } from '../../../logic/flow-rails.js';
 
 const AI_PROMPT = `[SISTEMA - ESTADO: CATÁLOGO (FALLBACK)]
 El cliente debe indicar sabor y cantidad de Barriles Desechables (5L).
@@ -89,7 +90,7 @@ export const BARRILES_RECOGIDA_PRODUCTOS = defineState({
   id: 'BARRILES_RECOGIDA_PRODUCTOS',
   // Al entrar: solo pedimos sabor/cantidad. *seguimos* se ofrece cuando ya hay carrito.
   promptQuestion: () => `Dime *qué sabor* y *cuántos* barriles (ej. *1 mojito y 1 sangría*).`,
-  shortQuestion: `¿Agregas otro, quitas alguno, o *seguimos*?`,
+  shortQuestion: withAssistantFooter(`¿Agregas otro, quitas alguno, o *seguimos*?`),
   aiPrompt: AI_PROMPT,
 
   async validateAndProcess(messageText, session) {

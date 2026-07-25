@@ -3,18 +3,18 @@
 // Textos, prompt IA y router de intención en un solo archivo.
 // ==============================================================================
 import { defineState } from '../../../logic/compile-state.js';
-import { matchKeywordIntent, rulesRouterIntencion, rulesWebVsChat } from '../../../logic/keyword-intent.js';
+import { rulesRouterIntencion, rulesWebVsChat } from '../../../logic/keyword-intent.js';
 import { resolveDecisionIntent } from '../../../logic/decision-intent.js';
 import { asksPriceOrCatalog } from '../../../logic/interruptions.js';
+import { getBrowseOnlyGoodbye } from '../../../views/templates.js';
+import { withAssistantFooter, ASSISTANT_FOOTER } from '../../../logic/flow-rails.js';
 
 const WELCOME = `¡Hola! Somos *Cocktails on Tap* 🍸
 Soy un *asistente virtual*: si me respondes con las palabras en *negrita*, te oriento más rápido con precios e info.
 
 ¿Buscas *Barriles Desechables* o *Servicio para Eventos*?`;
 
-const SHORT_Q = `Para seguir, ¿buscas *Barriles Desechables* o *Servicio para Eventos*?
-
-_(También puedes escribir *NO* para hablar con una persona.)_`;
+const SHORT_Q = withAssistantFooter(`Para seguir, ¿buscas *Barriles Desechables* o *Servicio para Eventos*?`);
 
 /**
  * Respuesta al CTA de Instagram "más información" (mensaje predefinido del anuncio).
@@ -24,7 +24,7 @@ const AD_INFO_REPLY = `¡Hola! Soy un *asistente virtual* de *Cocktails on Tap* 
 
 ¿Buscas *Barriles Desechables* o *Servicio para Eventos*?
 
-_(También puedes escribir *NO* para hablar con una persona.)_`;
+${ASSISTANT_FOOTER}`;
 
 const MENSAJE_AMBAS = [
   `🍸 ¡Perfecto! Te doy un resumen de ambos:
@@ -92,23 +92,7 @@ export const ESPERANDO_INTENCION = defineState({
   },
 
   async validateAndProcess(messageText, session) {
-    const intent = matchKeywordIntent(messageText, rulesRouterIntencion(), {
-      log: true,
-      logContext: 'router'
-    });
-
-    if (intent === 'BARRILES') {
-      session.userIntent = 'BARRILES';
-      return { success: true, nextState: 'BARRILES_FILTRO_CANAL' };
-    }
-
-    if (intent === 'EVENTOS') {
-      session.userIntent = 'EVENTOS';
-      return { success: true, nextState: 'EVENTOS_RECOGIDA_DATOS' };
-    }
-
     // CTA Instagram "más información" (solo al inicio, sin producto elegido aún).
-    // Barriles/Eventos ya se resolvieron arriba si el anuncio venía con esas keywords.
     if (!session.userIntent && isInstagramInfoCta(messageText)) {
       return {
         success: true,
@@ -117,13 +101,48 @@ export const ESPERANDO_INTENCION = defineState({
       };
     }
 
-    if (intent === 'AMBAS' && !session.hasAskedAmbas) {
-      session.hasAskedAmbas = true;
-      return {
-        success: true,
-        nextState: 'ESPERANDO_INTENCION',
-        customReplies: MENSAJE_AMBAS
-      };
+    if (!session.hasAskedAmbas) {
+      const choice = await resolveDecisionIntent({
+        messageText,
+        session,
+        stepQuestion: SHORT_Q,
+        allowedLabels: ['BARRILES', 'EVENTOS', 'AMBAS', 'MIRON'],
+        keywordRules: rulesRouterIntencion(),
+        labelHints: {
+          BARRILES: 'Quiere Barriles Desechables para casa/regalo (no servicio de evento con montaje).',
+          EVENTOS: 'Quiere Servicio para Eventos (matrimonio, cumpleaños, dispensador, muro).',
+          AMBAS: 'Quiere conocer ambos productos antes de elegir.',
+          MIRON: 'Solo está mirando / no quiere cotizar ahora / después sin intención de compra.'
+        }
+      });
+
+      if (choice === 'MIRON') {
+        return {
+          success: true,
+          nextState: 'CERRADO',
+          customReply: getBrowseOnlyGoodbye(),
+          mute: true
+        };
+      }
+
+      if (choice === 'BARRILES') {
+        session.userIntent = 'BARRILES';
+        return { success: true, nextState: 'BARRILES_FILTRO_CANAL' };
+      }
+
+      if (choice === 'EVENTOS') {
+        session.userIntent = 'EVENTOS';
+        return { success: true, nextState: 'EVENTOS_RECOGIDA_DATOS' };
+      }
+
+      if (choice === 'AMBAS' && !session.hasAskedAmbas) {
+        session.hasAskedAmbas = true;
+        return {
+          success: true,
+          nextState: 'ESPERANDO_INTENCION',
+          customReplies: MENSAJE_AMBAS
+        };
+      }
     }
 
     if (session.hasAskedAmbas) {

@@ -4,8 +4,9 @@
 import { defineState } from '../../../logic/compile-state.js';
 import { resolveDecisionIntent } from '../../../logic/decision-intent.js';
 import { rulesMenuUnoDos } from '../../../logic/keyword-intent.js';
+import { withAssistantFooter } from '../../../logic/flow-rails.js';
 
-const SHORT_Q = `¿Responde 1 para cócteles o 2 para datos?`;
+const SHORT_Q = withAssistantFooter(`¿Responde *1* para cócteles o *2* para datos?`);
 
 const AI_PROMPT = `[SISTEMA - ESTADO: MODIFICAR PEDIDO]
 Indica responder *1* (cócteles) o *2* (datos). Máximo 2 frases.`;

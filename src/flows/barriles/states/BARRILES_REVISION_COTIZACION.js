@@ -7,8 +7,9 @@ import { OrderBuilder } from '../../../logic/order-builder.js';
 import { resolveDecisionIntent } from '../../../logic/decision-intent.js';
 import { rulesConfirmarOModificar } from '../../../logic/keyword-intent.js';
 import { getQuotationTemplate, buildAdminBarrilesOrderBody } from '../../../views/templates.js';
+import { withAssistantFooter } from '../../../logic/flow-rails.js';
 
-const SHORT_Q = `¿Te parece bien esta cotización? Escribe *ok* para confirmarla, o dime qué cambiar.`;
+const SHORT_Q = withAssistantFooter(`¿Te parece bien esta cotización? Escribe *ok* para confirmarla, o dime qué cambiar.`);
 
 const AI_PROMPT = `[SISTEMA - ESTADO: REVISIÓN COTIZACIÓN BARRILES]
 Resuelve dudas breves de precio/despacho. Cierra pidiendo *ok* para confirmar o que diga qué cambiar.`;

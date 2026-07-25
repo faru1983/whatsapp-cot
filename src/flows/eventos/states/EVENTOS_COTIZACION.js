@@ -15,8 +15,9 @@ import {
   formatEventCartSummary,
   buildEventQuoteFromSession
 } from '../../../logic/eventos-helpers.js';
+import { withAssistantFooter } from '../../../logic/flow-rails.js';
 
-const SHORT_Q = `Si está bien, escribe *ok*. Si quieres cambiar algo, escribe *modificar*.`;
+const SHORT_Q = withAssistantFooter(`Si está bien, escribe *ok*. Si quieres cambiar algo, escribe *modificar*.`);
 
 const AI_PROMPT = `[SISTEMA - ESTADO: REVISIÓN DE COTIZACIÓN DE EVENTO]
 El cliente ya recibió una cotización generada por el sistema (precios oficiales).

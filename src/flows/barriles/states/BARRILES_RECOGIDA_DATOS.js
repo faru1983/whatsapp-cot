@@ -4,9 +4,10 @@
 // ==============================================================================
 import { defineState } from '../../../logic/compile-state.js';
 import { parseClientName, parseDate, findLocationByFuzzyMatch } from '../../../logic/utils.js';
+import { withAssistantFooter } from '../../../logic/flow-rails.js';
 
-const SHORT_Q = `¿Me pasas la *fecha* y *comuna* de entrega?
-Ejemplo: _"Para este sábado en Providencia"_`;
+const SHORT_Q = withAssistantFooter(`¿Me pasas la *fecha* y *comuna* de entrega?
+Ejemplo: _"Para este sábado en Providencia"_`);
 
 const AI_PROMPT = `[SISTEMA - ESTADO: DATOS DE DESPACHO]
 Faltan fecha y/o comuna para Barriles Desechables (o el cliente quiere corregirlas).

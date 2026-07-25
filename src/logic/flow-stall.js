@@ -35,8 +35,30 @@ export function getPendingFlowRequirement(session, stateId) {
       return hasProducts ? null : 'products';
     }
 
+    case 'BARRILES_RECOGIDA_DATOS': {
+      const cd = session.orderBuilder?.clientData;
+      if (cd?.date && cd?.location) return null;
+      return 'client_data';
+    }
+
     case 'EVENTOS_ELECCION_FORMATO':
       return session.eventoFormato ? null : 'format';
+
+    case 'EVENTOS_INTRO_MENU':
+      return 'continue';
+
+    case 'EVENTOS_ELECCION_MENU': {
+      const products = session.orderBuilder?.products;
+      const hasProducts = products && Object.keys(products).length > 0;
+      return hasProducts ? null : 'cart';
+    }
+
+    case 'EVENTOS_COTIZACION':
+    case 'BARRILES_REVISION_COTIZACION':
+      return 'confirm_quote';
+
+    case 'BARRILES_ROUTER_MODIFICACION':
+      return 'mod_choice';
 
     default:
       return null;

@@ -184,6 +184,24 @@ async function runCase(name, steps) {
 }
 
 try {
+  await runCase('Ruido router sin repetir menú', [
+    {
+      input: 'hola',
+      expectState: 'ESPERANDO_INTENCION',
+      expectMuted: false,
+      expectIncludes: ['asistente virtual', 'Barriles Desechables']
+    }
+  ]);
+
+  // Cuenta cuántas veces aparece la pregunta del menú (debe ser 1, no 2+)
+  resetSession(SESSION_ID);
+  const holaReply = await processMessage(SESSION_ID, 'hola');
+  const holaText = replyToText(holaReply);
+  const menuMatches = (holaText.match(/barriles desechables/gi) || []).length;
+  assert(menuMatches <= 2, `saludo "hola" no repite menú (${menuMatches} menciones de Barriles Desechables)`);
+  const assistantMentions = (holaText.match(/asistente virtual/gi) || []).length;
+  assert(assistantMentions === 1, `saludo "hola" menciona asistente virtual una sola vez (tiene ${assistantMentions})`);
+
   await runCase('Ruido router', [
     {
       input: 'holi',
@@ -217,6 +235,33 @@ try {
       expectState: 'ESPERANDO_INTENCION',
       expectMuted: false,
       expectIncludes: ['Barriles Desechables']
+    }
+  ]);
+
+  await runCase('Barriles keyword barriles solo', [
+    {
+      input: 'barriles',
+      expectState: 'BARRILES_FILTRO_CANAL',
+      expectMuted: false
+    }
+  ]);
+
+  await runCase('Mirón en router', [
+    {
+      input: 'solo estoy mirando',
+      expectState: 'CERRADO',
+      expectMuted: true,
+      expectIncludes: ['Cuando quieras cotizar']
+    }
+  ]);
+
+  await runCase('Después te confirmo no es mirón en filtro', [
+    { input: 'desechables', expectState: 'BARRILES_FILTRO_CANAL' },
+    {
+      input: 'después te confirmo la comuna',
+      expectState: 'BARRILES_FILTRO_CANAL',
+      expectMuted: false,
+      expectIncludes: ['comuna', 'cuándo']
     }
   ]);
 
@@ -442,7 +487,22 @@ try {
     }
   ]);
 
-  await runCase('Anti-loop eventos: FAQ no alarga charla si faltan invitados', [
+  await runCase('Anti-loop conversacional con 2 strikes', [
+    {
+      input: 'calentamiento global',
+      expectState: 'ESPERANDO_INTENCION',
+      expectMuted: false,
+      expectIncludes: ['asistente virtual', 'no estoy seguro']
+    },
+    {
+      input: 'segunda pregunta off topic',
+      expectState: 'CERRADO',
+      expectMuted: true,
+      expectIncludes: ['paso con alguien del equipo']
+    }
+  ]);
+
+  await runCase('Anti-loop eventos handoff hablado', [
     {
       input: 'eventos',
       expectState: 'EVENTOS_RECOGIDA_DATOS'
@@ -457,21 +517,8 @@ try {
       input: 'se pueden comprar?',
       expectState: 'CERRADO',
       expectMuted: true,
+      expectIncludes: ['paso con alguien del equipo'],
       expectNotIncludes: ['cotizar y comprar', 'vendemos los dispensadores']
-    }
-  ]);
-
-  await runCase('Anti-loop conversacional con 2 strikes', [
-    {
-      input: 'calentamiento global',
-      expectState: 'ESPERANDO_INTENCION',
-      expectMuted: false,
-      expectIncludes: ['asistente virtual', 'no estoy seguro']
-    },
-    {
-      input: 'segunda pregunta off topic',
-      expectState: 'CERRADO',
-      expectMuted: true
     }
   ]);
 } catch (err) {

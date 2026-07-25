@@ -493,19 +493,30 @@ export function isOnlyBrowsing(messageText) {
 		return true;
 	}
 
-	// Rechazo explícito / "después" / no lo tomará
-	if (/\b(no\s+gracias|gracias\s+no|no\s+quiero(\s+cotiz)?|no\s+deseo|no\s+me\s+interesa|no\s+lo\s+tomar[eé]|por\s+ahora\s+no|ahora\s+no|despu[eé]s|luego|en\s+otro\s+momento|nada|cancelar)\b/i.test(lower)) {
+	// Rechazo explícito / no lo tomará (sin "después" suelto en frases de cotización)
+	if (/\b(no\s+gracias|gracias\s+no|no\s+quiero(\s+cotiz)?|no\s+deseo|no\s+me\s+interesa|no\s+lo\s+tomar[eé]|por\s+ahora\s+no|ahora\s+no|nada|cancelar)\b/i.test(lower)) {
 		return true;
 	}
 
-	// "Lo tendré presente", "lo tengo presente", "para agosto/más adelante"
+	// "Después" / "luego" solo como palabra suelta = mirón (no en "después te confirmo la comuna")
+	if (/^(despu[eé]s|luego|en\s+otro\s+momento)(\s+gracias)?[.!]?$/i.test(trimmed)) {
+		return true;
+	}
+	if (/\bdespu[eé]s\b/i.test(lower)) {
+		if (/\b(confirmo|confirmar|te\s+(digo|aviso|paso)|comuna|fecha|datos|cotiz|quiero|necesito)\b/i.test(lower)) {
+			return false;
+		}
+	}
+
+	// "Lo tendré presente", "lo tengo presente", "para más adelante"
 	if (/\b(lo\s+tendr[eé]\s+presente|lo\s+tengo\s+presente|tendr[eé]\s+presente|m[aá]s\s+adelante|en\s+el\s+futuro)\b/i.test(lower)) {
 		return true;
 	}
-	// Mes futuro sin pedir cotizar ahora (ej. "para agosto", "en diciembre quizás")
-	if (/\b(para|en)\s+(enero|febrero|marzo|abril|mayo|junio|julio|agosto|septiembre|octubre|noviembre|diciembre)\b/i.test(lower)
-		&& !/\b(cotiz|quiero|necesito|pedido|comprar|agendar)\b/i.test(lower)) {
-		return true;
+	// Mes futuro solo con señal de mirón (ej. "lo tendré presente para agosto")
+	if (/\b(para|en)\s+(enero|febrero|marzo|abril|mayo|junio|julio|agosto|septiembre|octubre|noviembre|diciembre)\b/i.test(lower)) {
+		if (/\b(lo\s+tendr[eé]\s+presente|lo\s+tengo\s+presente|solo\s+mir|mirando|quiz[aá]s|tal\s+vez)\b/i.test(lower)) {
+			return true;
+		}
 	}
 
 	return false;
@@ -519,7 +530,7 @@ export function isOnlyBrowsing(messageText) {
  * @returns {boolean}
  */
 export function wantsInstagramOrSocial(messageText) {
-	return /\b(instagram|insta|\big\b|redes?|segu(ir|irme|irnos)|historia|historias|video|videos)\b/i.test(
+	return /\b(instagram|insta|\big\b|redes?|segu(ir|irme|irnos)|historia|historias)\b/i.test(
 		String(messageText || '').toLowerCase()
 	);
 }

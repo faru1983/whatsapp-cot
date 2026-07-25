@@ -9,8 +9,9 @@ import { resolveDecisionIntent } from '../../../logic/decision-intent.js';
 import { rulesConfirmarOCorregirDatos } from '../../../logic/keyword-intent.js';
 import { applyEventDataFromMessage } from '../../../logic/eventos-helpers.js';
 import { img } from '../../../logic/media.js';
+import { withAssistantFooter } from '../../../logic/flow-rails.js';
 
-const SHORT_Q = `¿Todo bien? Escribe *ok* para continuar o corrige un dato.`;
+const SHORT_Q = withAssistantFooter(`¿Todo bien? Escribe *ok* para continuar o corrige un dato.`);
 
 const AI_PROMPT = `[SISTEMA - ESTADO: CONFIRMAR DATOS DEL EVENTO]
 El cliente ya tiene al menos la cantidad de invitados y recibió un resumen (celebración/fecha/comuna pueden decir "Por confirmar").

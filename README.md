@@ -169,7 +169,7 @@ NVIDIA_MODEL=meta/llama-3.1-8b-instruct
 #### Red de seguridad (opcional, ya vienen valores por defecto)
 
 ```env
-SECURITY_MAX_CONSECUTIVE_ERRORS=3
+SECURITY_MAX_CONSECUTIVE_ERRORS=2
 SECURITY_MAX_INTENT_SWITCHES=3
 ```
 

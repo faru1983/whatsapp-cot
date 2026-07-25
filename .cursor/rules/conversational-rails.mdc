@@ -1,0 +1,35 @@
+---
+description: Contrato de rieles conversacionales — priorizar dato pendiente, FAQ acotada, handoff hablado
+globs:
+  - src/core/engine.js
+  - src/logic/flow-stall.js
+  - src/logic/flow-rails.js
+  - src/flows/**/*.js
+  - scripts/verify-flows.mjs
+alwaysApply: false
+---
+
+# Rails conversacionales (whatsapp-cot)
+
+## Principio
+
+El bot guía cotizaciones de Meta Ads: **dato pendiente primero**, re-pregunta clara, máximo **1 FAQ lateral** por dato bloqueado, y a **2 strikes** (`SECURITY_MAX_CONSECUTIVE_ERRORS=2`) → **handoff hablado** + mute + admin (nunca silencio).
+
+## Engine (`engine.js`)
+
+1. Orden: handoff → mirón (solo router) → estado → stall/FAQ/plantilla.
+2. `getPendingFlowRequirement` define el dato bloqueado; si hay strike previo, no FAQ/LLM libre.
+3. FAQ con dato pendiente: `session.faqSidequestByPending[pendingKey]` máx. 1; **no** resetear `consecutiveErrors`.
+4. Anti-loop / stall SOS: siempre `HANDOFF_CLIENT_REPLY` al cliente.
+5. `getOnMissHint` + `shortQuestion` en cada miss.
+
+## Estados (`flows/*/states/`)
+
+- Un archivo por paso: textos + `aiPrompt` + `validateAndProcess`.
+- `shortQuestion` con `withAssistantFooter()` de `flow-rails.js`.
+- Menús / sí-no: `resolveDecisionIntent` (keywords → NLU). Pasos de datos: parsers, no NLU de decisión.
+- Interrupciones locales: mirón → mute; precio → tip + re-ask del dato.
+
+## Tests
+
+Si cambia copy visible, transiciones, mute o burbujas → actualizar `scripts/verify-flows.mjs` y correr `npm run verify`.

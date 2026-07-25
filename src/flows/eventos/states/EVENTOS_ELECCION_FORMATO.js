@@ -11,8 +11,9 @@ import {
   ensureEventOrderBuilder
 } from '../../../logic/eventos-helpers.js';
 import { img, vid } from '../../../logic/media.js';
+import { withAssistantFooter } from '../../../logic/flow-rails.js';
 
-const SHORT_Q = `¿Qué formato prefieres: *1* (*Dispensador*) o *2* (*Muro*)?`;
+const SHORT_Q = withAssistantFooter(`¿Qué formato prefieres: *1* (*Dispensador*) o *2* (*Muro*)?`);
 
 const ASK_INTRO = `¿Quieres ver los *cócteles* disponibles y *precios*? Escribe *sí* o *ok* para continuar.`;
 

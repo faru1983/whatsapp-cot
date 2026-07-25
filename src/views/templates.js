@@ -9,6 +9,8 @@ import { formatPrice, preciosData } from '../logic/utils.js';
 // 1. DESPEDIDAS Y ACLARACIONES COMPARTIDAS
 // ==============================================================================
 
+export { HANDOFF_CLIENT_REPLY, ASSISTANT_FOOTER, withAssistantFooter } from '../logic/flow-rails.js';
+
 /**
  * getBrowseOnlyGoodbye: Despedida cuando el cliente solo está mirando opciones.
  *

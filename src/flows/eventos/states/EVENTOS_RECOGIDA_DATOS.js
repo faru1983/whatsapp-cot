@@ -10,7 +10,8 @@ import {
   wantsBrowseOnlyClose
 } from '../../../logic/interruptions.js';
 import { matchKeywordIntent, rulesWebVsChat } from '../../../logic/keyword-intent.js';
-import { applyEventDataFromMessage, extractGuestsFromMessage, asksEventServiceFormatQuestion } from '../../../logic/eventos-helpers.js';
+import { applyEventDataFromMessage, extractGuestsFromMessage, asksEventServiceFormatQuestion, asksCoverageAreaQuestion } from '../../../logic/eventos-helpers.js';
+import { withAssistantFooter } from '../../../logic/flow-rails.js';
 
 // Bienvenida en 2 burbujas: primero el servicio + web; luego pedimos los datos
 const WELCOME_TEXTS = [
@@ -41,9 +42,9 @@ El cliente acaba de entrar a Servicio para Eventos. Debe dar datos (celebración
  */
 function shortQuestionForSession(session) {
   if (!session.guests) {
-    return `¿Cuántos *invitados* serán aproximadamente?`;
+    return withAssistantFooter(`¿Cuántos *invitados* serán aproximadamente?`);
   }
-  return `¿Me confirmas los datos del evento para seguir?`;
+  return withAssistantFooter(`¿Me confirmas los datos del evento para seguir?`);
 }
 
 /**
@@ -89,6 +90,11 @@ export const EVENTOS_RECOGIDA_DATOS = defineState({
         customReply: `¡Listo! Cotiza aquí: https://cocktailsontap.cl/eventos\nSi surge una duda, escríbeme. 🥂`,
         mute: true
       };
+    }
+
+    // Pregunta de cobertura (¿van a X?) → FAQ, no extraer comuna del mensaje
+    if (asksCoverageAreaQuestion(messageText) && !session.guests && !messageLooksLikeGuests(messageText)) {
+      return { success: false };
     }
 
     // Extraemos lo que venga (puede ser 1 dato o varios)

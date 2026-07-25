@@ -404,9 +404,9 @@ ${labelBlock}
 - UNCLEAR: no responde al paso, es ambiguo, o es otra pregunta
 
 REGLAS:
-1. Responde SOLO un JSON válido: {"intent":"ETIQUETA","confidence":"high"|"low"}
+1. Responde SOLO un JSON válido: {"intent":"ETIQUETA","confidence":"high"|"medium"|"low"}
 2. "intent" debe ser una de las etiquetas permitidas O "UNCLEAR".
-3. Usa "high" solo si estás bastante seguro (incluye typos leves y sinónimos claros).
+3. Usa "high" si estás bastante seguro; "medium" solo en menús de 2 opciones si hay buena señal pero no perfecta.
 4. Si el mensaje es una pregunta de otra cosa, saludo vacío, o no responde al paso → UNCLEAR + low.
 5. PROHIBIDO inventar etiquetas nuevas. PROHIBIDO devolver texto fuera del JSON.
 6. No clasifiques datos concretos (fechas, comunas, nombres de cócteles) como decisión: eso es UNCLEAR.
@@ -460,9 +460,11 @@ Ejemplo: {"intent":"${labels[0]}","confidence":"high"}`;
 
     testLog(`NLU decisión: labels=[${labelsList}] → intent=${intent} confidence=${confidence}`);
 
-    // Solo aceptamos etiqueta permitida con confianza alta (evita avances dudosos)
-    if (confidence !== 'high') {
-      testLog(`NLU decisión: descartado (confidence≠high)`);
+    // Solo aceptamos etiqueta permitida con confianza alta (o media en menús binarios)
+    const isBinaryMenu = labels.length === 2;
+    const confidenceOk = confidence === 'high' || (isBinaryMenu && confidence === 'medium');
+    if (!confidenceOk) {
+      testLog(`NLU decisión: descartado (confidence=${confidence || 'none'})`);
       return null;
     }
     if (!labels.includes(intent)) {

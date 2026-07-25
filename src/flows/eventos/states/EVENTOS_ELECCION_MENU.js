@@ -27,6 +27,7 @@ import {
   formatEventCartSummary,
   getEventPriceListImage
 } from '../../../logic/eventos-helpers.js';
+import { withAssistantFooter } from '../../../logic/flow-rails.js';
 
 const ASK_COCKTAILS = `¿Qué cócteles te gustaría incluir en tu evento? (ej: "Mojito 10L y 1 Aperol 5L")`;
 const ASK_OK_AFTER_CART = `Si está bien así, escribe *ok* para ver el resumen de tu cotización.
@@ -49,10 +50,10 @@ function shortQuestionForSession(session) {
   const hasCart = session.orderBuilder?.products
     && Object.keys(session.orderBuilder.products).length > 0;
   if (hasCart) {
-    return `Si está bien, escribe *ok* para el resumen.
-    _(Si quieres cambiar, dime qué agregar o quitar.)_`;
+    return withAssistantFooter(`Si está bien, escribe *ok* para el resumen.
+_(Si quieres cambiar, dime qué agregar o quitar.)_`);
   }
-  return ASK_COCKTAILS;
+  return withAssistantFooter(ASK_COCKTAILS);
 }
 
 /**

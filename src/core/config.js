@@ -180,8 +180,8 @@ export function loadBotConfig() {
     // Umbrales de la red de seguridad (engine.js). Ver sección SECURITY_* en .env
     security: {
       // Anti-loop: cuántas respuestas "no entendidas" seguidas antes de silenciar y avisar al admin
-      // Default 3 = mismo valor que .env.example (evitar mute demasiado agresivo)
-      maxConsecutiveErrors: parsePositiveInt(process.env.SECURITY_MAX_CONSECUTIVE_ERRORS, 3),
+      // Default 2 = handoff rápido en leads de Meta Ads (ver .env.example)
+      maxConsecutiveErrors: parsePositiveInt(process.env.SECURITY_MAX_CONSECUTIVE_ERRORS, 2),
       // Cambio de intención: cuántas veces puede alternar barriles ↔ eventos antes de silenciar
       maxIntentSwitches: parsePositiveInt(process.env.SECURITY_MAX_INTENT_SWITCHES, 3),
     }

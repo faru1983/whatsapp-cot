@@ -9,8 +9,9 @@ import {
   getEventFormatKey,
   buildMenuEntryReplies
 } from '../../../logic/eventos-helpers.js';
+import { withAssistantFooter } from '../../../logic/flow-rails.js';
 
-const SHORT_Q = `¿Quieres ver los cócteles disponibles y precios? Escribe *OK* para continuar.`;
+const SHORT_Q = withAssistantFooter(`¿Quieres ver los cócteles disponibles y precios? Escribe *OK* para continuar.`);
 
 const AI_PROMPT = `[SISTEMA - ESTADO: INTRO MENÚ DE EVENTO]
 El cliente ya eligió Dispensador o Muro y recibió el pitch de lo incluido.
