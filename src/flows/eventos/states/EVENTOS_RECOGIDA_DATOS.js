@@ -11,6 +11,7 @@ import {
 } from '../../../logic/interruptions.js';
 import { matchKeywordIntent, rulesWebVsChat } from '../../../logic/keyword-intent.js';
 import { applyEventDataFromMessage, extractGuestsFromMessage, asksEventServiceFormatQuestion, asksCoverageAreaQuestion } from '../../../logic/eventos-helpers.js';
+import { isLikelyThirdPartyBotReply } from '../../../logic/interruptions.js';
 import { withAssistantFooter } from '../../../logic/flow-rails.js';
 
 // Bienvenida en 2 burbujas: primero el servicio + web; luego pedimos los datos
@@ -95,6 +96,15 @@ export const EVENTOS_RECOGIDA_DATOS = defineState({
     // Pregunta de cobertura (¿van a X?) → FAQ, no extraer comuna del mensaje
     if (asksCoverageAreaQuestion(messageText) && !session.guests && !messageLooksLikeGuests(messageText)) {
       return { success: false };
+    }
+
+    // Mensaje de otro bot/negocio (IA hablando con IA): re-preguntar sin extraer datos
+    if (isLikelyThirdPartyBotReply(messageText)) {
+      return {
+        success: true,
+        nextState: 'EVENTOS_RECOGIDA_DATOS',
+        customReply: `Parece que ese mensaje no trae datos de tu evento 😊\n\n¿Me compartes *celebración*, *invitados*, *fecha* y *comuna*?\nEjemplo: _"Matrimonio, 50 invitados, 15 de mayo, Las Condes"_`
+      };
     }
 
     // Extraemos lo que venga (puede ser 1 dato o varios)

@@ -6,8 +6,13 @@ import {
   findLocationByFuzzyMatch,
   parseDate,
   formatPrice,
-  preciosData
+  preciosData,
+  normalizeString,
+  findClosestCatalogMatch,
+  fixEventLitrageShorthand,
+  isValidFreeformLocationCapture
 } from './utils.js';
+import { isLikelyThirdPartyBotReply } from './interruptions.js';
 import { OrderBuilder } from './order-builder.js';
 import { img } from './media.js';
 import { getEventLitersSuggestion } from '../views/templates.js';
@@ -21,12 +26,16 @@ import { getEventLitersSuggestion } from '../views/templates.js';
 export function parseCelebrationType(messageText) {
   const lower = String(messageText || '').toLowerCase();
 
-  // Buscar cumpleaños con edad específica (ej: "15 años", "mis 40", "cumple de 30")
-  const ageMatch = lower.match(/\b(?:cumplea[nñ]os|cumple|mis?)?\s*(?:de\s+)?(\d+)\s*(?:añitos|años?|anos?)\b/i) 
-                || lower.match(/\b(?:cumplea[nñ]os|cumple|mis)\s+(?:de\s+)?(\d+)\b/i);
-  
-  if (ageMatch && parseInt(ageMatch[1], 10) > 0 && parseInt(ageMatch[1], 10) < 150) {
-    return `Cumpleaños ${ageMatch[1]} años`;
+  // "cumpleaños 25 invitados" → 25 son invitados, no la edad del cumpleañero
+  const guestsAfterCumple = /\b(?:cumplea[nñ]os|cumple)\s+(?:de\s+|para\s+)?\d+\s*(?:personas|invitados|pax|inv)\b/i.test(lower);
+  if (!guestsAfterCumple) {
+    // Buscar cumpleaños con edad específica (ej: "15 años", "mis 40", "cumple de 30")
+    const ageMatch = lower.match(/\b(?:cumplea[nñ]os|cumple|mis?)?\s*(?:de\s+)?(\d+)\s*(?:añitos|años?|anos?)\b/i)
+                  || lower.match(/\b(?:cumplea[nñ]os|cumple|mis)\s+(?:de\s+)?(\d+)\b/i);
+
+    if (ageMatch && parseInt(ageMatch[1], 10) > 0 && parseInt(ageMatch[1], 10) < 150) {
+      return `Cumpleaños ${ageMatch[1]} años`;
+    }
   }
 
   const map = [
@@ -51,6 +60,12 @@ export function parseCelebrationType(messageText) {
  */
 export function extractGuestsFromMessage(messageText) {
   let clean = String(messageText || '');
+
+  // Prioridad: "25 invitados" en el texto original (antes de quitar "cumpleaños 25")
+  const explicitOriginal = clean.match(/\b(\d+)\s*(personas|invitados|pax|inv)\b/i);
+  if (explicitOriginal) {
+    return parseInt(explicitOriginal[1], 10);
+  }
 
   // 1. Quitar fechas (ej. 15 de mayo)
   clean = clean.replace(/\b\d+\s*de\s*(enero|febrero|marzo|abril|mayo|junio|julio|agosto|septiembre|octubre|noviembre|diciembre)\b/gi, '');
@@ -146,6 +161,137 @@ export function asksCoverageAreaQuestion(messageText) {
 }
 
 /**
+ * asksEventCartPriceQuestion: ¿Pregunta por discrepancia de precio con lo ya cotizado?
+ * Ej.: "¿y por qué sale otro valor?", "en la lista decía menos".
+ *
+ * @param {string} messageText
+ * @returns {boolean}
+ */
+export function asksEventCartPriceQuestion(messageText) {
+  const trimmed = String(messageText || '').trim();
+  if (!trimmed) return false;
+  const lower = trimmed.toLowerCase();
+
+  if (/\b(por\s*qu[eé]|porque)\b/i.test(lower)
+      && /\b(valor|precio|sale|cuesta|cobran|caro|barato|diferente|otro)\b/i.test(lower)) {
+    return true;
+  }
+  if (/\b(otro\s+valor|m[aá]s\s+caro|en\s+la\s+(lista|carta|imagen)|no\s+coincide|precio\s+diferente)\b/i.test(lower)) {
+    return true;
+  }
+  if (/\?/.test(trimmed) && /\b(precio|valor|cu[aá]nto|cuesta)\b/i.test(lower)) {
+    return true;
+  }
+  return false;
+}
+
+/**
+ * parseLitrageOnlyMessage: ¿El mensaje es solo un litraje? (ej. "10L", "30 litros")
+ *
+ * @param {string} messageText
+ * @returns {string|null} Litraje normalizado ("10L") o null
+ */
+export function parseLitrageOnlyMessage(messageText) {
+  const trimmed = String(messageText || '').trim();
+  if (!trimmed) return null;
+  const m = trimmed.match(/^(\d+)\s*(?:l|lt|lts|litros?)?\.?$/i);
+  if (!m) return null;
+  return `${m[1]}L`;
+}
+
+/**
+ * parseCocktailNamesWithoutLitrage: Detecta sabores sin tamaño (typos incluidos).
+ * Ej.: "Monito aperol" → ["Mojito", "Aperol Spritz"] antes de llamar al NLU.
+ *
+ * @param {string} messageText
+ * @param {string[]} catalogNames
+ * @returns {string[]}
+ */
+export function parseCocktailNamesWithoutLitrage(messageText, catalogNames) {
+  const text = String(messageText || '').trim();
+  if (!text) return [];
+  if (/\b\d+\s*(?:l|lt|lts|litros?)\b/i.test(text)) return [];
+  if (asksEventCartPriceQuestion(text) || /\?/.test(text)) return [];
+
+  const norm = normalizeString(text);
+  const matched = [];
+
+  // Nombres completos del catálogo presentes en el mensaje
+  for (const name of catalogNames) {
+    const nameNorm = normalizeString(name);
+    if (norm.includes(nameNorm)) {
+      if (!matched.includes(name)) matched.push(name);
+    }
+  }
+
+  // Tokens sueltos con fuzzy match (monito → Mojito, aperol → Aperol Spritz)
+  const stop = new Set(['para', 'con', 'son', 'una', 'unos', 'quiero', 'dame', 'pon', 'agrega', 'y', 'el', 'la']);
+  const tokens = norm.split(/[\s,;/+]+/).filter((t) => t.length >= 3 && !stop.has(t));
+
+  for (const token of tokens) {
+    const hit = findClosestCatalogMatch(token, catalogNames);
+    if (!hit || matched.includes(hit)) continue;
+    const hitNorm = normalizeString(hit);
+    const isStrong = token.length >= 4
+      || hitNorm.startsWith(token)
+      || hitNorm.split(' ').some((w) => w.startsWith(token));
+    if (isStrong) matched.push(hit);
+  }
+
+  return matched;
+}
+
+/**
+ * validateEventProductLines: Mapea líneas NLU/programáticas al catálogo y valida litraje.
+ *
+ * @param {string} messageText
+ * @param {Array<{name: string, quantity: number, litrage?: string}>} items
+ * @param {string} formatKey - 'muro' | 'dispensador'
+ * @param {string[]} allowedLitrages
+ * @param {string} defaultLitrage
+ * @param {string[]} catalogNames
+ * @returns {{ parsedProducts: Array, invalidLitrages: Array }}
+ */
+export function validateEventProductLines(messageText, items, formatKey, allowedLitrages, defaultLitrage, catalogNames) {
+  const parsedProducts = [];
+  const invalidLitrages = [];
+
+  for (const item of items || []) {
+    if (!item?.name || !item.quantity) continue;
+    const matchedName = findClosestCatalogMatch(item.name, catalogNames);
+    if (!matchedName) continue;
+
+    const fixedProducts = fixEventLitrageShorthand(
+      messageText,
+      { name: matchedName, quantity: item.quantity, litrage: item.litrage || defaultLitrage },
+      allowedLitrages,
+      defaultLitrage
+    );
+
+    for (const fixed of fixedProducts) {
+      const litragesToTry = [fixed.litrage];
+      // NLU a veces devuelve 5L en Muro; reintentamos con 10L antes de fallar
+      if (formatKey === 'muro' && fixed.litrage === '5L') litragesToTry.push('10L');
+
+      let added = false;
+      for (const tryL of litragesToTry) {
+        if (!allowedLitrages.includes(tryL)) continue;
+        const price = preciosData.cocteles[matchedName]?.[formatKey]?.[tryL];
+        if (price == null) continue;
+        parsedProducts.push({ name: matchedName, quantity: fixed.quantity, litrage: tryL });
+        added = true;
+        break;
+      }
+      if (!added) {
+        invalidLitrages.push({ name: matchedName, litrage: fixed.litrage });
+      }
+    }
+  }
+
+  return { parsedProducts, invalidLitrages };
+}
+
+/**
  * applyEventDataFromMessage: Extrae celebración, comuna, fecha, invitados y guarda en sesión.
  *
  * @param {string} messageText
@@ -154,6 +300,11 @@ export function asksCoverageAreaQuestion(messageText) {
  */
 export function applyEventDataFromMessage(messageText, session) {
   let hasNewInfo = false;
+
+  // Auto-respuesta de otro bot/negocio: no extraer celebración, comuna ni invitados
+  if (isLikelyThirdPartyBotReply(messageText)) {
+    return false;
+  }
 
   const celebration = parseCelebrationType(messageText);
   if (celebration && celebration !== session.celebrationType) {
@@ -175,15 +326,11 @@ export function applyEventDataFromMessage(messageText, session) {
     );
     if (locationMatch) {
       const captured = locationMatch[1].trim();
-      const capturedNorm = captured
-        .toLowerCase()
-        .normalize('NFD')
-        .replace(/[\u0300-\u036f]/g, '');
-      const isBareStopword = /^(el|la|los|las|lo|un|una|mi|tu|su|casa|de|del|en)$/i.test(capturedNorm);
-      if (!isBareStopword && capturedNorm.length >= 3) {
-        session.location = captured;
-        session.isRM = false;
-        session.region = null;
+      if (isValidFreeformLocationCapture(captured)) {
+        const fuzzyCaptured = findLocationByFuzzyMatch(captured);
+        session.location = fuzzyCaptured?.name || captured;
+        session.isRM = fuzzyCaptured?.isRM ?? false;
+        session.region = fuzzyCaptured?.region ?? null;
         hasNewInfo = true;
       }
     }

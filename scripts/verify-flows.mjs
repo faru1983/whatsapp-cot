@@ -106,7 +106,7 @@ assert(wantsAdvanceProductsOrder('ok'), `"ok" sí quiere avanzar`);
 assert(!isOnlyAdvanceProductsOrder('aka'), `"aka" no es advance`);
 
 // Comunas: "no" NUNCA debe matchear Ñuñoa (substring "no" ⊂ "nunoa")
-const { findLocationByFuzzyMatch, parseDate } = await import('../src/logic/utils.js');
+const { findLocationByFuzzyMatch, parseDate, isValidFreeformLocationCapture } = await import('../src/logic/utils.js');
 assert(findLocationByFuzzyMatch('no') == null, `"no" no es comuna`);
 assert(findLocationByFuzzyMatch('sos') == null, `"sos" no es comuna`);
 assert(findLocationByFuzzyMatch('ñuñoa')?.name === 'Ñuñoa', `"ñuñoa" → Ñuñoa`);
@@ -127,6 +127,38 @@ assert(parseDate('15 de mayo') === '15 de mayo', `día+mes → 15 de mayo`);
 assert(parseDate('quiero cotizar un matrimonio para diciembre') === 'para diciembre', `mes solo con para`);
 assert(parseDate('en marzo 2027') === 'en marzo 2027', `mes + año`);
 assert(parseDate('sin fecha acá') == null, `sin fecha → null`);
+
+assert(!isValidFreeformLocationCapture('lo que pueda ayudarte'), `"en lo que pueda ayudarte" no es comuna`);
+assert(isValidFreeformLocationCapture('Talca'), `Talca libre sigue siendo válida`);
+const { isLikelyThirdPartyBotReply } = await import('../src/logic/interruptions.js');
+assert(isLikelyThirdPartyBotReply('No puedo ayudarte con eso. ¿Hay algo más en lo que pueda ayudarte?'), `detecta deflexión de otro bot`);
+assert(isLikelyThirdPartyBotReply('Te atiende IA de Alonzo desde Viña del Mar'), `detecta bienvenida ajena`);
+
+const {
+  parseLitrageOnlyMessage,
+  parseCocktailNamesWithoutLitrage,
+  asksEventCartPriceQuestion,
+  validateEventProductLines,
+  getAllowedLitrages
+} = await import('../src/logic/eventos-helpers.js');
+const { preciosData: datosPrecios } = await import('../src/logic/utils.js');
+const catalogNames = Object.keys(datosPrecios.cocteles || {});
+
+assert(parseLitrageOnlyMessage('10L') === '10L', `10L solo → litraje`);
+assert(parseLitrageOnlyMessage('30 litros') === '30L', `30 litros solo → litraje`);
+assert(asksEventCartPriceQuestion('Y porque sale otro valor'), `pregunta discrepancia de precio`);
+const monitoAperol = parseCocktailNamesWithoutLitrage('Monito aperol', catalogNames);
+assert(monitoAperol.includes('Mojito') && monitoAperol.some((n) => /Aperol/i.test(n)), `Monito aperol → sabores del catálogo`);
+const muroLitrages = getAllowedLitrages('muro');
+const validated = validateEventProductLines(
+  'Monito aperol',
+  [{ name: 'Mojito', quantity: 1, litrage: '10L' }, { name: 'Aperol Spritz', quantity: 1, litrage: '10L' }],
+  'muro',
+  muroLitrages,
+  '10L',
+  catalogNames
+);
+assert(validated.parsedProducts.length === 2, `Mojito+Aperol 10L válidos en muro`);
 
 // Grep nextState en flows
 const flowsRoot = path.join(__dirname, '../src/flows');
@@ -331,6 +363,17 @@ try {
     }
   ]);
 
+  await runCase('Eventos cumpleaños con invitados sin confundir edad', [
+    { input: 'Servicio para Eventos', expectState: 'EVENTOS_RECOGIDA_DATOS' },
+    {
+      input: 'Cumpleaños 25 invitados Peñalolen',
+      expectState: 'EVENTOS_CONFIRMAR_DATOS',
+      expectMuted: false,
+      expectIncludes: ['25', 'Peñalolén', 'Cumpleaños'],
+      expectNotIncludes: ['25 años', 'cuántos invitados']
+    }
+  ]);
+
   // Confirmación de datos → foto única con caption de recomendación + pregunta de formato
   await runCase('Eventos confirmación → formato (img+caption)', [
     { input: 'evento', expectState: 'EVENTOS_RECOGIDA_DATOS' },
@@ -518,6 +561,46 @@ try {
       expectIncludes: ['paso con alguien del equipo']
     }
   ]);
+
+  console.log('\n-- Eventos menú muro monito aperol y duda de precio --');
+  resetSession(SESSION_ID);
+  {
+    const session = getSession(SESSION_ID);
+    session.currentState = 'EVENTOS_ELECCION_MENU';
+    session.userIntent = 'EVENTOS';
+    session.eventoFormato = 'Muro de Coctelería';
+    session.guests = 100;
+    session.orderBuilder = { type: 'muro', products: {}, extras: {} };
+
+    const st = statesMap.EVENTOS_ELECCION_MENU;
+    const r1 = await st.validateAndProcess('Monito aperol', session);
+    const t1 = typeof r1.customReply === 'string' ? r1.customReply : '';
+    assert(t1.includes('Mojito') && /Aperol/i.test(t1), `Monito aperol agrega ambos cócteles`);
+    assert(!t1.includes('no está disponible'), `Monito aperol no error de litraje`);
+
+    const r2 = await st.validateAndProcess('Y porque sale otro valor', session);
+    const t2 = typeof r2.customReply === 'string' ? r2.customReply : '';
+    assert(t2.includes('Tu pedido actual'), `duda de precio explica carrito`);
+    assert(!t2.includes('litraje no está disponible'), `duda de precio no error de litraje`);
+  }
+
+  console.log('\n-- Eventos bot ajeno no extrae comuna falsa --');
+  resetSession(SESSION_ID);
+  {
+    const session = getSession(SESSION_ID);
+    session.currentState = 'EVENTOS_RECOGIDA_DATOS';
+    session.userIntent = 'EVENTOS';
+    const st = statesMap.EVENTOS_RECOGIDA_DATOS;
+    await st.validateAndProcess('Servicio para Eventos', session);
+    const r = await st.validateAndProcess(
+      'No puedo ayudarte con eso. ¿Hay algo más en lo que pueda ayudarte?',
+      session
+    );
+    const t = typeof r.customReply === 'string' ? r.customReply : '';
+    assert(!session.location, `no guarda comuna falsa`);
+    assert(t.includes('no trae datos'), `re-pregunta datos del evento`);
+    assert(!t.includes('lo que pueda'), `no menciona comuna inventada`);
+  }
 
   await runCase('Anti-loop eventos handoff hablado', [
     {

@@ -663,6 +663,34 @@ function buildLocationSearchKeys(comunaName) {
 		.sort((a, b) => b.length - a.length);
 }
 
+/** Palabras que invalidan una captura "en …" que no es comuna (ej. "en lo que pueda ayudarte"). */
+const LOCATION_CAPTURE_REJECT_RE = /\b(que|cual|cuales|donde|cuando|como|pueda|puedo|podemos|ayudarte|ayudar|ayudarle|algo|mas|este|esta|ese|esa|nada|todo|todos|hoy|aqui|ahi|ese|hablar|podria|puede|tienen|tienes|hay)\b/i;
+
+/**
+ * isValidFreeformLocationCapture: ¿El texto capturado tras "en …" puede ser una comuna/ciudad?
+ * Solo aceptamos catálogo oficial o 1–3 palabras sin verbos/pronombres conversacionales.
+ *
+ * @param {string} captured - Fragmento capturado por regex
+ * @returns {boolean}
+ */
+export function isValidFreeformLocationCapture(captured) {
+	const t = String(captured || '').trim();
+	if (t.length < 3) return false;
+
+	const norm = normalizeLocationText(t);
+	if (!norm || LOCATION_STOPWORDS.has(norm)) return false;
+	if (/^(lo\s+)?que\b/.test(norm)) return false;
+	if (LOCATION_CAPTURE_REJECT_RE.test(norm)) return false;
+
+	if (findLocationByFuzzyMatch(t)) return true;
+
+	const words = norm.split(/\s+/).filter(Boolean);
+	if (words.length > 3) return false;
+	if (words.some((w) => LOCATION_CAPTURE_REJECT_RE.test(w) || LOCATION_STOPWORDS.has(w))) return false;
+
+	return words.length >= 1 && words.length <= 3;
+}
+
 /**
  * extractLocationHints: Saca candidatos tras "en …" / "comuna …".
  * Así "proxima semana en la condes" aporta el hint "la condes".
@@ -686,7 +714,9 @@ function extractLocationHints(normalized) {
 				''
 			)
 			.trim();
-		if (hint.length >= 3 && !LOCATION_STOPWORDS.has(hint)) hints.add(hint);
+		if (hint.length >= 3 && !LOCATION_STOPWORDS.has(hint) && isValidFreeformLocationCapture(hint)) {
+			hints.add(hint);
+		}
 	}
 	return [...hints];
 }
@@ -1089,8 +1119,12 @@ export function fixEventLitrageShorthand(userMessage, product, allowedLitrages, 
 		return tempResults;
 	}
 
-	// 3) Si es una cantidad > 3 o litraje no estándar (ej. "15 mojito" sin partición exacta), NUNCA asumir error.
-	// Asignar quantity=1 y litrage=qtyAsLitrage (ej: 1x 15L), para que la validación notifique el litraje inválido.
+	// 3) Cantidad 1 sin litraje en el mensaje: conservar litrage ya asignado (ej. default 10L en Muro)
+	if (qty === 1 && product.litrage && allowedLitrages.includes(product.litrage)) {
+		return [product];
+	}
+
+	// 4) Cantidad > 1 sin partición exacta → probar qty como litraje (validación posterior)
 	if (product.litrage && product.litrage !== defaultLitrage && product.litrage !== qtyAsLitrage) {
 		return [product];
 	}

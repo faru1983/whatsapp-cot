@@ -62,6 +62,38 @@ export function isGreetingOrNoise(messageText) {
   return false;
 }
 
+/**
+ * isLikelyThirdPartyBotReply: ¿Parece auto-respuesta de otro negocio/bot en WhatsApp?
+ * Evita extraer datos o improvisar charla cuando llega el mensaje de bienvenida ajeno.
+ *
+ * @param {string} messageText
+ * @returns {boolean}
+ */
+export function isLikelyThirdPartyBotReply(messageText) {
+  const trimmed = String(messageText || '').trim();
+  if (!trimmed) return false;
+  const lower = trimmed.toLowerCase();
+
+  if (/\b(te\s+atiende\s+(ia|i\.a\.)|atiende\s+ia|asistente\s+virtual\s+de\s+(?!cocktails|coctel))\b/i.test(lower)) {
+    return true;
+  }
+  if (/\b(nos\s+dedicamos\s+a|bienvenida\s+a|damos\s+la\s+bienvenida)\b/i.test(lower)
+      && !/\bcocktails?\s+on\s+tap\b/i.test(lower)) {
+    return true;
+  }
+  if (/\b(catering|banquetes?|florister[ií]a|mobiliario\s+infantil)\b/i.test(lower)
+      && /\b(arriendo|producci[oó]n\s+de\s+eventos|decoraci[oó]n)\b/i.test(lower)) {
+    return true;
+  }
+  if (/^no\s+puedo\s+ayudarte\s+con\s+eso/i.test(trimmed)) {
+    return true;
+  }
+  if ((trimmed.match(/\*/g) || []).length >= 3 && trimmed.length > 120) {
+    return true;
+  }
+  return false;
+}
+
 // ==============================================================================
 // 2. PRECIO / CARTA / LISTA (sin elegir canal todavía)
 // ==============================================================================
