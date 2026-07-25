@@ -52,7 +52,7 @@ export const BARRILES_REVISION_COTIZACION = defineState({
       let adminProducts = '';
       for (const [pName, qty] of Object.entries(session.orderBuilder.products)) {
         const price = preciosData.cocteles[pName]?.desechable?.['5L'] || 0;
-        adminProducts += `- ${qty}x ${pName}: ${formatPrice(price * qty)}\n`;
+        adminProducts += `- ${qty}x ${pName} 5L: ${formatPrice(price * qty)}\n`;
       }
 
       let adminExtras = '';

@@ -104,6 +104,11 @@ export function sanitizeCustomerFacingReply(text) {
 		.replace(/\n{3,}/g, '\n\n')
 		.trim();
 
+	// Si el modelo filtró razonamiento interno, no enviamos nada (el engine usará plantilla o NO_FAQ)
+	if (/\bno puedo determinar\b|\bel cliente est[aá] (preguntando|cotizando)\b|\bproporcionar m[aá]s contexto\b|\bpreguntar si el cliente\b|\bdebes preguntar\b|\bno est[aá] claro si\b/i.test(out)) {
+		return '';
+	}
+
 	return out;
 }
 

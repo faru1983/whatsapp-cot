@@ -39,9 +39,12 @@ function formatCartLines(products) {
   let lines = '';
   for (const [name, qty] of Object.entries(products)) {
     const price = preciosData.cocteles[name]?.desechable?.['5L'] || 0;
-    lines += `- ${qty}x ${name}: ${formatPrice(price * qty)}\n`;
+    lines += `- ${qty}x ${name} 5L: ${formatPrice(price * qty)}\n`;
   }
   lines += `\n*Subtotal de cócteles:* ${formatPrice(quote.subtotal)}`;
+  if (quote.totalLiters > 0) {
+    lines += ` (${quote.totalLiters}L ≈ ${quote.totalDrinks} tragos)`;
+  }
   return lines;
 }
 

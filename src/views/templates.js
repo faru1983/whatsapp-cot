@@ -44,7 +44,10 @@ export function getQuotationTemplate(clientData, quote, deliveryCost, locationDa
   text += `📋 *Tu Pedido:*\n`;
   for (const detail of quote.details) {
     const icon = detail.isExtra ? '✨' : '🍹';
-    text += `${icon} ${detail.quantity}x ${detail.name}: ${formatPrice(detail.lineTotal)}\n`;
+    const itemLabel = detail.isExtra
+      ? `${detail.quantity}x ${detail.name}`
+      : `${detail.quantity}x ${detail.name} ${detail.litrage || '5L'}`;
+    text += `${icon} ${itemLabel}: ${formatPrice(detail.lineTotal)}\n`;
   }
 
   text += `\n💰 *Resumen de Pago:*\n`;
@@ -63,6 +66,10 @@ export function getQuotationTemplate(clientData, quote, deliveryCost, locationDa
     text += `  Despacho: Por confirmar\n`;
     text += `  -----------------------\n`;
     text += `  *TOTAL: ${formatPrice(quote.subtotal)}*\n`;
+  }
+
+  if (quote.totalLiters > 0) {
+    text += `\n_Estás solicitando *${quote.totalLiters}L* que equivalen a *${quote.totalDrinks} tragos aprox.*_\n`;
   }
 
   // Pregunta en segundo mensaje para que el cliente lea bien los montos primero

@@ -83,6 +83,49 @@ export function extractGuestsFromMessage(messageText) {
 }
 
 /**
+ * asksEventServiceFormatQuestion: ¿Pregunta por dispensador/muro o si es solo barriles?
+ * Ej.: "solo o dispensador", "dispensador o muro", "¿incluye la estación?".
+ * En EVENTOS_RECOGIDA_DATOS respondemos con copy fijo (sin FAQ/IA) para no filtrar razonamiento interno.
+ *
+ * @param {string} messageText - Mensaje del cliente
+ * @returns {boolean}
+ */
+export function asksEventServiceFormatQuestion(messageText) {
+  const trimmed = String(messageText || '').trim();
+  if (!trimmed) return false;
+
+  const lower = trimmed.toLowerCase();
+
+  // Elección entre formatos de evento (dispensador vs muro)
+  if (/\b(dispensador|muro)\b/i.test(lower) && /\b(o|u|versus|vs)\b/i.test(lower)) {
+    return true;
+  }
+
+  // "solo" vs dispensador/estación (¿solo barriles o con servicio completo?)
+  if (/\bsolo\b/i.test(lower) && /\b(dispensador|muro|barriles?|estaci[oó]n)\b/i.test(lower)) {
+    return true;
+  }
+
+  // Solo barriles / barriles solos (sin instalación)
+  if (/\b(solo\s*(los\s*)?barriles?|barriles?\s+solo(s)?|solamente\s+barriles?)\b/i.test(lower)) {
+    return true;
+  }
+
+  // ¿Incluye dispensador/instalación?
+  if (/\b(con|sin|incluye|traen?|llevan?|viene)\b/i.test(lower)
+      && /\b(dispensador|muro|estaci[oó]n|instalaci[oó]n)\b/i.test(lower)) {
+    return true;
+  }
+
+  // Mensaje corto centrado en dispensador (ej. "solo o dispensador", "dispensador?")
+  if (/^(solo\s+o\s+)?dispensador(\s+port[aá]til)?[?.!]?$/i.test(trimmed)) {
+    return true;
+  }
+
+  return false;
+}
+
+/**
  * applyEventDataFromMessage: Extrae celebración, comuna, fecha, invitados y guarda en sesión.
  *
  * @param {string} messageText

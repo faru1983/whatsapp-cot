@@ -17,6 +17,7 @@ import { statesMap } from '../flows/index.js';
 import { readPrompt } from '../views/prompts.js';
 import { buildFaqCatalogContext, sanitizeCustomerFacingReply } from '../logic/utils.js';
 import { isGreetingOrNoise, wantsExplicitHandoff } from '../logic/interruptions.js';
+import { getPendingFlowRequirement } from '../logic/flow-stall.js';
 import { isImagePart, isVideoPart, isMediaPart, assertImageExists } from '../logic/media.js';
 import { buildAdminSosBody } from '../views/templates.js';
 import { FAQ_JSON_PATH } from './paths.js';
@@ -317,6 +318,7 @@ async function processMessageUnlocked(sessionId, messageText, options = {}) {
   }
 
   const currentStateId = session.currentState;
+  const stallThreshold = maxConsecutiveErrors || 3;
 
   // triggerSosMute: Silencia el chat y avisa al admin (handoff humano).
   const triggerSosMute = (title, reason, clientReply = null) => {
@@ -340,6 +342,27 @@ async function processMessageUnlocked(sessionId, messageText, options = {}) {
     }
     saveSession(sessionId, session);
     return clientReply;
+  };
+
+  /**
+   * registerFlowStallStrike: Suma strike cuando el cliente no avanza el paso actual.
+   * Al llegar a SECURITY_MAX_CONSECUTIVE_ERRORS → mute + SOS sin mensaje al cliente.
+   *
+   * @param {string} reason - Motivo corto para logs/admin
+   * @returns {string|null|undefined} Respuesta al cliente si hubo SOS; null si silencio
+   */
+  const registerFlowStallStrike = (reason) => {
+    session.consecutiveErrors = (session.consecutiveErrors || 0) + 1;
+    cliLog(`flujo atascado (${reason}) → strike ${session.consecutiveErrors}/${stallThreshold}`);
+
+    if (session.consecutiveErrors >= stallThreshold) {
+      return triggerSosMute(
+        'ANTI-LOOP',
+        'Varios mensajes seguidos sin avanzar el paso de cotización.',
+        null
+      );
+    }
+    return null;
   };
 
   // 1.1 Escape global a humano (handoff seguro)
@@ -441,7 +464,11 @@ async function processMessageUnlocked(sessionId, messageText, options = {}) {
   const isQuestion = /\?/.test(messageText)
     || /^(como|cómo|donde|dónde|cuando|cuándo|quien|quién|porque|por\s*qu[eé]|que\s+es|qué\s+es|tienen|tienen\s+disponibilidad|cuanto|cuánto|cuesta|cuestan|vale|valen|hacen|realizan|despachan|envian|envían|van|llegan)\b/i.test(messageText.trim());
 
-  if (isQuestion && currentStateId !== 'CERRADO') {
+  const pendingFlow = getPendingFlowRequirement(session, currentStateId);
+  const flowAlreadyStalling = Boolean(pendingFlow && (session.consecutiveErrors || 0) > 0);
+
+  // Si ya hubo un strike y el paso sigue pendiente, no usamos FAQ: dejamos que el fallback cuente el strike
+  if (isQuestion && currentStateId !== 'CERRADO' && !flowAlreadyStalling) {
     cliLog(`FAQ PRE-CHECK: Detectada posible pregunta en '${messageText}'`);
     const faqData = JSON.parse(fs.readFileSync(FAQ_JSON_PATH, 'utf8'));
     const faqResponse = await responderFAQ(messageText, faqData, {
@@ -488,7 +515,16 @@ async function processMessageUnlocked(sessionId, messageText, options = {}) {
   let reply = "";
 
   if (processResult.success) {
-    session.consecutiveErrors = 0; // Se resetean los strikes
+    const pendingBefore = getPendingFlowRequirement(session, currentStateId);
+    const stateAdvanced = Boolean(processResult.nextState && processResult.nextState !== currentStateId);
+    const pendingAfter = getPendingFlowRequirement(session, processResult.nextState || currentStateId);
+
+    // Solo reseteamos strikes si el flujo avanzó o dejó de estar bloqueado
+    if (stateAdvanced || !pendingBefore || (pendingBefore && !pendingAfter)) {
+      session.consecutiveErrors = 0;
+    } else {
+      cliLog('paso OK pero el flujo sigue pendiente → strikes sin reset');
+    }
     cliLog(`paso OK (success)`);
     
     if (processResult.shouldReset) {
@@ -569,8 +605,6 @@ async function processMessageUnlocked(sessionId, messageText, options = {}) {
     // Preferimos la pregunta corta para no re-pegar el prompt largo del estado
     const finalQuestion = shortQ || questionText;
 
-    const conversationalMaxErrors = Math.min(2, maxConsecutiveErrors || 3);
-
     /**
      * buildNoInfoReply: Plantilla fija cuando FAQ/IA no ayudan.
      * Si ya eligió Barriles/Eventos, no preguntamos "¿seguir con X?" (es redundante).
@@ -584,6 +618,17 @@ async function processMessageUnlocked(sessionId, messageText, options = {}) {
     };
 
     const trimmedMessage = messageText.trim();
+
+    // 4.0 Paso bloqueado + strike previo → no FAQ/IA: cuenta otro strike o SOS en silencio
+    if (flowAlreadyStalling) {
+      const sosReply = registerFlowStallStrike(pendingFlow);
+      if (sosReply !== null) return sosReply;
+
+      reply = buildNoInfoReply();
+      session.history.turns.push({ role: 'model', text: reply });
+      saveSession(sessionId, session);
+      return reply;
+    }
 
     // 4.1 Saludo / ruido / entusiasmo → re-pregunta corta SIN sumar strike
     // (ej. "Hoooola q genial", "gracias", "ok" a mitad de pedido)
@@ -605,9 +650,9 @@ async function processMessageUnlocked(sessionId, messageText, options = {}) {
 
     if (looksClearOffTopic) {
       session.consecutiveErrors = (session.consecutiveErrors || 0) + 1;
-      cliLog(`off-topic → strike ${session.consecutiveErrors}/${conversationalMaxErrors} (sin SOS inmediato)`);
+      cliLog(`off-topic → strike ${session.consecutiveErrors}/${stallThreshold} (sin SOS inmediato)`);
 
-      if (session.consecutiveErrors >= conversationalMaxErrors) {
+      if (session.consecutiveErrors >= stallThreshold) {
         return triggerSosMute(
           'OFF-TOPIC',
           'Varios mensajes fuera de contexto de cotización; handoff a humano.',
@@ -640,7 +685,7 @@ async function processMessageUnlocked(sessionId, messageText, options = {}) {
     }
 
     if (faqResponse !== 'NO_FAQ') {
-      // FAQ OK: ayudamos → reseteamos strikes (no cuenta como fallo)
+      // FAQ OK sin bloqueo previo: ayudamos y reseteamos strikes
       session.consecutiveErrors = 0;
       cliLog('FAQ: match → respondiendo (strikes en 0)');
       reply = appendStepQuestionIfNeeded(sanitizeCustomerFacingReply(faqResponse), finalQuestion);
@@ -651,10 +696,10 @@ async function processMessageUnlocked(sessionId, messageText, options = {}) {
 
     // 4.4 Sin FAQ clara: strike + plantilla fija (o LLM muy corto si parece pregunta real)
     session.consecutiveErrors = (session.consecutiveErrors || 0) + 1;
-    cliLog(`sin ayuda clara → strike ${session.consecutiveErrors}/${conversationalMaxErrors}`);
+    cliLog(`sin ayuda clara → strike ${session.consecutiveErrors}/${stallThreshold}`);
 
-    // Anti-loop: umbral anti-loop conversacional → mute + SOS
-    if (session.consecutiveErrors >= conversationalMaxErrors) {
+    // Anti-loop: umbral SECURITY_MAX_CONSECUTIVE_ERRORS → mute + SOS (sin mensaje al cliente)
+    if (session.consecutiveErrors >= stallThreshold) {
       return triggerSosMute(
         'ANTI-LOOP',
         'Varias respuestas seguidas que el bot no entendió.',

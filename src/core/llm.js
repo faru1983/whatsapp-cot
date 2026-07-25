@@ -342,6 +342,10 @@ function normalizeFaqResult(textResult) {
   const looksLikeRefusal = /no tengo (una )?respuesta|no (est[aá]|se encuentra) en (nuestra |la )?base|no (puedo|s[eé]) (responder|ayudar)|fuera de (mi|la) (conocimiento|base)|no aplica|no corresponde/i.test(raw);
   if (looksLikeRefusal) return 'NO_FAQ';
 
+  // Razonamiento interno filtrado al cliente (ej. "No puedo determinar si el cliente está preguntando…")
+  const looksLikeMetaReasoning = /\bno puedo determinar\b|\bel cliente est[aá] (preguntando|cotizando)\b|\bproporcionar m[aá]s contexto\b|\bpreguntar si el cliente\b|\bdebes preguntar\b|\bno est[aá] claro si\b/i.test(raw);
+  if (looksLikeMetaReasoning) return 'NO_FAQ';
+
   return raw;
 }
 
@@ -556,7 +560,8 @@ REGLAS:
 11. Extras o comuna concreta (con categoría clara): responde solo ese dato, amable y breve, en pesos chilenos.
 12. PROHIBIDO decir "no tengo respuesta" o disculparte cuando no hay match. En ese caso SOLO: NO_FAQ
 13. ANTI-JERGA INTERNA (crítica): NUNCA escribas al cliente palabras como "DATOS OFICIALES", "FAQ", "faq.json", "datos.json", "sección", "base de datos", "CONTEXTO DE SESIÓN" ni "consultar la tabla en...". Habla solo como vendedor: da la info útil en español chileno cordial. NUNCA pegues meta-instrucciones de la base FAQ.
-14. DETECCIÓN DE FRUSTRACIÓN O COMPLEJIDAD (crítica): Si el mensaje denota frustración o enojo con el bot (ej. "bot tonto", "no entiendo", "mal servicio", "asesor ya"), o si consultan requerimientos de facturación, medios de pago complejos, convenios o logística muy avanzada fuera de catálogo y FAQ, responde EXACTAMENTE: SOS_HANDOFF`;
+14. ANTI-RAZONAMIENTO INTERNO (crítica): NUNCA expliques tu incertidumbre ni hables en tercera persona del cliente ("no puedo determinar si el cliente…", "debes preguntar si cotiza…"). Si no estás seguro → responde EXACTAMENTE: NO_FAQ. Si el cliente ya está cotizando EVENTOS, no vuelvas a comparar con barriles desechables salvo que lo pregunte explícitamente.
+15. DETECCIÓN DE FRUSTRACIÓN O COMPLEJIDAD (crítica): Si el mensaje denota frustración o enojo con el bot (ej. "bot tonto", "no entiendo", "mal servicio", "asesor ya"), o si consultan requerimientos de facturación, medios de pago complejos, convenios o logística muy avanzada fuera de catálogo y FAQ, responde EXACTAMENTE: SOS_HANDOFF`;
 
   try {
     let textResult = "NO_FAQ";

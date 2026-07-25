@@ -428,6 +428,39 @@ try {
     }
   ]);
 
+  await runCase('Duda dispensador vs solo barriles en eventos (sin leak IA)', [
+    {
+      input: 'Servicio para Eventos',
+      expectState: 'EVENTOS_RECOGIDA_DATOS'
+    },
+    {
+      input: 'solo o dispensador',
+      expectState: 'EVENTOS_RECOGIDA_DATOS',
+      expectMuted: false,
+      expectIncludes: ['Dispensador Portátil', 'Barriles Desechables', 'invitados'],
+      expectNotIncludes: ['No puedo determinar', 'el cliente está preguntando', 'proporcionar más contexto']
+    }
+  ]);
+
+  await runCase('Anti-loop eventos: FAQ no alarga charla si faltan invitados', [
+    {
+      input: 'eventos',
+      expectState: 'EVENTOS_RECOGIDA_DATOS'
+    },
+    {
+      input: 'Mi gustar',
+      expectState: 'EVENTOS_RECOGIDA_DATOS',
+      expectMuted: false,
+      expectIncludes: ['no estoy seguro', 'invitados']
+    },
+    {
+      input: 'se pueden comprar?',
+      expectState: 'CERRADO',
+      expectMuted: true,
+      expectNotIncludes: ['cotizar y comprar', 'vendemos los dispensadores']
+    }
+  ]);
+
   await runCase('Anti-loop conversacional con 2 strikes', [
     {
       input: 'calentamiento global',

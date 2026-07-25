@@ -10,7 +10,7 @@ import {
   wantsBrowseOnlyClose
 } from '../../../logic/interruptions.js';
 import { matchKeywordIntent, rulesWebVsChat } from '../../../logic/keyword-intent.js';
-import { applyEventDataFromMessage, extractGuestsFromMessage } from '../../../logic/eventos-helpers.js';
+import { applyEventDataFromMessage, extractGuestsFromMessage, asksEventServiceFormatQuestion } from '../../../logic/eventos-helpers.js';
 
 // Bienvenida en 2 burbujas: primero el servicio + web; luego pedimos los datos
 const WELCOME_TEXTS = [
@@ -104,6 +104,19 @@ export const EVENTOS_RECOGIDA_DATOS = defineState({
         success: true,
         nextState: 'EVENTOS_RECOGIDA_DATOS',
         customReply: `Precios en https://cocktailsontap.cl/eventos 🍸\n\nPara seguir aquí, ¿cuántos *invitados* serán aprox?`
+      };
+    }
+
+    // Duda sobre dispensador/muro o "solo barriles" → copy fijo (evita leak de razonamiento FAQ/IA)
+    if (asksEventServiceFormatQuestion(messageText) && !guestsJustParsed) {
+      return {
+        success: true,
+        nextState: 'EVENTOS_RECOGIDA_DATOS',
+        customReply: `En *Servicio para Eventos* los cócteles van en barril y los sirves con nuestra estación (*Dispensador Portátil* o *Muro de Coctelería*): instalación, hielo, vasos y accesorios incluidos. 🍸
+
+Si buscas solo llevar barriles a tu casa, es nuestro servicio de *Barriles Desechables* (5L).
+
+Para recomendarte el formato ideal, ¿cuántos *invitados* serán aproximadamente?`
       };
     }
 
