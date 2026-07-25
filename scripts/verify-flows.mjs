@@ -220,6 +220,23 @@ try {
     }
   ]);
 
+  await runCase('CTA Meta con producto eventos en la frase', [
+    {
+      input: '¡Hola! Quiero más información sobre el Servicio para Eventos',
+      expectState: 'EVENTOS_RECOGIDA_DATOS',
+      expectMuted: false,
+      expectIncludes: ['Eventos', 'invitados']
+    }
+  ]);
+
+  await runCase('CTA Meta con barriles desechables en la frase', [
+    {
+      input: 'Hola, quiero más info sobre los barriles desechables',
+      expectState: 'BARRILES_FILTRO_CANAL',
+      expectMuted: false
+    }
+  ]);
+
   await runCase('CTA keyword más info', [
     {
       input: 'mas info',

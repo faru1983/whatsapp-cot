@@ -3,7 +3,7 @@
 // Textos, prompt IA y router de intención en un solo archivo.
 // ==============================================================================
 import { defineState } from '../../../logic/compile-state.js';
-import { rulesRouterIntencion, rulesWebVsChat } from '../../../logic/keyword-intent.js';
+import { matchKeywordIntent, rulesRouterIntencion, rulesWebVsChat } from '../../../logic/keyword-intent.js';
 import { resolveDecisionIntent } from '../../../logic/decision-intent.js';
 import { asksPriceOrCatalog } from '../../../logic/interruptions.js';
 import { getBrowseOnlyGoodbye } from '../../../views/templates.js';
@@ -54,9 +54,7 @@ const PREGUNTA_POST_AMBAS =
 
 /**
  * isInstagramInfoCta: ¿Es el CTA genérico de anuncio / “quiero más info”?
- * Keywords: más info, más información, información, info
- * (también con "hola" / "quiero…", típico de Meta).
- * Solo usarlo al inicio (sin userIntent).
+ * Solo si NO eligió producto en el mismo mensaje (ej. "más info sobre eventos" → EVENTOS).
  *
  * @param {string} messageText
  * @returns {boolean}
@@ -64,8 +62,12 @@ const PREGUNTA_POST_AMBAS =
 function isInstagramInfoCta(messageText) {
   const t = String(messageText || '').trim();
   if (!t) return false;
-  // más info | más información | información | info
-  return /\b(?:m[aá]s\s+)?info(?:rmaci[oó]n)?\b/i.test(t);
+  if (!/\b(?:m[aá]s\s+)?info(?:rmaci[oó]n)?\b/i.test(t)) return false;
+
+  const productIntent = matchKeywordIntent(messageText, rulesRouterIntencion().filter(
+    (r) => r.label === 'BARRILES' || r.label === 'EVENTOS' || r.label === 'AMBAS'
+  ));
+  return !productIntent;
 }
 
 const AI_PROMPT = `[SISTEMA - ESTADO: FILTRO PRINCIPAL]
@@ -92,15 +94,7 @@ export const ESPERANDO_INTENCION = defineState({
   },
 
   async validateAndProcess(messageText, session) {
-    // CTA Instagram "más información" (solo al inicio, sin producto elegido aún).
-    if (!session.userIntent && isInstagramInfoCta(messageText)) {
-      return {
-        success: true,
-        nextState: 'ESPERANDO_INTENCION',
-        customReply: AD_INFO_REPLY
-      };
-    }
-
+    // 1) Producto en el mensaje (keywords/NLU) antes que CTA genérico de Meta
     if (!session.hasAskedAmbas) {
       const choice = await resolveDecisionIntent({
         messageText,
@@ -143,6 +137,15 @@ export const ESPERANDO_INTENCION = defineState({
           customReplies: MENSAJE_AMBAS
         };
       }
+    }
+
+    // 2) CTA Instagram genérico (sin producto en el mensaje)
+    if (!session.userIntent && isInstagramInfoCta(messageText)) {
+      return {
+        success: true,
+        nextState: 'ESPERANDO_INTENCION',
+        customReply: AD_INFO_REPLY
+      };
     }
 
     if (session.hasAskedAmbas) {
