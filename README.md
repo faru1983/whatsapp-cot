@@ -811,8 +811,3 @@ Si el archivo no está en `assets/`, el bot **se silencia** (sin mensaje al clie
 ## Código libre / licencia y autor
 
 Este proyecto es de **código libre**: puedes estudiarlo, usarlo para aprender, adaptarlo a tu negocio y compartirlo respetando el espíritu abierto del código.
-
-Hecho por **Felipe Ramírez**  
-Correo: [feliperamirez1983@gmail.com](mailto:feliperamirez1983@gmail.com)
-
-Si te sirvió — aunque sea un poco — **escríbeme para contármelo**. Me alegra saber que el bot (o el README) te ayudó, y también recibo con gusto dudas, ideas o mejoras.
