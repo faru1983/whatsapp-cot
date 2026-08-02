@@ -104,6 +104,14 @@ export function getSession(sessionId) {
  */
 export function saveSession(sessionId, session) {
   if (session?.history && Array.isArray(session.history.turns) && session.history.turns.length > 16) {
+    // Truncamos a 16 turnos (costo/latencia LLM). Avisamos una vez por sesión
+    // para diagnosticar conversaciones largas donde el fallback IA “se pone raro”.
+    if (!session._historyTrimWarned) {
+      console.warn(
+        `[db] Historial truncado a 16 turnos (sesión ${sessionId}, tenía ${session.history.turns.length}).`
+      );
+      session._historyTrimWarned = true;
+    }
     session.history.turns = session.history.turns.slice(-16);
   }
   const data = JSON.stringify(session);

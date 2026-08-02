@@ -18,6 +18,7 @@ index.js → engine.js → statesMap (flows/index.js)
   ↘ logic/interruptions.js + decision-intent + keyword-intent + nlu-intent
   ↘ logic/validators + actions (registro por nombre)
   ↘ logic/eventos-helpers.js + order-builder.js + utils.js + media.js
+  ↘ logic/cot-api.js + cot-catalog.js + cot-event-quote.js + cot-barriles-sale.js + cot-contact.js + cot-barriles-contact.js + cot-eventos-contact.js
   ↘ llm.js (fallback/NLU/FAQ) + db.js
   ↘ whatsapp-send.js + business-labels.js
   ↘ views/templates.js (solo compartidos) + prompts.js (solo readPrompt)
@@ -30,7 +31,7 @@ index.js → engine.js → statesMap (flows/index.js)
 | `src/core/engine.js` | Máquina de estados + red de seguridad + CLI (`test:local`) |
 | `src/core/llm.js` | `generateResponse`, extractores NLU, `classifyStepIntent`, `responderFAQ` |
 | `src/core/db.js` | Sesiones SQLite |
-| `src/flows/index.js` | `statesMap` unificado (13 estados) |
+| `src/flows/index.js` | `statesMap` unificado (17 estados) |
 | `src/flows/router/states/` | `ESPERANDO_INTENCION` |
 | `src/flows/barriles/states/` | Un archivo por `BARRILES_*` |
 | `src/flows/eventos/states/` | Un archivo por `EVENTOS_*` |
@@ -39,6 +40,13 @@ index.js → engine.js → statesMap (flows/index.js)
 | `src/logic/interruptions.js` | Ruido, precio/carta, mirón, `seguimos` |
 | `src/logic/validators/` + `actions/` | Registro de utilidades/acciones por nombre |
 | `src/logic/eventos-helpers.js` | Helpers del flujo eventos (formato, carrito, quote) |
+| `src/logic/cot-api.js` | Cliente HTTP: catalog, quotes, direct-sales |
+| `src/logic/cot-catalog.js` | Catálogo vivo + mapeo carrito → productId/size |
+| `src/logic/cot-event-quote.js` | Payload + submit cotización evento (`/quotes`) |
+| `src/logic/cot-barriles-sale.js` | Payload + submit venta desechable (`/direct-sales`) |
+| `src/logic/cot-contact.js` | Parsers compartidos nombre/apellido/email |
+| `src/logic/cot-barriles-contact.js` | Helpers contacto → confirmación → API (Barriles) |
+| `src/logic/cot-eventos-contact.js` | Helpers contacto → confirmación → API (Eventos) |
 | `src/logic/keyword-intent.js` | Cajita 1: keywords → etiqueta |
 | `src/logic/nlu-intent.js` | Cajita 2: clasificador IA |
 | `src/logic/decision-intent.js` | Keywords → NLU en menús / sí-no |
@@ -91,9 +99,9 @@ Cada estado exporta (vía `defineState`):
 
 **Router:** `ESPERANDO_INTENCION` → BARRILES / EVENTOS / ambas / hint de precios.
 
-**Barriles:** `BARRILES_FILTRO_CANAL` (web + comuna/fecha) → `BARRILES_RECOGIDA_PRODUCTOS` → `BARRILES_REVISION_COTIZACION` (si ya hay datos; si no → `BARRILES_RECOGIDA_DATOS` como red de seguridad) → `BARRILES_ROUTER_MODIFICACION`.
+**Barriles:** `BARRILES_FILTRO_CANAL` (web + comuna/fecha) → `BARRILES_RECOGIDA_PRODUCTOS` → `BARRILES_REVISION_COTIZACION` (si ya hay datos; si no → `BARRILES_RECOGIDA_DATOS` como red de seguridad) → `BARRILES_ROUTER_MODIFICACION` (modificar) o `BARRILES_DATOS_CONTACTO` (generar compra) → `BARRILES_CONFIRMAR_COMPRA` → `POST /api/v1/direct-sales` → `CERRADO`.
 
-**Eventos:** `EVENTOS_RECOGIDA_DATOS` → `EVENTOS_CONFIRMAR_DATOS` → `EVENTOS_ELECCION_FORMATO` → `EVENTOS_INTRO_MENU` → `EVENTOS_ELECCION_MENU` → `EVENTOS_COTIZACION`.
+**Eventos:** `EVENTOS_RECOGIDA_DATOS` → `EVENTOS_CONFIRMAR_DATOS` → `EVENTOS_ELECCION_FORMATO` → `EVENTOS_INTRO_MENU` → `EVENTOS_ELECCION_MENU` → `EVENTOS_COTIZACION` → `EVENTOS_DATOS_CONTACTO` → `EVENTOS_CONFIRMAR_ENVIO` → `POST /api/v1/quotes` → `CERRADO`.
 
 IDs semánticos (`BARRILES_*` / `EVENTOS_*`); transiciones reales en cada `nextState`.
 
@@ -110,7 +118,7 @@ IDs semánticos (`BARRILES_*` / `EVENTOS_*`); transiciones reales en cada `nextS
 ## Datos y config
 
 - `db/datos.json`, `db/faq.json`
-- `.env`: `LLM_PROVIDER`, API keys, `ADMIN_NUMBERS`, `LABEL_*`, `SECURITY_MAX_CONSECUTIVE_ERRORS`, `SECURITY_MAX_INTENT_SWITCHES`
+- `.env`: `LLM_PROVIDER`, API keys, `COT_API_BASE_URL`, `COT_API_KEY`, `ADMIN_NUMBERS`, `LABEL_*`, `SECURITY_MAX_CONSECUTIVE_ERRORS`, `SECURITY_MAX_INTENT_SWITCHES`
 
 ## Convenciones al editar
 

@@ -111,7 +111,7 @@ Al agregar funcionalidad:
 - Cambios mínimos: solo el estado/flujo pedido.
 - Reutilizar: `normalizeString`, `parseDate`, `OrderBuilder`, `interruptions`, `resolveDecisionIntent`, `img()`, etc.
 - Validación programática primero; LLM como fallback / NLU.
-- Keywords de decisión en *negrita* en el copy (evitar menús 1/2 salvo que el paso ya los use).
+- Decisiones: menú con emojis numéricos (`1️⃣`/`2️⃣`) + sinónimos en *negrita*; aceptar emoji o dígito en input (`matchesMenuOption`).
 - Errores: `try/catch` + `console.error`; no silenciar.
 - Sesiones: mutar en el estado; `saveSession` desde `engine.js`.
 - Imports ESM con extensión `.js`.

@@ -12,6 +12,7 @@ import { fileURLToPath } from 'url';
 import { generateResponse, responderFAQ } from './llm.js';
 import { loadBotConfig } from './config.js';
 import { getSession, saveSession, resetSession } from './db.js';
+import { warmCotCatalog } from '../logic/cot-catalog.js';
 
 import { statesMap } from '../flows/index.js';
 import { readPrompt } from '../views/prompts.js';
@@ -19,7 +20,7 @@ import { buildFaqCatalogContext, sanitizeCustomerFacingReply } from '../logic/ut
 import { isGreetingOrNoise, wantsExplicitHandoff } from '../logic/interruptions.js';
 import { getPendingFlowRequirement } from '../logic/flow-stall.js';
 import { isImagePart, isVideoPart, isMediaPart, assertImageExists } from '../logic/media.js';
-import { buildAdminSosBody, HANDOFF_CLIENT_REPLY, getBrowseOnlyGoodbye } from '../views/templates.js';
+import { buildAdminSosBody, HANDOFF_CLIENT_REPLY } from '../views/templates.js';
 import { FAQ_JSON_PATH } from './paths.js';
 import { enableTestDebug, testLog } from './debug-log.js';
 import {
@@ -31,7 +32,7 @@ import {
   withoutAssistantFooter,
   stepQuestionAfterIdentityBody
 } from '../logic/flow-rails.js';
-import { wantsBrowseOnlyClose } from '../logic/interruptions.js';
+import { jidToE164 } from '../logic/cot-event-quote.js';
 
 const isMainModule = process.argv[1] === fileURLToPath(import.meta.url);
 
@@ -295,6 +296,11 @@ async function processMessageUnlocked(sessionId, messageText, options = {}) {
 
   let session = getSession(sessionId);
 
+  // Guardamos el JID y el teléfono E.164 para la API de cotizaciones web
+  session.sessionId = sessionId;
+  const phone = jidToE164(sessionId);
+  if (phone) session.clientPhoneE164 = phone;
+
   // ==============================================================================
   // 1. SILENCIO (MUTE) Y COMANDOS DEL SISTEMA
   // ==============================================================================
@@ -378,7 +384,9 @@ async function processMessageUnlocked(sessionId, messageText, options = {}) {
   // 1.1 Escape global a humano (handoff seguro)
   const isNoWord = /^no$/i.test(messageText.trim());
   const isSosWord = /^sos$/i.test(messageText.trim());
-  const SOS_NO_EXCLUDED_STATES = ['BARRILES_RECOGIDA_DATOS'];
+  // En el router, "no" no significa handoff: mostramos nuevamente el menú.
+  // El traspaso inicial ocurre con 3️⃣ o una petición explícita de HUMANO.
+  const SOS_NO_EXCLUDED_STATES = ['ESPERANDO_INTENCION', 'BARRILES_RECOGIDA_DATOS'];
   const wantsNoHandoff = isNoWord && !SOS_NO_EXCLUDED_STATES.includes(currentStateId);
   const wantsHandoff = isSosWord || wantsNoHandoff || wantsExplicitHandoff(messageText);
 
@@ -392,18 +400,6 @@ async function processMessageUnlocked(sessionId, messageText, options = {}) {
   }
 
   session.history.turns.push({ role: 'user', text: messageText });
-
-  // 2.5 Mirón en router (antes del estado, evita quemar FAQ/strikes en entrada Meta)
-  if (currentStateId === 'ESPERANDO_INTENCION' && wantsBrowseOnlyClose(messageText)) {
-    cliLog('router: mirón → cierre suave + mute');
-    session.isMuted = true;
-    session.silenciado_timestamp = Date.now();
-    session.currentState = 'CERRADO';
-    const goodbye = getBrowseOnlyGoodbye();
-    session.history.turns.push({ role: 'model', text: goodbye });
-    saveSession(sessionId, session);
-    return goodbye;
-  }
 
   let currentState = statesMap[currentStateId];
   cliLog(`paso actual: ${currentStateId}`);
@@ -454,7 +450,10 @@ async function processMessageUnlocked(sessionId, messageText, options = {}) {
         
         if (session.intentSwitchCount >= maxIntentSwitches) {
           cliLog(`SEGURIDAD: demasiados cambios de intención (>= ${maxIntentSwitches}). Silenciando.`);
+          // Mismo contrato que el resto de SOS: mute + CERRADO (no dejar a mitad de flujo)
           session.isMuted = true;
+          session.silenciado_timestamp = Date.now();
+          session.currentState = 'CERRADO';
           // Alerta SOS unificada: cabecera (cliente) la arma index.js
           if (alertAdmin) {
             alertAdmin({
@@ -472,8 +471,35 @@ async function processMessageUnlocked(sessionId, messageText, options = {}) {
 
         cliLog(`SWITCH: cliente cambia intención → ${switchIntent}`);
         session.userIntent = switchIntent;
-        session.currentState = switchIntent === 'BARRILES' ? 'BARRILES_FILTRO_CANAL' : 'EVENTOS_RECOGIDA_DATOS';
         session.consecutiveErrors = 0;
+
+        // Limpiamos datos del flujo que se abandona para no “saltar” pasos
+        // con invitados/fecha/carrito viejos al volver a entrar.
+        if (switchIntent === 'BARRILES') {
+          session.guests = null;
+          session.date = null;
+          session.location = null;
+          session.isRM = undefined;
+          session.celebrationType = null;
+          session.eventoFormato = null;
+          session.orderBuilder = {
+            type: 'desechable',
+            products: {},
+            extras: {},
+            clientData: { name: null, date: null, location: null }
+          };
+        } else if (switchIntent === 'EVENTOS') {
+          // No reutilizamos el carrito desechable en Eventos (formato distinto)
+          session.orderBuilder = null;
+          session.guests = null;
+          session.date = null;
+          session.location = null;
+          session.isRM = undefined;
+          session.celebrationType = null;
+          session.eventoFormato = null;
+        }
+
+        session.currentState = switchIntent === 'BARRILES' ? 'BARRILES_FILTRO_CANAL' : 'EVENTOS_RECOGIDA_DATOS';
 
         // Puede ser string o array (info + pregunta en burbujas separadas)
         const newState = statesMap[session.currentState];
@@ -491,7 +517,12 @@ async function processMessageUnlocked(sessionId, messageText, options = {}) {
   const faqSidequestAllowed = canUseFaqSidequest(session, pendingFlow);
 
   // Si ya hubo un strike y el paso sigue pendiente, no usamos FAQ: dejamos que el fallback cuente el strike
-  if (isQuestion && currentStateId !== 'CERRADO' && !flowAlreadyStalling && faqSidequestAllowed) {
+  // El router inicial es cerrado y determinístico: primero debe elegirse
+  // Eventos o Barriles. No permitimos que FAQ/IA responda antes de esa elección.
+  const canPrecheckFaq = currentStateId !== 'CERRADO'
+    && currentStateId !== 'ESPERANDO_INTENCION';
+
+  if (isQuestion && canPrecheckFaq && !flowAlreadyStalling && faqSidequestAllowed) {
     cliLog(`FAQ PRE-CHECK: Detectada posible pregunta en '${messageText}'`);
     const faqData = JSON.parse(fs.readFileSync(FAQ_JSON_PATH, 'utf8'));
     const faqResponse = await responderFAQ(messageText, faqData, {
@@ -548,14 +579,23 @@ async function processMessageUnlocked(sessionId, messageText, options = {}) {
     const pendingBefore = getPendingFlowRequirement(session, currentStateId);
     const stateAdvanced = Boolean(processResult.nextState && processResult.nextState !== currentStateId);
     const pendingAfter = getPendingFlowRequirement(session, processResult.nextState || currentStateId);
+    // flowProgress: el estado avanzó el dato pendiente sin cambiar de paso
+    // (ej. recibió el email y ahora pide dirección). Sin esto, success:true
+    // con el mismo pending nunca llegaba al anti-loop (DATOS_CONTACTO).
+    const madePartialProgress = Boolean(processResult.flowProgress);
 
-    // Solo reseteamos strikes si el flujo avanzó o dejó de estar bloqueado
-    if (stateAdvanced || !pendingBefore || (pendingBefore && !pendingAfter)) {
+    // Solo reseteamos strikes si el flujo avanzó, hubo progreso parcial, o ya no hay pendiente
+    if (stateAdvanced || madePartialProgress || !pendingBefore || (pendingBefore && !pendingAfter)) {
       session.consecutiveErrors = 0;
+      cliLog(`paso OK (success${madePartialProgress && !stateAdvanced ? ', progreso parcial' : ''})`);
+    } else if (pendingBefore && pendingAfter && pendingBefore === pendingAfter && !stateAdvanced) {
+      // success:true pero mismo requisito pendiente → cuenta como stall (anti-loop)
+      const sosReply = registerFlowStallStrike(pendingAfter);
+      if (sosReply !== null) return sosReply;
+      cliLog('paso OK pero el flujo sigue pendiente → strike');
     } else {
-      cliLog('paso OK pero el flujo sigue pendiente → strikes sin reset');
+      cliLog('paso OK (success)');
     }
-    cliLog(`paso OK (success)`);
     
     if (processResult.shouldReset) {
       resetSession(sessionId);
@@ -639,15 +679,38 @@ async function processMessageUnlocked(sessionId, messageText, options = {}) {
 
     /**
      * buildNoInfoReply: Plantilla fija cuando FAQ/IA no ayudan.
-     * Si ya eligió Barriles/Eventos, no preguntamos "¿seguir con X?" (es redundante).
+     * En el router (sin path) re-mostramos el menú con tono cordial (nunca “no estoy seguro”).
+     * En pasos de DATOS (fecha, comuna, cócteles) no pedimos emoji de menú.
+     * En pasos de DECISIÓN (1️⃣/2️⃣) sí recordamos responder con el número.
      */
     const buildNoInfoReply = () => {
       const q = withoutAssistantFooter(finalQuestion);
       const handoff = 'O escribe *NO* o *HUMANO* para hablar con alguien del equipo.';
       const hasPath = session.userIntent === 'BARRILES' || session.userIntent === 'EVENTOS';
-      if (hasPath) {
-        return `Disculpa, soy un *asistente virtual* y no estoy seguro de cómo responder a eso. 😔\n\n${q}\n\n${handoff}`;
+      // Pendientes de menú numerado vs captura libre de datos
+      const menuPendingKeys = new Set([
+        'intent', 'confirm', 'format', 'continue', 'confirm_quote', 'mod_choice'
+      ]);
+      const isMenuStep = menuPendingKeys.has(pendingFlow)
+        || currentStateId === 'ESPERANDO_INTENCION';
+
+      // Entrada: miss = menú de nuevo, sin plantilla “no estoy seguro”
+      if (currentStateId === 'ESPERANDO_INTENCION' && !hasPath) {
+        return stepQuestionAfterIdentityBody(
+          'Disculpa, no te entendí bien 😊 Soy el *asistente virtual* de Cocktails on Tap.\nElige una opción del menú (puedes responder con el número o el emoji).',
+          finalQuestion
+        );
       }
+
+      if (hasPath && isMenuStep) {
+        return `Disculpa, soy un *asistente virtual* y no estoy seguro de cómo responder a eso. 😔\n\nResponde con el número de la opción (1️⃣, 2️⃣…) o la palabra en *negrita* si puedes.\n\n${q}\n\n${handoff}`;
+      }
+
+      if (hasPath) {
+        // Paso de datos (fecha/comuna/cócteles/contacto): re-pregunta clara, sin menú
+        return `Disculpa, no te entendí bien 😊\n\n${q}\n\n${handoff}`;
+      }
+
       return `Disculpa, soy un *asistente virtual* y no estoy seguro de cómo responder a eso. 😔\n\n¿Quieres seguir con tu cotización?\n\n${q}\n\n${handoff}`;
     };
 
@@ -668,12 +731,15 @@ async function processMessageUnlocked(sessionId, messageText, options = {}) {
     // (ej. "Hoooola q genial", "gracias", "ok" a mitad de pedido)
     if (isGreetingOrNoise(trimmedMessage)) {
       cliLog('ruido/cortesía → re-pregunta fija (sin strike, sin IA)');
-      reply = currentStateId === 'ESPERANDO_INTENCION'
-        ? stepQuestionAfterIdentityBody(
+      if (currentStateId === 'ESPERANDO_INTENCION') {
+        reply = stepQuestionAfterIdentityBody(
           '¡Hola! 🍸 Soy el *asistente virtual* de Cocktails on Tap.',
           finalQuestion
-        )
-        : `Disculpa, no te entendí bien 😊\nResponde con la palabra en *negrita* si puedes.\n\n${finalQuestion}`;
+        );
+      } else {
+        // Datos libres: no empujar menú 1️⃣/2️⃣
+        reply = `Disculpa, no te entendí bien 😊\n\n${finalQuestion}`;
+      }
       session.history.turns.push({ role: 'model', text: reply });
       saveSession(sessionId, session);
       return reply;
@@ -697,7 +763,9 @@ async function processMessageUnlocked(sessionId, messageText, options = {}) {
         );
       }
 
-      reply = `Disculpa, soy un *asistente virtual* y estoy para ayudarte a cotizar 🍸\nResponde con la palabra en *negrita* si puedes.\n\n${withoutAssistantFooter(finalQuestion)}\n\nO escribe *NO* o *HUMANO* para hablar con alguien del equipo.`;
+      reply = currentStateId === 'ESPERANDO_INTENCION'
+        ? buildNoInfoReply()
+        : `Disculpa, soy un *asistente virtual* y estoy para ayudarte a cotizar 🍸\nResponde con el número de la opción (1️⃣, 2️⃣…) o la palabra en *negrita* si puedes.\n\n${withoutAssistantFooter(finalQuestion)}\n\nO escribe *NO* o *HUMANO* para hablar con alguien del equipo.`;
       session.history.turns.push({ role: 'model', text: reply });
       saveSession(sessionId, session);
       return reply;
@@ -868,24 +936,20 @@ function formatCliSnapshotLines(session, opts = {}) {
 }
 
 /**
- * printCliStartupIntro: Un solo bloque de bienvenida + panel inicial.
+ * printCliStartupIntro: Bienvenida mínima + estado actual.
  *
  * @param {object} session
  */
 function printCliStartupIntro(session) {
-  const snapshot = formatCliSnapshotLines(session).map((l) => `  ${l}`).join('\n');
+  const stateId = session.currentState || '(sin estado)';
   console.log(`
 ─────────────────────────────────────────
   Simulador Local — WhatsApp Lite Bot
   Rails: estado · stall · strikes · FAQ
 
-  Escribe como cliente. Tras cada mensaje verás
-  solo el estado; el panel completo: /status
-
   Comandos: /status /help /reset /mute /unmute /exit
 
-  Panel interno (inicio):
-${snapshot}
+Estado: ${stateId}
 ─────────────────────────────────────────
 `);
 }
@@ -941,7 +1005,8 @@ Ejemplos para probar:
  * Tras cada mensaje imprime la respuesta del bot + panel interno completo.
  */
 function cliChat() {
-  const sessionId = 'cli-test@s.whatsapp.net';
+  // Número ficticio E.164-compatible para que cot-api/admin muestren WhatsApp en CLI
+  const sessionId = '56911111111@s.whatsapp.net';
 
   if (!rl) {
     rl = readline.createInterface({
@@ -973,8 +1038,24 @@ function cliChat() {
     const sessionBefore = getSession(sessionId);
     const wasMuted = !!sessionBefore.isMuted;
     const stateBefore = sessionBefore.currentState || '(sin estado)';
+    const adminAlerts = [];
 
-    const response = await processMessage(sessionId, message);
+    // En el simulador, las alertas SOS se imprimen para depurar (en WhatsApp van al admin)
+    const response = await processMessage(sessionId, message, {
+      sendAdminAlert: (alert) => {
+        adminAlerts.push(alert);
+        const type = String(alert?.type || 'ALERT').toUpperCase();
+        const title = alert?.title || '(sin título)';
+        cliLog(`SOS → alerta al administrador`);
+        cliLog(`  tipo: ${type}`);
+        cliLog(`  título: ${title}`);
+        if (alert?.body) {
+          for (const line of String(alert.body).split('\n')) {
+            cliLog(`  ${line}`);
+          }
+        }
+      }
+    });
 
     const sessionAfter = getSession(sessionId);
 
@@ -994,6 +1075,9 @@ function cliChat() {
           if (part.caption) console.log(part.caption);
         }
       }
+    } else if (adminAlerts.length > 0 && !wasMuted) {
+      // Mute silencioso con SOS: el cliente no ve nada, pero el test sí muestra el motivo
+      cliLog('Sin respuesta al cliente (mute silencioso + SOS)');
     }
 
     if (cmd === '/reset') {
@@ -1005,6 +1089,9 @@ function cliChat() {
     const isMutedNow = !!sessionAfter.isMuted;
     if (!wasMuted && isMutedNow) {
       cliLog(`MUTE activado → estado: ${stateAfter}`);
+      if (adminAlerts.length > 0) {
+        cliLog(`SOS enviado al administrador (${adminAlerts.map((a) => a.title || a.type).join(', ')})`);
+      }
       cliLog(`Los siguientes mensajes se ignoran. Usa /unmute o /reset.`);
     } else if (wasMuted && isMutedNow) {
       cliLog(`MUTE activo — mensaje ignorado. Estado: ${stateAfter}`);
@@ -1022,6 +1109,13 @@ function cliChat() {
 }
 
 if (isMainModule) {
-  printCliStartupIntro(getSession('cli-test@s.whatsapp.net'));
+  // Precargamos antes de dibujar "Tú:" y sin logs para que ninguna salida
+  // asíncrona del catálogo se mezcle con el mensaje que escribe el tester.
+  if (botConfig.cotApi?.configured) {
+    await warmCotCatalog({ silent: true });
+  }
+  // JID sintético con forma de celular Chile: así la API/admin ven un WhatsApp
+  // en pruebas locales (en producción llega el JID real del cliente).
+  printCliStartupIntro(getSession('56911111111@s.whatsapp.net'));
   cliChat();
 }

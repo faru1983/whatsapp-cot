@@ -5,22 +5,30 @@
 import { defineState } from '../../../logic/compile-state.js';
 import { parseClientName, parseDate, findLocationByFuzzyMatch } from '../../../logic/utils.js';
 import { withAssistantFooter } from '../../../logic/flow-rails.js';
+import { exampleConcreteDateHint, normalizeBotDateText } from '../../../logic/cot-event-quote.js';
 
-const SHORT_Q = withAssistantFooter(`¿Me pasas la *fecha* y *comuna* de entrega?
-Ejemplo: _"Para este sábado en Providencia"_`);
+/**
+ * deliveryExample: Fecha concreta cercana + comuna (evita "este sábado").
+ *
+ * @returns {string}
+ */
+function deliveryExample() {
+  return `_"${exampleConcreteDateHint()} en Providencia"_`;
+}
 
 const AI_PROMPT = `[SISTEMA - ESTADO: DATOS DE DESPACHO]
 Faltan fecha y/o comuna para Barriles Desechables (o el cliente quiere corregirlas).
 1. Dudas: transferencias OK; regiones por encomienda. NUNCA inventes tarifas.
-2. Cierra pidiendo lo que falte (fecha y/o comuna). NO menciones extras.`;
+2. Cierra pidiendo lo que falte (fecha y/o comuna) con día concreto (ej. "5 de agosto"). NO menciones extras.`;
 
 export const BARRILES_RECOGIDA_DATOS = defineState({
   id: 'BARRILES_RECOGIDA_DATOS',
   promptQuestion: () => [
     `Para armar la cotización con despacho, necesito *fecha* y *comuna* de entrega.`,
-    `Ejemplo: _"Para este sábado en Providencia"_`
+    `Ejemplo: ${deliveryExample()}`
   ],
-  shortQuestion: SHORT_Q,
+  shortQuestion: () => withAssistantFooter(`¿Me pasas la *fecha* y *comuna* de entrega?
+Ejemplo: ${deliveryExample()}`),
   aiPrompt: AI_PROMPT,
 
   async validateAndProcess(messageText, session) {
@@ -44,11 +52,14 @@ export const BARRILES_RECOGIDA_DATOS = defineState({
 
     let hasNewInfo = false;
     let parsedName = parseClientName(messageText) || session.orderBuilder.clientData.name;
-    const parsedDate = parseDate(messageText) || session.orderBuilder.clientData.date;
+    const rawDate = parseDate(messageText);
+    const parsedDate = rawDate
+      ? (normalizeBotDateText(rawDate) || rawDate)
+      : session.orderBuilder.clientData.date;
     const locationSearch = findLocationByFuzzyMatch(messageText);
 
     if (parseClientName(messageText)) hasNewInfo = true;
-    if (parseDate(messageText)) hasNewInfo = true;
+    if (rawDate) hasNewInfo = true;
     if (locationSearch) {
       session.orderBuilder.clientData.location = locationSearch.name;
       session.orderBuilder.clientData.locationData = locationSearch;

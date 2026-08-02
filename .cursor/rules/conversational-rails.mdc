@@ -13,7 +13,7 @@ alwaysApply: false
 
 ## Principio
 
-El bot guía cotizaciones de Meta Ads: **dato pendiente primero**, re-pregunta clara, máximo **1 FAQ lateral** por dato bloqueado, y a **2 strikes** (`SECURITY_MAX_CONSECUTIVE_ERRORS=2`) → **handoff hablado** + mute + admin (nunca silencio).
+El bot guía cotizaciones de Meta Ads: **dato pendiente primero**, re-pregunta clara, máximo **1 FAQ lateral** por dato bloqueado, y a **2 strikes** (`SECURITY_MAX_CONSECUTIVE_ERRORS=2`) → **handoff hablado** + mute + admin. Excepción: segundo miss del router inicial → SOS silencioso.
 
 ## Engine (`engine.js`)
 
@@ -27,7 +27,12 @@ El bot guía cotizaciones de Meta Ads: **dato pendiente primero**, re-pregunta c
 
 - Un archivo por paso: textos + `aiPrompt` + `validateAndProcess`.
 - `shortQuestion` con `withAssistantFooter()` de `flow-rails.js`.
-- Menús / sí-no: `resolveDecisionIntent` (keywords → NLU). Pasos de datos: parsers, no NLU de decisión.
+- **Decisiones:** menú con emojis numéricos (`1️⃣`/`2️⃣`/`3️⃣` vía `formatMenuBlock` / `matchesMenuOption`). Keywords: emoji, dígito o sinónimo → NLU si falla.
+- **Datos** (fecha, comuna, cócteles, contacto): texto libre + parsers; no menú numerado.
+- En `ESPERANDO_INTENCION` no se usa NLU: solo reglas claras abren Eventos/Barriles.
+- Primer texto sin intención en `ESPERANDO_INTENCION` → muestra el menú una vez.
+- Segunda respuesta sin opción válida → `CERRADO` + mute + SOS admin, sin mensaje al cliente.
+- Opción `3️⃣` / `HUMANO` → mute + alerta al administrador.
 - Interrupciones locales: mirón → mute; precio → tip + re-ask del dato.
 
 ## Tests

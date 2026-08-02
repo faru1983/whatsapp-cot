@@ -3,6 +3,10 @@
 // Dos modos:
 //   1) def.validateAndProcess ya viene → solo normaliza promptQuestion / aiPrompt
 //   2) type: 'menu' + validators[] → arma validateAndProcess recorriendo validadores
+//
+// Nota (revisión pre-prod): hoy ningún estado en flows/*/states usa type:'menu';
+// todos traen validateAndProcess custom. El modo 2 + ACTIONS se mantienen como
+// framework para menús declarativos futuros (no es código muerto a eliminar).
 // ==============================================================================
 import { ACTIONS } from './actions/index.js';
 import { VALIDATORS, getKeywordRules } from './validators/index.js';

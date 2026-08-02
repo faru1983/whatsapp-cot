@@ -25,7 +25,7 @@ import {
 
 /**
  * isGreetingOrNoise: ¿El mensaje es solo cortesía, saludo o entusiasmo?
- * Ej.: "hola", "Hoooola q genial", "ok", "gracias", "súper".
+ * Ej.: "hola", "¡Hola!", "Hola buen dia", "Hoooola q genial", "ok", "gracias".
  * NO es una elección de canal ni de producto: el bot debe re-preguntar el paso.
  *
  * @param {string} messageText - Lo que escribió el cliente
@@ -35,27 +35,38 @@ export function isGreetingOrNoise(messageText) {
   const trimmed = String(messageText ?? '').trim();
   if (!trimmed) return true;
 
-  // Saludos / ok / gracias / listo (con signos o espacios de más)
-  if (/^(hola+|holi|buenas|buen\s*d[ií]a|buenas\s*tardes|buenas\s*noches|hey|hi|hello|ok|okay|dale|gracias|thank(s)?|ya|listo|de\s+nada|genial|super|súper|perfecto|buenísimo|buenisimo|wow|wena|wenas)[\s!.?]*$/i.test(trimmed)) {
+  // Quitamos ¡ ¿ y puntuación de bordes (WhatsApp manda mucho "¡Hola!")
+  const stripped = trimmed
+    .replace(/^[¡!¿?\s.,;:…-]+/u, '')
+    .replace(/[¡!¿?.…,;:\s-]+$/u, '')
+    .trim();
+  if (!stripped) return true;
+
+  // Saludos / ok / gracias / listo (mensaje completo)
+  if (/^(hola+|holi|buenas|buen\s*d[ií]a|buenas\s*tardes|buenas\s*noches|hey|hi|hello|ok|okay|dale|gracias|thank(s)?|ya|listo|de\s+nada|genial|super|súper|perfecto|buenísimo|buenisimo|wow|wena|wenas)$/i.test(stripped)) {
     return true;
   }
 
-  // Entusiasmo / saludo alargado + palabras cortas ("Hoooola q genial", "hola qué bueno")
-  const norm = normalizeString(trimmed);
-  if (/^h+o+l+a+\b/.test(norm) || /^(holi|buenas|hey|hi)\b/.test(norm)) {
+  // Entusiasmo / saludo + cortesía ("Hola buen dia", "Hoooola q genial", "hola qué tal")
+  const norm = normalizeString(stripped);
+  if (
+    /^h+o+l+a+\b/.test(norm)
+    || /^(holi|buenas|buen\s*dia|buenas\s*tardes|buenas\s*noches|hey|hi|hello)\b/.test(norm)
+  ) {
     // Solo ruido si el resto son muletillas (no pide precio, web, chat, cóctel…)
     const rest = norm
       .replace(/^h+o+l+a+\b/, '')
-      .replace(/^(holi|buenas|hey|hi)\b/, '')
-      .replace(/\b(q|que|qué|muy|tan|la|el|lo|de|y|a|o|u|x|xd|jaja+|jeje+)\b/g, ' ')
-      .replace(/\b(genial|super|buen[oa]s?|buenisimo|buenísimo|bac[aá]n|wena|wenas|gracias|ok|okay|dale|perfecto|wow|hola)\b/g, ' ')
+      .replace(/^(holi|buenas\s*tardes|buenas\s*noches|buen\s*dia|buenas|hey|hi|hello)\b/, '')
+      .replace(/\b(q|que|que tal|como estas|como esta|como te va|muy|tan|la|el|lo|de|y|a|o|u|x|xd|jaja+|jeje+|amigo|amiga|todos|todas)\b/g, ' ')
+      .replace(/\b(buen|dia|tardes|noches|dias)\b/g, ' ')
+      .replace(/\b(genial|super|buen[oa]s?|buenisimo|bacan|wena|wenas|gracias|ok|okay|dale|perfecto|wow|hola)\b/g, ' ')
       .replace(/[!?.\s]+/g, ' ')
       .trim();
     if (rest.length === 0) return true;
   }
 
   // Frase corta de solo entusiasmo (sin verbo de compra ni canal)
-  if (/^(q|que|qué)?\s*(genial|bac[aá]n|buen[oa]|buenisimo|buenísimo|super|súper|wow)[\s!.?]*$/i.test(trimmed)) {
+  if (/^(q|que)?\s*(genial|bacan|buen[oa]|buenisimo|super|wow)$/i.test(norm)) {
     return true;
   }
 

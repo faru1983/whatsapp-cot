@@ -456,9 +456,10 @@ export function hasDrinkSelection(text) {
 	}
 
 	const normalizedText = text.toLowerCase().normalize('NFD').replace(/[\u0300-\u036f]/g, '');
-	const hasNumbers = /\b[1-9]\d*\b/.test(text);
 
-	return dynamicDrinkKeywords.test(normalizedText) || hasNumbers;
+	// Solo palabras de cóctel / litraje. Un número suelto (ej. "5 de agosto")
+	// NO cuenta: si no, fechas y comunas disparan el NLU de productos.
+	return dynamicDrinkKeywords.test(normalizedText);
 }
 
 // ==============================================================================
@@ -667,8 +668,42 @@ function buildLocationSearchKeys(comunaName) {
 const LOCATION_CAPTURE_REJECT_RE = /\b(que|cual|cuales|donde|cuando|como|pueda|puedo|podemos|ayudarte|ayudar|ayudarle|algo|mas|este|esta|ese|esa|nada|todo|todos|hoy|aqui|ahi|ese|hablar|podria|puede|tienen|tienes|hay)\b/i;
 
 /**
+ * Tokens de fecha/tiempo que NUNCA son comuna tras "en …".
+ * Cubre la familia del bug "50 invitados en diciembre" → comuna diciembre,
+ * y hermanos: "en lunes", "en marzo", "en la tarde", etc.
+ */
+const LOCATION_DATE_TIME_TOKENS = new Set([
+	// Meses
+	'enero', 'febrero', 'marzo', 'abril', 'mayo', 'junio',
+	'julio', 'agosto', 'septiembre', 'octubre', 'noviembre', 'diciembre',
+	// Días de la semana
+	'lunes', 'martes', 'miercoles', 'miércoles', 'jueves', 'jeuves',
+	'viernes', 'sabado', 'sábado', 'domingo',
+	// Relativos / momento del día / estaciones
+	'hoy', 'manana', 'mañana', 'ayer', 'tarde', 'noche', 'madrugada',
+	'semana', 'mes', 'ano', 'año', 'finde', 'weekend',
+	'proxima', 'próxima', 'proximo', 'próximo', 'pasado',
+	'verano', 'invierno', 'primavera', 'otono', 'otoño'
+]);
+
+/**
+ * looksLikeDateOrTimeToken: ¿La palabra (o la primera tras artículo) es fecha/tiempo?
+ *
+ * @param {string} normWord - Token ya normalizado (minúsculas, sin acento opcional)
+ * @returns {boolean}
+ */
+function looksLikeDateOrTimeToken(normWord) {
+	const w = String(normWord || '').trim().toLowerCase();
+	if (!w) return false;
+	if (LOCATION_DATE_TIME_TOKENS.has(w)) return true;
+	// Sin acentos (normalizeLocationText puede haber quitado ñ/acentos)
+	const folded = w.normalize('NFD').replace(/[\u0300-\u036f]/g, '');
+	return LOCATION_DATE_TIME_TOKENS.has(folded);
+}
+
+/**
  * isValidFreeformLocationCapture: ¿El texto capturado tras "en …" puede ser una comuna/ciudad?
- * Solo aceptamos catálogo oficial o 1–3 palabras sin verbos/pronombres conversacionales.
+ * Solo aceptamos catálogo oficial o 1–3 palabras sin verbos/pronombres/fecha-tiempo.
  *
  * @param {string} captured - Fragmento capturado por regex
  * @returns {boolean}
@@ -682,11 +717,19 @@ export function isValidFreeformLocationCapture(captured) {
 	if (/^(lo\s+)?que\b/.test(norm)) return false;
 	if (LOCATION_CAPTURE_REJECT_RE.test(norm)) return false;
 
+	const words = norm.split(/\s+/).filter(Boolean);
+	// "diciembre", "el viernes", "la tarde", "marzo 2027"
+	if (words.some((w) => looksLikeDateOrTimeToken(w))) return false;
+	if (words.length === 2 && /^\d{4}$/.test(words[1]) && looksLikeDateOrTimeToken(words[0])) {
+		return false;
+	}
+
 	if (findLocationByFuzzyMatch(t)) return true;
 
-	const words = norm.split(/\s+/).filter(Boolean);
 	if (words.length > 3) return false;
-	if (words.some((w) => LOCATION_CAPTURE_REJECT_RE.test(w) || LOCATION_STOPWORDS.has(w))) return false;
+	if (words.some((w) => LOCATION_CAPTURE_REJECT_RE.test(w) || LOCATION_STOPWORDS.has(w))) {
+		return false;
+	}
 
 	return words.length >= 1 && words.length <= 3;
 }
@@ -707,10 +750,10 @@ function extractLocationHints(normalized) {
 	let m;
 	while ((m = re.exec(normalized))) {
 		let hint = String(m[1] || '').trim();
-		// Recorta si pegó palabras de fecha al final del hint
+		// Recorta si pegó palabras de fecha/tiempo al final del hint
 		hint = hint
 			.replace(
-				/\b(enero|febrero|marzo|abril|mayo|junio|julio|agosto|septiembre|octubre|noviembre|diciembre|semana|hoy|manana)\b.*$/i,
+				/\b(enero|febrero|marzo|abril|mayo|junio|julio|agosto|septiembre|octubre|noviembre|diciembre|lunes|martes|miercoles|jueves|viernes|sabado|domingo|semana|hoy|manana|tarde|noche)\b.*$/i,
 				''
 			)
 			.trim();
@@ -893,31 +936,49 @@ export function parseClientName(text) {
 		}
 	}
 
+	// Palabras que NUNCA son nombre (días, meses, cortesía, productos, etc.)
+	const commonWords = [
+		'hola', 'buenas', 'buen', 'buenos', 'dias', 'días', 'tardes', 'noches',
+		'estimado', 'estimada', 'si', 'sí', 'no', 'para', 'en', 'el', 'la', 'lo',
+		'este', 'esta', 'hoy', 'mañana', 'manana', 'ayer', 'luego', 'despues', 'después',
+		'lunes', 'martes', 'miercoles', 'miércoles', 'jueves', 'jeuves', 'viernes',
+		'sabado', 'sábado', 'domingo',
+		'enero', 'febrero', 'marzo', 'abril', 'mayo', 'junio', 'julio', 'agosto',
+		'septiembre', 'octubre', 'noviembre', 'diciembre',
+		'quiero', 'quisiera', 'necesito', 'gracias', 'ok', 'okay', 'dale', 'perfecto',
+		'barril', 'barriles', 'servicio', 'evento', 'eventos', 'cotizar', 'cotizacion',
+		'cotización', 'mojito', 'sangria', 'sangría', 'aperol', 'pisco', 'dispensador', 'muro',
+		'providencia', 'condes', 'nunoa', 'ñuñoa', 'santiago', 'comuna', 'fecha'
+	];
+
 	const beforeComma = text.match(/^([A-Za-záéíóúÁÉÍÓÚñÑ\s]+),/);
 	if (beforeComma && beforeComma[1]) {
 		const candidate = beforeComma[1].trim();
 		const words = candidate.split(/\s+/);
-		const commonWords = ['hola', 'buenas', 'estimado', 'estimada', 'si', 'no', 'para', 'en', 'el', 'la', 'lo', 'este', 'esta', 'hoy', 'lunes', 'martes', 'miercoles', 'miércoles', 'jueves', 'jeuves', 'viernes', 'sabado', 'sábado', 'domingo', 'quiero', 'barril', 'barriles', 'servicio', 'evento'];
 		const hasCommon = words.some((w) => commonWords.includes(w.toLowerCase()));
 
-		if (!hasCommon && candidate.length > 2) {
+		// Exigimos al menos 2 palabras (nombre + apellido) en el patrón "X Y, resto"
+		if (!hasCommon && candidate.length > 2 && words.length >= 2) {
 			return words.map((w) => w.charAt(0).toUpperCase() + w.slice(1).toLowerCase()).join(' ');
 		}
 	}
 
 	const tokens = text.trim().split(/[\s,]+/);
-	const commonWords = ['hola', 'buenas', 'estimado', 'estimada', 'si', 'no', 'para', 'en', 'el', 'la', 'lo', 'este', 'esta', 'hoy', 'lunes', 'martes', 'miercoles', 'miércoles', 'jueves', 'viernes', 'sabado', 'sábado', 'domingo', 'quiero', 'barril', 'barriles', 'servicio', 'evento'];
 
-	for (const token of tokens) {
-		if (/^[A-Z][a-zñáéíóú]+$/.test(token) && !commonWords.includes(token.toLowerCase())) {
-			return token;
+	// Token capitalizado suelto: solo si el mensaje es corto (1–2 tokens) y no es commonWord
+	if (tokens.length <= 2) {
+		for (const token of tokens) {
+			if (/^[A-ZÁÉÍÓÚÑ][a-záéíóúñ]+$/.test(token) && !commonWords.includes(token.toLowerCase())) {
+				return token;
+			}
 		}
 	}
 
 	const simplifiedText = text.trim().toLowerCase();
 	const words = simplifiedText.split(/[\s,]+/).filter((w) => w.length > 2);
-	const nonNameWords = [...commonWords, 'enero', 'febrero', 'marzo', 'abril', 'mayo', 'junio', 'julio', 'agosto', 'septiembre', 'octubre', 'noviembre', 'diciembre', 'mañana', 'manana', 'hoy', 'ayer', 'nada', 'ninguno'];
+	const nonNameWords = [...commonWords, 'nada', 'ninguno'];
 
+	// Una sola palabra: solo si parece nombre propio (no commonWord)
 	if (words.length === 1 && !nonNameWords.includes(words[0])) {
 		return text.trim().charAt(0).toUpperCase() + text.trim().slice(1).toLowerCase();
 	}
@@ -927,8 +988,11 @@ export function parseClientName(text) {
 
 /**
  * parseDate: Extrae una fecha del mensaje del cliente (texto libre).
- * Acepta día+mes ("15 de mayo"), solo mes ("para diciembre"), números,
- * días de la semana y relativas (hoy / mañana).
+ * Acepta día+mes con o sin "de" ("15 de mayo", "15 diciembre"),
+ * solo mes ("para diciembre"), números, días de la semana y relativas.
+ *
+ * Importante: día+mes va ANTES que solo-mes. Si no, "15 diciembre"
+ * matchearía solo "diciembre" y perderíamos el día.
  *
  * @param {string} text - Mensaje del cliente
  * @returns {string|null} Fragmento de fecha encontrado, o null
@@ -940,8 +1004,11 @@ export function parseDate(text) {
 		'enero|febrero|marzo|abril|mayo|junio|julio|agosto|septiembre|octubre|noviembre|diciembre';
 
 	const datePatterns = [
-		// Día + mes: "15 de mayo", "el 3 de diciembre"
-		new RegExp(`((?:el\\s+)?\\d{1,2}\\s+de\\s+(?:${months}))`, 'i'),
+		// Día + mes (+ año opcional): "15 de mayo", "15 diciembre", "el 3 dic… 2027"
+		new RegExp(
+			`((?:el\\s+)?\\d{1,2}\\s+(?:de\\s+)?(?:${months})(?:\\s+(?:de\\s+)?\\d{4})?)`,
+			'i'
+		),
 		// Solo mes (con o sin preposición/año): "diciembre", "para diciembre", "en marzo 2027"
 		new RegExp(
 			`((?:(?:para|en|durante|este|el)\\s+)?(?:${months})(?:\\s+(?:de\\s+)?\\d{4})?)`,
@@ -1069,15 +1136,47 @@ export function parseEventElimination(text, currentItems) {
 }
 
 /**
+ * partitionLitersIntoBarrels: Parte un total de litros en barriles del formato.
+ * Ej.: 15L con [10L, 5L] → [{ size: 10, count: 1 }, { size: 5, count: 1 }]
+ * Si no se puede cubrir exacto, retorna null.
+ *
+ * @param {number} totalLiters
+ * @param {string[]} allowedLitrages
+ * @returns {Array<{ size: number, count: number }>|null}
+ */
+export function partitionLitersIntoBarrels(totalLiters, allowedLitrages) {
+	const total = Number(totalLiters);
+	if (!Number.isFinite(total) || total <= 0) return null;
+
+	const numericAllowed = allowedLitrages
+		.map((l) => parseInt(l, 10))
+		.filter((n) => !isNaN(n) && n > 0)
+		.sort((a, b) => b - a);
+
+	let rem = total;
+	const parts = [];
+	for (const size of numericAllowed) {
+		if (rem >= size) {
+			const count = Math.floor(rem / size);
+			parts.push({ size, count });
+			rem %= size;
+		}
+	}
+	if (rem !== 0 || parts.length === 0) return null;
+	return parts;
+}
+
+/**
  * fixEventLitrageShorthand: Corrige el error típico del NLU:
  * "10 de mojito" → quantity=10 litrage=5L  ❌  →  quantity=1 litrage=10L  ✅
+ * También parte litrajes no estándar: "15L Sangria" → 1×10L + 1×5L.
  * Solo actúa si la "cantidad" es un litraje válido (5/10/20/30) y no dijo "x"/"unidades".
  *
  * @param {string} userMessage - Mensaje original del cliente
  * @param {{ name: string, quantity: number, litrage: string }} product - Producto del NLU
  * @param {string[]} allowedLitrages - Litrajes del formato (ej. ['5L','10L'])
  * @param {string} defaultLitrage - Litraje por defecto del formato
- * @returns {{ name: string, quantity: number, litrage: string }}
+ * @returns {Array<{ name: string, quantity: number, litrage: string }>}
  */
 export function fixEventLitrageShorthand(userMessage, product, allowedLitrages, defaultLitrage) {
 	if (!product?.name || !product.quantity) return [product];
@@ -1099,32 +1198,40 @@ export function fixEventLitrageShorthand(userMessage, product, allowedLitrages, 
 		return [{ ...product, quantity: 1, litrage: qtyAsLitrage }];
 	}
 
-	// 2) Partición óptima (ej. 35L en formato [10L, 5L] → 3x 10L y 1x 5L)
-	const numericAllowed = allowedLitrages
-		.map((l) => parseInt(l, 10))
-		.filter((n) => !isNaN(n) && n > 0)
-		.sort((a, b) => b - a);
+	// 2) Partición óptima de la "cantidad" como litros (ej. 35 → 3×10L + 1×5L)
+	const qtyParts = partitionLitersIntoBarrels(qty, allowedLitrages);
+	if (qtyParts) {
+		return qtyParts.map(({ size, count }) => ({
+			...product,
+			quantity: count,
+			litrage: `${size}L`
+		}));
+	}
 
-	let tempRemaining = qty;
-	const tempResults = [];
-	for (const size of numericAllowed) {
-		if (tempRemaining >= size) {
-			const count = Math.floor(tempRemaining / size);
-			tempResults.push({ ...product, quantity: count, litrage: `${size}L` });
-			tempRemaining %= size;
+	// 3) Litraje explícito no estándar (ej. "15L Sangria" con allowed 5L/10L)
+	const litNum = parseInt(String(product.litrage || ''), 10);
+	if (
+		product.litrage
+		&& !allowedLitrages.includes(product.litrage)
+		&& Number.isFinite(litNum)
+		&& litNum > 0
+	) {
+		const litParts = partitionLitersIntoBarrels(litNum, allowedLitrages);
+		if (litParts) {
+			return litParts.map(({ size, count }) => ({
+				...product,
+				quantity: count * qty,
+				litrage: `${size}L`
+			}));
 		}
 	}
 
-	if (tempRemaining === 0 && tempResults.length > 0) {
-		return tempResults;
-	}
-
-	// 3) Cantidad 1 sin litraje en el mensaje: conservar litrage ya asignado (ej. default 10L en Muro)
+	// 4) Cantidad 1 sin litraje en el mensaje: conservar litrage ya asignado (ej. default 10L en Muro)
 	if (qty === 1 && product.litrage && allowedLitrages.includes(product.litrage)) {
 		return [product];
 	}
 
-	// 4) Cantidad > 1 sin partición exacta → probar qty como litraje (validación posterior)
+	// 5) Cantidad > 1 sin partición exacta → probar qty como litraje (validación posterior)
 	if (product.litrage && product.litrage !== defaultLitrage && product.litrage !== qtyAsLitrage) {
 		return [product];
 	}
@@ -1223,12 +1330,16 @@ export function interceptBotOptionsAnswer(messageText, lastBotMessage) {
 	const botOfferedOptions = [];
 	const lines = String(lastBotMessage).split('\n');
 	for (const line of lines) {
+		// Las líneas del carrito ("- 1x Mojito (5L): $69.990") no son opciones para elegir:
+		// si las tomáramos como tales, cualquier respuesta siguiente sumaría ese mismo cóctel.
+		if (/^\s*-\s*\d+\s*[x×]/i.test(line) || /\$\s*\d/.test(line)) continue;
 		const m = line.match(/^\s*-\s*([A-Za-záéíóúÁÉÍÓÚñÑ0-9°º\s]+)/);
 		if (m && m[1]) {
 			botOfferedOptions.push(m[1].trim());
 		}
 	}
-	if (botOfferedOptions.length === 0) return null;
+	// Con menos de dos alternativas no hay elección real que interceptar.
+	if (botOfferedOptions.length < 2) return null;
 
 	const fakeDuda = { mencionado: messageText, opciones: botOfferedOptions };
 	const { resolved } = resolveDoubtsProgrammatically([fakeDuda]);

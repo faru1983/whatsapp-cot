@@ -1,198 +1,117 @@
 // ==============================================================================
-// OBJETIVO: Paso ESPERANDO_INTENCION — entrada: Barriles vs Eventos.
-// Textos, prompt IA y router de intención en un solo archivo.
+// OBJETIVO: Paso ESPERANDO_INTENCION — router determinístico de entrada.
+// Solo abre Eventos o Barriles con reglas claras; un segundo miss hace SOS silencioso.
 // ==============================================================================
 import { defineState } from '../../../logic/compile-state.js';
-import { matchKeywordIntent, rulesRouterIntencion, rulesWebVsChat } from '../../../logic/keyword-intent.js';
-import { resolveDecisionIntent } from '../../../logic/decision-intent.js';
-import { asksPriceOrCatalog } from '../../../logic/interruptions.js';
-import { getBrowseOnlyGoodbye } from '../../../views/templates.js';
-import { withAssistantFooter, ASSISTANT_FOOTER } from '../../../logic/flow-rails.js';
+import { matchKeywordIntent, rulesRouterIntencion } from '../../../logic/keyword-intent.js';
+import { buildAdminSosBody } from '../../../views/templates.js';
+import {
+  withAssistantFooter,
+  formatMenuBlock
+} from '../../../logic/flow-rails.js';
 
-const WELCOME = `¡Hola! Somos *Cocktails on Tap* 🍸
-Soy un *asistente virtual*: si me respondes con las palabras en *negrita*, te oriento más rápido con precios e info.
+/** Menú principal (1️⃣ Eventos / 2️⃣ Barriles / 3️⃣ Humano). */
+const MENU_BLOCK = formatMenuBlock([
+  'Servicio para Eventos',
+  'Barriles Desechables',
+  'Hablar con Humano'
+]);
 
-¿Buscas *Barriles Desechables* o *Servicio para Eventos*?`;
+const WELCOME = `¡Hola! Soy el *asistente virtual* de *Cocktails on Tap* 🍸
 
-const SHORT_Q = withAssistantFooter(`Para seguir, ¿buscas *Barriles Desechables* o *Servicio para Eventos*?`);
+Cuéntame si te ayudo a cotizar nuestro *Servicio para Eventos*
+o si te interesa comprar *Barriles Desechables*.
 
-/**
- * Respuesta al CTA de Instagram "más información" (mensaje predefinido del anuncio).
- * Presentación corta + menú (el cliente aún no eligió producto).
- */
-const AD_INFO_REPLY = `¡Hola! Soy un *asistente virtual* de *Cocktails on Tap* 🍸
+Selecciona una opción para continuar:
+${MENU_BLOCK}`;
 
-¿Buscas *Barriles Desechables* o *Servicio para Eventos*?
-
-${ASSISTANT_FOOTER}`;
-
-const MENSAJE_AMBAS = [
-  `🍸 ¡Perfecto! Te doy un resumen de ambos:
-
-🛢️ *Barriles Desechables*
-Barriles de *5 litros* que rinden aproximadamente *25 cócteles*, listos para servir en segundos. Disponibles en sabores clásicos como *Mojito*, *Caipiriña*, *Sangría* y otros. Son ideales para disfrutar en casa, celebraciones o regalar.
-
-Puedes adquirilos en nuestra tienda virtual 👉https://cocktailsontap.cl/barriles`,
-
-  `🎉 *Servicio para Eventos*
-Montamos una *Estacion de Coctelería Autoservicio* con todo lo necesario para que tus invitados disfruten cócteles listos en segundos. Ideal para matrimonios, cumpleaños, empresas y celebraciones de todo tipo.
-
-Puedes cotizar facilmente en nuestra web 👉https://cocktailsontap.cl/eventos`,
-
-  `¿Prefieres la *web*, o te cuento más de *Barriles Desechables* o *Servicio para Eventos*? 🍹`
-];
-
-const PRICE_HINT = `Claro 🙂 Para darte *precios* exactos necesito saber el producto:
-
-• *Barriles Desechables* — desde *$31.990* (5L ≈ 25 cócteles)
-• *Servicio para Eventos* — según formato e invitados
-
-¿Cuál te interesa? Escribe *Barriles Desechables* o *Servicio para Eventos*.`;
-
-const PREGUNTA_POST_AMBAS =
-  '¿Prefieres revisar la *página web* o quieres que te cuente más sobre *Barriles Desechables* o el *Servicio para Eventos*?';
+const SHORT_Q = withAssistantFooter(`Selecciona una opción para continuar:
+${MENU_BLOCK}`);
 
 /**
- * isInstagramInfoCta: ¿Es el CTA genérico de anuncio / “quiero más info”?
- * Solo si NO eligió producto en el mismo mensaje (ej. "más info sobre eventos" → EVENTOS).
+ * handoffHumanoResult: Cierra el chat y pide asistencia humana (opción 3️⃣).
  *
- * @param {string} messageText
- * @returns {boolean}
+ * @returns {object}
  */
-function isInstagramInfoCta(messageText) {
-  const t = String(messageText || '').trim();
-  if (!t) return false;
-  if (!/\b(?:m[aá]s\s+)?info(?:rmaci[oó]n)?\b/i.test(t)) return false;
-
-  const productIntent = matchKeywordIntent(messageText, rulesRouterIntencion().filter(
-    (r) => r.label === 'BARRILES' || r.label === 'EVENTOS' || r.label === 'AMBAS'
-  ));
-  return !productIntent;
+function handoffHumanoResult() {
+  return {
+    success: true,
+    nextState: 'CERRADO',
+    mute: true,
+    notifyAdmin: {
+      type: 'SOS',
+      title: 'PIDIÓ HUMANO',
+      body: buildAdminSosBody({
+        reason: 'Eligió opción 3 / hablar con humano en el menú de entrada.',
+        stateId: 'ESPERANDO_INTENCION'
+      })
+    },
+    customReply: `Te comunico con alguien del equipo. ¡Ya te escriben! 🙌`
+  };
 }
 
-const AI_PROMPT = `[SISTEMA - ESTADO: FILTRO PRINCIPAL]
-Eres un asistente virtual de Cocktails on Tap. El cliente aún no eligió camino.
-Productos oficiales (nombres exactos):
-- *Barriles Desechables*
-- *Servicio para Eventos*
-
-Tu tarea:
-1. Saludo: breve + pide que responda con las palabras en *negrita*.
-2. Si pregunta precios sin elegir producto: 1-2 frases (barriles desde $31.990; eventos según formato) y pide elegir *Barriles Desechables* o *Servicio para Eventos*.
-3. Cierra SIEMPRE con: ¿Buscas *Barriles Desechables* o *Servicio para Eventos*?
-REGLAS:
-- NUNCA digas "para la casa" ni reformules los nombres.
-- NUNCA armes cotización completa todavía.
-- Tono chileno cordial. Máx. 3 frases + la pregunta.`;
+/**
+ * silentInvalidChoiceResult: Silencia el bot cuando el cliente no elige
+ * ninguna opción después de haber recibido el menú y alerta al administrador.
+ * No incluye customReply: el cliente no recibe otro mensaje automático.
+ *
+ * @param {string} messageText - Segunda respuesta no reconocida
+ * @returns {object}
+ */
+function silentInvalidChoiceResult(messageText) {
+  return {
+    success: true,
+    nextState: 'CERRADO',
+    mute: true,
+    notifyAdmin: {
+      type: 'SOS',
+      title: 'SIN OPCIÓN VÁLIDA',
+      body: buildAdminSosBody({
+        reason: 'No eligió Eventos, Barriles ni Humano después de recibir el menú.',
+        stateId: 'ESPERANDO_INTENCION',
+        lastMessage: messageText
+      })
+    }
+  };
+}
 
 export const ESPERANDO_INTENCION = defineState({
   id: 'ESPERANDO_INTENCION',
   shortQuestion: SHORT_Q,
-  aiPrompt: AI_PROMPT,
-  promptQuestion(session) {
-    return session.hasAskedAmbas ? SHORT_Q : WELCOME;
-  },
+  promptQuestion: () => WELCOME,
 
   async validateAndProcess(messageText, session) {
-    // 1) Producto en el mensaje (keywords/NLU) antes que CTA genérico de Meta
-    if (!session.hasAskedAmbas) {
-      const choice = await resolveDecisionIntent({
-        messageText,
-        session,
-        stepQuestion: SHORT_Q,
-        allowedLabels: ['BARRILES', 'EVENTOS', 'AMBAS', 'MIRON'],
-        keywordRules: rulesRouterIntencion(),
-        labelHints: {
-          BARRILES: 'Quiere Barriles Desechables para casa/regalo (no servicio de evento con montaje).',
-          EVENTOS: 'Quiere Servicio para Eventos (matrimonio, cumpleaños, dispensador, muro).',
-          AMBAS: 'Quiere conocer ambos productos antes de elegir.',
-          MIRON: 'Solo está mirando / no quiere cotizar ahora / después sin intención de compra.'
-        }
-      });
+    // Caja única de entrada: solo reglas locales, sin NLU ni fallback generativo.
+    const choice = matchKeywordIntent(messageText, rulesRouterIntencion());
 
-      if (choice === 'MIRON') {
-        return {
-          success: true,
-          nextState: 'CERRADO',
-          customReply: getBrowseOnlyGoodbye(),
-          mute: true
-        };
-      }
-
-      if (choice === 'BARRILES') {
-        session.userIntent = 'BARRILES';
-        return { success: true, nextState: 'BARRILES_FILTRO_CANAL' };
-      }
-
-      if (choice === 'EVENTOS') {
-        session.userIntent = 'EVENTOS';
-        return { success: true, nextState: 'EVENTOS_RECOGIDA_DATOS' };
-      }
-
-      if (choice === 'AMBAS' && !session.hasAskedAmbas) {
-        session.hasAskedAmbas = true;
-        return {
-          success: true,
-          nextState: 'ESPERANDO_INTENCION',
-          customReplies: MENSAJE_AMBAS
-        };
-      }
+    if (choice === 'HUMANO') {
+      return handoffHumanoResult();
     }
 
-    // 2) CTA Instagram genérico (sin producto en el mensaje)
-    if (!session.userIntent && isInstagramInfoCta(messageText)) {
-      return {
-        success: true,
-        nextState: 'ESPERANDO_INTENCION',
-        customReply: AD_INFO_REPLY
-      };
+    if (choice === 'BARRILES') {
+      session.userIntent = 'BARRILES';
+      return { success: true, nextState: 'BARRILES_FILTRO_CANAL' };
     }
 
-    if (session.hasAskedAmbas) {
-      const postAmbasRules = [
-        ...rulesWebVsChat().filter((r) => r.label === 'WEB'),
-        ...rulesRouterIntencion().filter((r) => r.label === 'BARRILES' || r.label === 'EVENTOS')
-      ];
-
-      const choice = await resolveDecisionIntent({
-        messageText,
-        session,
-        stepQuestion: PREGUNTA_POST_AMBAS,
-        allowedLabels: ['WEB', 'BARRILES', 'EVENTOS'],
-        keywordRules: postAmbasRules,
-        labelHints: {
-          WEB: 'Quiere ir a la página web / link / sitio (no seguir cotizando por este chat).',
-          BARRILES: 'Quiere saber más o cotizar Barriles Desechables por este chat.',
-          EVENTOS: 'Quiere saber más o cotizar Servicio para Eventos por este chat.'
-        }
-      });
-
-      if (choice === 'WEB') {
-        return {
-          success: true,
-          nextState: 'CERRADO',
-          customReply: `¡Perfecto! Si tienes alguna duda me avisas. 🍹`,
-          mute: true
-        };
-      }
-      if (choice === 'BARRILES') {
-        session.userIntent = 'BARRILES';
-        return { success: true, nextState: 'BARRILES_FILTRO_CANAL' };
-      }
-      if (choice === 'EVENTOS') {
-        session.userIntent = 'EVENTOS';
-        return { success: true, nextState: 'EVENTOS_RECOGIDA_DATOS' };
-      }
+    if (choice === 'EVENTOS') {
+      session.userIntent = 'EVENTOS';
+      return { success: true, nextState: 'EVENTOS_RECOGIDA_DATOS' };
     }
 
-    if (asksPriceOrCatalog(messageText)) {
-      return {
-        success: true,
-        nextState: 'ESPERANDO_INTENCION',
-        customReply: PRICE_HINT
-      };
+    // Si el menú ya fue mostrado y tampoco eligió ahora, hacemos un SOS
+    // silencioso: mute + administrador, sin enviar otra burbuja al cliente.
+    if (session.routerMenuShown) {
+      return silentInvalidChoiceResult(messageText);
     }
 
-    return { success: false };
+    // Primer mensaje no reconocido: menú de bienvenida (ya presenta al asistente).
+    // Eventos/Barriles usarán un copy más directo si assistantIntroduced=true.
+    session.routerMenuShown = true;
+    session.assistantIntroduced = true;
+    return {
+      success: true,
+      nextState: 'ESPERANDO_INTENCION',
+      customReply: WELCOME
+    };
   }
 });

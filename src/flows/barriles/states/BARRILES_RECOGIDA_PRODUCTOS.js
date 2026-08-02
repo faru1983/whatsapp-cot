@@ -19,12 +19,18 @@ import { extractProductsWithAI } from '../../../core/llm.js';
 import { OrderBuilder } from '../../../logic/order-builder.js';
 import { getDoubtClarificationTemplate, getBrowseOnlyGoodbye } from '../../../views/templates.js';
 import { withAssistantFooter } from '../../../logic/flow-rails.js';
+import {
+  asksDeliveryOrDispatchQuestion,
+  REPLY_DISPATCH_SIDEBAR,
+  stripDeliveryQuestionForCart,
+  parseBarrilesProductsProgrammatic
+} from '../../../logic/eventos-helpers.js';
 
 const AI_PROMPT = `[SISTEMA - ESTADO: CATÁLOGO (FALLBACK)]
 El cliente debe indicar sabor y cantidad de Barriles Desechables (5L).
 1. Duda breve (ingredientes, despacho RM / encomienda regiones). NUNCA inventes costos.
 2. Solo formato 5L. Si solo mira / no quiere ahora: despídete y NO preguntes más.
-3. Si no: cierra pidiendo sabor/cantidad (ej. "1 mojito y 1 sangría"). Si ya tiene pedido, puede escribir *seguimos*.`;
+3. Si no: cierra pidiendo sabor/cantidad (ej. "1 mojito y 1 sangría"). Si ya tiene pedido, sugiere escribir *ok* para el resumen.`;
 
 /**
  * formatCartLines: Lista de ítems + subtotal (sin saludo).
@@ -50,17 +56,20 @@ function formatCartLines(products) {
 }
 
 /**
- * buildCartConfirmReply: Resumen de cócteles + pregunta (*seguimos* solo aquí, con carrito lleno).
+ * buildCartConfirmReply: Resumen de cócteles + CTA (*ok* para el resumen; también vale *seguimos*).
  *
  * @param {object} products - Mapa nombre → cantidad
+ * @param {string} [extraNote] - Nota extra (ej. duda de despacho en el mismo mensaje)
  * @returns {string}
  */
-function buildCartConfirmReply(products) {
+function buildCartConfirmReply(products, extraNote = '') {
+  const note = extraNote ? `\n\n${extraNote}` : '';
   return `🍹 Te confirmo los cócteles seleccionados:
 
 ${formatCartLines(products)}
 
-¿Agregas otro sabor o *seguimos* con estos? 🍸`;
+Si está bien así, escribe *ok* para ver el resumen de tu cotización.
+_(Si quieres cambiar, dime qué agregar o quitar)_ 🍸${note}`;
 }
 
 /**
@@ -88,9 +97,10 @@ function nextStateAfterProducts(session) {
 
 export const BARRILES_RECOGIDA_PRODUCTOS = defineState({
   id: 'BARRILES_RECOGIDA_PRODUCTOS',
-  // Al entrar: solo pedimos sabor/cantidad. *seguimos* se ofrece cuando ya hay carrito.
+  // Al entrar: solo pedimos sabor/cantidad. *ok* se ofrece cuando ya hay carrito.
   promptQuestion: () => `Dime *qué sabor* y *cuántos* barriles (ej. *1 mojito y 1 sangría*).`,
-  shortQuestion: withAssistantFooter(`¿Agregas otro, quitas alguno, o *seguimos*?`),
+  shortQuestion: withAssistantFooter(`Si está bien, escribe *ok* para el resumen.
+_(O dime qué agregar o quitar)_`),
   aiPrompt: AI_PROMPT,
 
   async validateAndProcess(messageText, session) {
@@ -145,7 +155,8 @@ Dime un sabor y cantidad (ej. *1 mojito*), o escribe *lista* para ver la carta d
 
 ${formatCartLines(session.orderBuilder.products)}
 
-¿Agregas otro, quitas alguno, o *seguimos*? 🍸`
+Si está bien así, escribe *ok* para ver el resumen de tu cotización.
+_(Si quieres cambiar, dime qué agregar o quitar)_ 🍸`
       };
     }
 
@@ -160,12 +171,19 @@ ${formatCartLines(session.orderBuilder.products)}
     let dudas = [];
     let quiere_avanzar = false;
 
-    // INTERCEPTOR: Si el bot dio opciones en el turno anterior y el usuario elige una, la capturamos sin ir a la IA.
-    const interceptedOption = interceptBotOptionsAnswer(messageText, lastBotMessage);
-    if (interceptedOption) {
+    // Multi-intent: si hay pedido + duda de despacho, extraemos cócteles sin la pregunta
+    const hasDispatchQ = asksDeliveryOrDispatchQuestion(messageText);
+    const extractText = hasDispatchQ ? stripDeliveryQuestionForCart(messageText) : messageText;
+
+    // Primero reglas locales (como en eventos) — no depender solo del LLM
+    const programmatic = parseBarrilesProductsProgrammatic(extractText || messageText, catalogNames);
+    const interceptedOption = interceptBotOptionsAnswer(extractText || messageText, lastBotMessage);
+    if (programmatic.length > 0) {
+      extractedList = programmatic;
+    } else if (interceptedOption) {
       extractedList.push(interceptedOption);
     } else {
-      const result = await extractProductsWithAI(messageText, catalogNames, lastBotMessage);
+      const result = await extractProductsWithAI(extractText || messageText, catalogNames, lastBotMessage);
       extractedList = result.productos;
       dudas = result.dudas;
       quiere_avanzar = result.quiere_avanzar;
@@ -233,10 +251,14 @@ ${formatCartLines(session.orderBuilder.products)}
         return { success: true, nextState: nextStateAfterProducts(session) };
       }
 
+      // Multi-intent: pedido + duda de despacho → carrito + respuesta corta de cobertura
+      const dispatchNote = hasDispatchQ ? REPLY_DISPATCH_SIDEBAR : '';
+
       return {
         success: true,
         nextState: 'BARRILES_RECOGIDA_PRODUCTOS',
-        customReply: buildCartConfirmReply(session.orderBuilder.products)
+        customReply: buildCartConfirmReply(session.orderBuilder.products, dispatchNote),
+        flowProgress: true
       };
     }
 

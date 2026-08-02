@@ -1,5 +1,5 @@
 // ==============================================================================
-// OBJETIVO: Paso EVENTOS_ELECCION_FORMATO — Dispensador vs Muro.
+// OBJETIVO: Paso EVENTOS_ELECCION_FORMATO — Dispensador vs Muro (menú 1️⃣/2️⃣).
 // Al elegir, enviamos el pitch de lo incluido y pedimos ok para ver la carta.
 // ==============================================================================
 import { defineState } from '../../../logic/compile-state.js';
@@ -11,18 +11,27 @@ import {
   ensureEventOrderBuilder
 } from '../../../logic/eventos-helpers.js';
 import { img, vid } from '../../../logic/media.js';
-import { withAssistantFooter } from '../../../logic/flow-rails.js';
+import { withAssistantFooter, formatMenuBlock } from '../../../logic/flow-rails.js';
 
-const SHORT_Q = withAssistantFooter(`¿Qué formato prefieres: *1* (*Dispensador*) o *2* (*Muro*)?`);
+const MENU_BLOCK = formatMenuBlock(['Dispensador', 'Muro']);
 
-const ASK_INTRO = `¿Quieres ver los *cócteles* disponibles y *precios*? Escribe *sí* o *ok* para continuar.`;
+// Re-pregunta corta (si dudó o eligió "ambos"); la entrada inicial ya trae el menú completo en la foto.
+const SHORT_Q = withAssistantFooter(`Selecciona uno:
+
+${MENU_BLOCK}`);
+
+const ASK_INTRO = `¿Quieres ver los *cócteles* disponibles y *precios*?
+
+${formatMenuBlock(['Ver carta y precios', 'Hablar con Humano'])}`;
 
 // Respuesta fija si pide los dos formatos a la vez (no cotizamos ambos en el bot)
 const REPLY_AMBOS = `Idealmente cotizamos *uno* de los dos servicios (*Dispensador* o *Muro*).
 
 Si tienes un evento especial que requiera *ambos*, podemos evaluarlo con el equipo: escribe *HUMANO*.
 
-Si prefieres seguir acá, elige *1* (*Dispensador*) o *2* (*Muro*).`;
+Si prefieres seguir acá, selecciona uno:
+
+${MENU_BLOCK}`;
 
 const AI_PROMPT = `[SISTEMA - ESTADO: PREGUNTAS SOBRE FORMATO DE EVENTO]
 El cliente ya recibió la recomendación de formato (Dispensador Portátil o Muro de Coctelería) pero tiene dudas en lugar de elegir.
@@ -30,11 +39,13 @@ El cliente ya recibió la recomendación de formato (Dispensador Portátil o Mur
 2. REGLA DE LOGÍSTICA: Instalación Dispensador = gratis; Muro = $50.000. NUNCA inventes tarifas de envío.
 3. NUNCA cotices ni calcules precios finales todavía.
 4. Si pide AMBOS formatos: explica que el bot cotiza uno a la vez; para ambos puede escribir HUMANO o elegir Dispensador/Muro.
-5. Al finalizar, recuérdale elegir entre *Dispensador Portátil* o *Muro de Coctelería*.`;
+5. Al finalizar, recuérdale elegir 1️⃣ *Dispensador* o 2️⃣ *Muro*.`;
 
 export const EVENTOS_ELECCION_FORMATO = defineState({
   id: 'EVENTOS_ELECCION_FORMATO',
-  promptQuestion: () => `Por favor, confírmame si prefieres el *Dispensador Portátil* o el *Muro de Coctelería* para continuar.`,
+  promptQuestion: () => `Selecciona uno:
+
+${MENU_BLOCK}`,
   shortQuestion: SHORT_Q,
   aiPrompt: AI_PROMPT,
 
@@ -46,13 +57,14 @@ export const EVENTOS_ELECCION_FORMATO = defineState({
       allowedLabels: ['DISPENSADOR', 'MURO', 'AMBOS'],
       keywordRules: rulesDispensadorOMuro(),
       labelHints: {
-        DISPENSADOR: 'Elige opción 1 / Dispensador Portátil (instalación gratis, mínimo 10L). También: "1", "uno", "primera".',
-        MURO: 'Elige opción 2 / Muro de Coctelería (instalación con costo, mínimo 30L). También: "2", "dos", "segunda".',
+        DISPENSADOR: 'Elige opción 1 / Dispensador Portátil (instalación gratis, mínimo 10L). También: "1", "1️⃣", "uno".',
+        MURO: 'Elige opción 2 / Muro de Coctelería (instalación con costo, mínimo 30L). También: "2", "2️⃣", "dos".',
         AMBOS: 'Quiere los dos formatos a la vez (ambos, las 2, los 2, 1 y 2, dispensador y muro).'
       }
     });
 
-    // Quiere ambos → explicación fija; sigue en este paso (sin strike, sin forzar opción)
+    // Quiere ambos → explicación fija; sigue en este paso.
+    // Sin flowProgress: repetir "ambos" cuenta strike (anti-loop → HUMANO).
     if (intent === 'AMBOS') {
       return {
         success: true,

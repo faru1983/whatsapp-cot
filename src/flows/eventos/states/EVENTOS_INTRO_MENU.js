@@ -1,6 +1,6 @@
 // ==============================================================================
-// OBJETIVO: Paso EVENTOS_INTRO_MENU — tras el pitch del formato, confirmar
-// para ver carta de cócteles/precios + hint de litros/rendimiento.
+// OBJETIVO: Paso EVENTOS_INTRO_MENU — tras el pitch del formato, menú para
+// ver carta de cócteles/precios (1️⃣) o hablar con humano (2️⃣).
 // ==============================================================================
 import { defineState } from '../../../logic/compile-state.js';
 import { resolveDecisionIntent } from '../../../logic/decision-intent.js';
@@ -9,16 +9,21 @@ import {
   getEventFormatKey,
   buildMenuEntryReplies
 } from '../../../logic/eventos-helpers.js';
-import { withAssistantFooter } from '../../../logic/flow-rails.js';
+import { withAssistantFooter, formatMenuBlock } from '../../../logic/flow-rails.js';
+import { buildAdminSosBody } from '../../../views/templates.js';
 
-const SHORT_Q = withAssistantFooter(`¿Quieres ver los cócteles disponibles y precios? Escribe *OK* para continuar.`);
+const MENU_BLOCK = formatMenuBlock(['Ver carta y precios', 'Hablar con Humano']);
+
+const SHORT_Q = withAssistantFooter(`¿Quieres ver los cócteles disponibles y precios?
+
+${MENU_BLOCK}`);
 
 const AI_PROMPT = `[SISTEMA - ESTADO: INTRO MENÚ DE EVENTO]
 El cliente ya eligió Dispensador o Muro y recibió el pitch de lo incluido.
-Debe confirmar (sí / ok / seguimos) para ver la carta de precios y armar el pedido.
+Debe elegir 1️⃣ para ver la carta de precios, o 2️⃣ / HUMANO para una persona.
 1. Responde dudas breves sobre el formato (instalación, qué incluye) sin inventar precios de cócteles.
 2. NUNCA armes el pedido ni cotices totales todavía.
-3. Al final, recuérdale escribir *sí* o *ok* para ver cócteles y precios.`;
+3. Al final, recuérdale el menú 1️⃣ / 2️⃣.`;
 
 export const EVENTOS_INTRO_MENU = defineState({
   id: 'EVENTOS_INTRO_MENU',
@@ -31,12 +36,30 @@ export const EVENTOS_INTRO_MENU = defineState({
       messageText,
       session,
       stepQuestion: SHORT_Q,
-      allowedLabels: ['CONFIRMAR'],
+      allowedLabels: ['CONFIRMAR', 'HUMANO'],
       keywordRules: rulesContinuarSiOOk(),
       labelHints: {
-        CONFIRMAR: 'Quiere ver la carta / seguir (sí, ok, dale, seguimos, ver precios, ver cócteles).'
+        CONFIRMAR: 'Opción 1 / quiere ver la carta / seguir (1, 1️⃣, sí, ok, dale, ver precios).',
+        HUMANO: 'Opción 2 / quiere hablar con una persona del equipo.'
       }
     });
+
+    if (intent === 'HUMANO') {
+      return {
+        success: true,
+        nextState: 'CERRADO',
+        mute: true,
+        notifyAdmin: {
+          type: 'SOS',
+          title: 'PIDIÓ HUMANO',
+          body: buildAdminSosBody({
+            reason: 'Eligió opción 2 / hablar con humano en intro menú eventos.',
+            stateId: 'EVENTOS_INTRO_MENU'
+          })
+        },
+        customReply: `Te comunico con alguien del equipo. ¡Ya te escriben! 🙌`
+      };
+    }
 
     // Confirmó → carta + litros/rendimiento + pregunta de cócteles
     if (intent === 'CONFIRMAR') {

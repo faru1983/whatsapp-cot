@@ -3,11 +3,7 @@
 // OrderBuilder arma los números; el cliente confirma o vuelve a elegir menú.
 // ==============================================================================
 import { defineState } from '../../../logic/compile-state.js';
-import {
-  getEventQuotationTemplate,
-  buildAdminEventosOrderBody
-} from '../../../views/templates.js';
-import { formatPrice, preciosData } from '../../../logic/utils.js';
+import { getEventQuotationTemplate } from '../../../views/templates.js';
 import { resolveDecisionIntent } from '../../../logic/decision-intent.js';
 import { rulesConfirmarOModificar } from '../../../logic/keyword-intent.js';
 import {
@@ -15,9 +11,13 @@ import {
   formatEventCartSummary,
   buildEventQuoteFromSession
 } from '../../../logic/eventos-helpers.js';
-import { withAssistantFooter } from '../../../logic/flow-rails.js';
+import { withAssistantFooter, formatMenuBlock } from '../../../logic/flow-rails.js';
 
-const SHORT_Q = withAssistantFooter(`Si está bien, escribe *ok*. Si quieres cambiar algo, escribe *modificar*.`);
+const MENU_BLOCK = formatMenuBlock(['Continuar', 'Modificar']);
+
+const SHORT_Q = withAssistantFooter(`¿Te parece bien la cotización?
+
+${MENU_BLOCK}`);
 
 const AI_PROMPT = `[SISTEMA - ESTADO: REVISIÓN DE COTIZACIÓN DE EVENTO]
 El cliente ya recibió una cotización generada por el sistema (precios oficiales).
@@ -25,7 +25,7 @@ Tu tarea es:
 1. Responder dudas breves sobre el pedido, formato, instalación o logística.
 2. REGLA: Instalación Dispensador = $0. Instalación Muro = $50.000. NUNCA inventes tarifas.
 3. NUNCA recalcules ni inventes una cotización nueva con precios distintos a los ya mostrados.
-4. Al finalizar, pide escribir *ok* para avanzar (o *modificar* si quiere cambios).
+4. Al finalizar, pide elegir 1️⃣ Continuar o 2️⃣ Modificar.
 REGLA DE NEGRITA: Usa un solo asterisco (*) para negrita en WhatsApp.`;
 
 export const EVENTOS_COTIZACION = defineState({
@@ -60,8 +60,8 @@ export const EVENTOS_COTIZACION = defineState({
       allowedLabels: ['CONFIRMAR', 'MODIFICAR'],
       keywordRules: rulesConfirmarOModificar(),
       labelHints: {
-        CONFIRMAR: 'Aprueba la cotización y quiere datos de reserva / transferencia.',
-        MODIFICAR: 'Quiere cambiar cócteles, litros o algo del menú.'
+        CONFIRMAR: 'Opción 1 / aprueba la cotización y quiere seguir (1, 1️⃣, ok).',
+        MODIFICAR: 'Opción 2 / quiere cambiar cócteles, litros o algo del menú (2, 2️⃣, modificar).'
       }
     });
 
@@ -74,42 +74,21 @@ export const EVENTOS_COTIZACION = defineState({
       return { success: true, nextState: 'EVENTOS_ELECCION_MENU', customReply: reply };
     }
 
-    // Cliente aprueba la cotización → cerramos, silenciamos bot y avisamos al equipo
+    // Cliente aprueba el resumen → invitamos a dejar datos para la cotización formal
     if (intent === 'CONFIRMAR') {
-      const { location, date, guests, eventoFormato, celebrationType } = session;
-      const quote = session.orderBuilder?.quote;
-      const totalStr = quote?.total != null ? formatPrice(quote.total) : 'Revisar chat';
-      const formatKey = getEventFormatKey(eventoFormato);
-
-      let adminProducts = '';
-      for (const entry of Object.values(session.orderBuilder?.products || {})) {
-        const price = preciosData.cocteles[entry.name]?.[formatKey]?.[entry.litrage] || 0;
-        adminProducts += `- ${entry.quantity}x ${entry.name} (${entry.litrage}): ${formatPrice(price * entry.quantity)}\n`;
-      }
-
-      const alert = {
-        type: 'SUCCESS',
-        title: 'EVENTOS',
-        labelKey: 'cotizacionEventos',
-        body: buildAdminEventosOrderBody({
-          eventoFormato,
-          celebrationType,
-          guests,
-          location,
-          date,
-          productsText: adminProducts,
-          totalStr
-        })
-      };
-
-      const closingReply = `✅ Tu cotización quedó registrada.\n\nEn unos minutos uno de nuestros ejecutivos revisará la disponibilidad para esa fecha y te enviará los datos de transferencia.\n\nUna vez confirmado el pago, agendamos formalmente tu evento. 🥂`;
-
       return {
         success: true,
-        nextState: 'CERRADO',
-        mute: true,
-        notifyAdmin: alert,
-        customReply: closingReply
+        nextState: 'EVENTOS_DATOS_CONTACTO',
+        customReply: `¡Genial! 🥂 Ya casi queda lista tu propuesta.
+
+Para dejarte la *cotización formal* —con el detalle completo y una *copia en tu correo*— solo necesito unos últimos datos de contacto.
+
+Así te queda guardada, la revisas con calma y la compartes con quien organice contigo el evento.
+
+¿Me compartes *nombre*, *apellido* y *email*?
+Ejemplo: _Ana Pérez, ana@email.com_
+
+_Antes de crear la cotización revisaremos juntos que todo esté bien._`
       };
     }
 

@@ -1,18 +1,23 @@
 // ==============================================================================
-// OBJETIVO: Paso BARRILES_REVISION_COTIZACION — mostrar cotización y confirmar.
+// OBJETIVO: Paso BARRILES_REVISION_COTIZACION — mostrar cotización y decidir.
+// 1️⃣ Generar compra → datos de contacto + API; 2️⃣ Modificar → router.
 // ==============================================================================
 import { defineState } from '../../../logic/compile-state.js';
-import { preciosData, formatPrice } from '../../../logic/utils.js';
+import { preciosData } from '../../../logic/utils.js';
 import { OrderBuilder } from '../../../logic/order-builder.js';
 import { resolveDecisionIntent } from '../../../logic/decision-intent.js';
 import { rulesConfirmarOModificar } from '../../../logic/keyword-intent.js';
-import { getQuotationTemplate, buildAdminBarrilesOrderBody } from '../../../views/templates.js';
-import { withAssistantFooter } from '../../../logic/flow-rails.js';
+import { getQuotationTemplate } from '../../../views/templates.js';
+import { withAssistantFooter, formatMenuBlock } from '../../../logic/flow-rails.js';
 
-const SHORT_Q = withAssistantFooter(`¿Te parece bien esta cotización? Escribe *ok* para confirmarla, o dime qué cambiar.`);
+const MENU_BLOCK = formatMenuBlock(['Generar compra', 'Modificar']);
+
+const SHORT_Q = withAssistantFooter(`¿Te parece bien esta cotización?
+
+${MENU_BLOCK}`);
 
 const AI_PROMPT = `[SISTEMA - ESTADO: REVISIÓN COTIZACIÓN BARRILES]
-Resuelve dudas breves de precio/despacho. Cierra pidiendo *ok* para confirmar o que diga qué cambiar.`;
+Resuelve dudas breves de precio/despacho. Cierra pidiendo 1️⃣ Generar compra o 2️⃣ Modificar.`;
 
 export const BARRILES_REVISION_COTIZACION = defineState({
   id: 'BARRILES_REVISION_COTIZACION',
@@ -20,7 +25,7 @@ export const BARRILES_REVISION_COTIZACION = defineState({
   aiPrompt: AI_PROMPT,
   promptQuestion: (session) => {
     if (!session.orderBuilder?.clientData) {
-      return `Faltan datos del pedido. Escribe *1* para cócteles o vuelve a empezar con *Barriles Desechables*.`;
+      return `Faltan datos del pedido. Escribe 1️⃣ para cócteles o vuelve a empezar con *Barriles Desechables*.`;
     }
     const orderBuilder = new OrderBuilder('desechable', preciosData);
     orderBuilder.products = session.orderBuilder.products || {};
@@ -42,47 +47,28 @@ export const BARRILES_REVISION_COTIZACION = defineState({
       session,
       stepQuestion: SHORT_Q,
       allowedLabels: ['CONFIRMAR', 'MODIFICAR'],
-      keywordRules: rulesConfirmarOModificar()
+      keywordRules: rulesConfirmarOModificar(),
+      labelHints: {
+        CONFIRMAR: 'Opción 1 / quiere generar la compra online (1, 1️⃣, comprar, generar, ok, sí).',
+        MODIFICAR: 'Opción 2 / quiere cambiar cócteles, fecha o comuna (2, 2️⃣, modificar).'
+      }
     });
 
+    // Cliente quiere avanzar a la compra web → pedimos datos de contacto
     if (intent === 'CONFIRMAR') {
-      const { location, date } = session.orderBuilder.clientData;
-      const total = session.orderBuilder.quote?.total;
-      const totalStr = total ? formatPrice(total) : 'Revisar chat';
-
-      let adminProducts = '';
-      for (const [pName, qty] of Object.entries(session.orderBuilder.products)) {
-        const price = preciosData.cocteles[pName]?.desechable?.['5L'] || 0;
-        adminProducts += `- ${qty}x ${pName} 5L: ${formatPrice(price * qty)}\n`;
-      }
-
-      let adminExtras = '';
-      if (Object.keys(session.orderBuilder.extras).length > 0) {
-        for (const [eName, qty] of Object.entries(session.orderBuilder.extras)) {
-          const price = preciosData.extras[eName] || 0;
-          adminExtras += `- ${qty}x ${eName}: ${formatPrice(price * qty)}\n`;
-        }
-      }
-
-      const alert = {
-        type: 'SUCCESS',
-        title: 'BARRILES DESECHABLES',
-        labelKey: 'cotizacionBarriles',
-        body: buildAdminBarrilesOrderBody({
-          location,
-          date,
-          productsText: adminProducts,
-          extrasText: adminExtras,
-          totalStr
-        })
-      };
-
       return {
         success: true,
-        nextState: 'CERRADO',
-        mute: true,
-        notifyAdmin: alert,
-        customReply: `✅ Tu pedido quedó registrado.\n\nEn unos minutos alguien de nuestro equipo aprobará tu cotización y te enviará los datos de transferencia.\n\nUna vez confirmado el pago, tu pedido queda agendado. 🍹`
+        nextState: 'BARRILES_DATOS_CONTACTO',
+        customReply: `¡Genial! 🍹 Ya casi queda tu pedido.
+
+Para *generar tu compra online* —con el detalle y una *copia en tu correo*— solo necesito unos últimos datos.
+
+¿Me compartes *nombre*, *apellido* y *email*?
+Ejemplo: _Ana Pérez, ana@email.com_
+
+Después te pediré la *dirección de despacho* (calle y número).
+
+_Antes de crear la compra revisaremos juntos que todo esté bien._`
       };
     }
 

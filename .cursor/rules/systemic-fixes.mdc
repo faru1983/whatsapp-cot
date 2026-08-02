@@ -1,0 +1,39 @@
+---
+description: Corregir bugs con visión de sistema (regla/capa), no solo el caso del terminal
+alwaysApply: true
+---
+
+# Correcciones sistémicas (no parches de un solo caso)
+
+Al reparar un error reportado (terminal, cliente, test), **no** cerrar solo ese string o ese camino. Buscar la regla general y las variantes hermanas.
+
+## Método obligatorio
+
+1. **Clasificar** el bug: parser, prioridad de extractores, menú/interceptor, copy, mute/SOS, transición de estado, etc.
+2. **Arreglar la capa** (helper, contrato, validación compartida), no un `if` para el mensaje exacto del reporte.
+3. **Barrido de hermanos** del mismo patrón (otros meses, otros flujos Barriles/Eventos, mismos helpers, mismos menús).
+4. **Assert del patrón** en `scripts/verify-flows.mjs` (o test unitario del helper), no solo del ejemplo literal.
+5. **Explicar en la respuesta** qué regla general se fijó y qué variantes quedaron cubiertas.
+
+## Ejemplos del proyecto
+
+| Reporte puntual | Visión correcta |
+|---|---|
+| `"en diciembre"` se guardó como comuna | Rechazar **cualquier mes** en captura freeform de ubicación; fecha antes que comuna |
+| `"5 sangria"` sumó Mojito del carrito | Interceptor no debe tratar líneas de carrito como menú; exige ≥2 opciones reales |
+| Pie de asistente en pregunta de fecha | En `DATOS_CONTACTO`, mismo tono contextual para **todos** los datos faltantes |
+| Copy raro en un paso | Revisar re-preguntas / shortQuestion / on-miss del mismo estado y estados vecinos |
+
+## Anti-patrones
+
+- ❌ `if (text.includes('diciembre'))` / hardcode del mensaje del usuario
+- ❌ Arreglar solo Eventos cuando el helper también lo usa Barriles (o al revés)
+- ❌ Test que solo reproduce el string del bug sin el patrón
+- ❌ Dar por cerrado el fix sin preguntarse: “¿qué otra entrada ambigua cae en el mismo extractor?”
+
+## Checklist rápido antes de terminar
+
+- [ ] ¿El fix vive en el helper/contrato correcto?
+- [ ] ¿Cubré variantes del mismo patrón (no solo el ejemplo)?
+- [ ] ¿Hay assert de patrón en verify?
+- [ ] ¿Barriles y Eventos / menús similares quedan coherentes si aplica?

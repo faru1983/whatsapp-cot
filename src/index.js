@@ -11,6 +11,7 @@ import { processMessage } from './core/engine.js';
 import { shouldHandleMessage, stripTriggerPrefix } from './logic/utils.js';
 import { getSession, saveSession, resetSession, findSessionIdsForPhone } from './core/db.js';
 import { assertRuntimeConfigReady, loadBotConfig } from './core/config.js';
+import { warmCotCatalog } from './logic/cot-catalog.js';
 import { AUTH_DIR, PROJECT_ROOT } from './core/paths.js';
 import { isImagePart, isVideoPart, assertImageExists } from './logic/media.js';
 import { rememberLabel } from './core/business-labels.js';
@@ -362,6 +363,10 @@ async function startBot() {
   try {
     // Fail-fast: API key obligatoria; ADMIN_NUMBERS vacío solo avisa (SOS no llegarían)
     const config = assertRuntimeConfigReady();
+    // Precarga catálogo web (productId + sizes) para el primer quote más rápido
+    if (config.cotApi?.configured) {
+      void warmCotCatalog();
+    }
     const logger = pino({ level: 'silent' });
 
     console.log(`Iniciando bot en: ${PROJECT_ROOT}`);

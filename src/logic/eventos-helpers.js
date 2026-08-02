@@ -17,6 +17,12 @@ import { OrderBuilder } from './order-builder.js';
 import { img } from './media.js';
 import { getEventLitersSuggestion } from '../views/templates.js';
 
+/** Ejemplo canónico (litros primero) — intro menú + re-preguntas. */
+export const EVENT_COCKTAIL_ORDER_EXAMPLE = '5L Mojito y 10L Aperol';
+
+/** Pregunta estándar al pedir cócteles del evento. */
+export const ASK_EVENT_COCKTAILS = `¿Qué cócteles te gustaría incluir en tu evento? (ej: "${EVENT_COCKTAIL_ORDER_EXAMPLE}")`;
+
 /**
  * parseCelebrationType: Detecta qué celebra el cliente (matrimonio, cumpleaños, etc.).
  *
@@ -67,9 +73,20 @@ export function extractGuestsFromMessage(messageText) {
     return parseInt(explicitOriginal[1], 10);
   }
 
-  // 1. Quitar fechas (ej. 15 de mayo)
-  clean = clean.replace(/\b\d+\s*de\s*(enero|febrero|marzo|abril|mayo|junio|julio|agosto|septiembre|octubre|noviembre|diciembre)\b/gi, '');
-  
+  // 1. Quitar fechas: "15 de mayo", "15 diciembre", "el 3 diciembre 2027"
+  // Sin esto, "15 diciembre" deja el 15 y lo toma como invitados.
+  const months =
+    'enero|febrero|marzo|abril|mayo|junio|julio|agosto|septiembre|octubre|noviembre|diciembre';
+  clean = clean.replace(
+    new RegExp(`\\b(?:el\\s+)?\\d{1,2}\\s+(?:de\\s+)?(?:${months})(?:\\s+(?:de\\s+)?\\d{4})?\\b`, 'gi'),
+    ' '
+  );
+  // Solo mes ("en diciembre", "para marzo") — no aporta invitados
+  clean = clean.replace(
+    new RegExp(`\\b(?:para|en|durante|este|el)\\s+(?:${months})(?:\\s+(?:de\\s+)?\\d{4})?\\b`, 'gi'),
+    ' '
+  );
+
   // 2. Quitar edades/años (ej. 15 años, cumple 50, cumpleaños de 40)
   clean = clean.replace(/\b\d+\s*(añitos|años?|anos?)\b/gi, '');
   clean = clean.replace(/\b(cumpleaños|cumple)\s+(de\s+)?\d+\b/gi, '');
@@ -161,6 +178,45 @@ export function asksCoverageAreaQuestion(messageText) {
 }
 
 /**
+ * asksDeliveryOrDispatchQuestion: ¿Pregunta por despacho/envío (aunque venga junto a un pedido)?
+ * Ej.: "2 mojitos, ¿hacen despacho a Maipú?"
+ *
+ * @param {string} messageText
+ * @returns {boolean}
+ */
+export function asksDeliveryOrDispatchQuestion(messageText) {
+  const trimmed = String(messageText || '').trim();
+  if (!trimmed) return false;
+  if (asksCoverageAreaQuestion(trimmed)) return true;
+  return /\b(despacho|despachan|env[ií]o|envian|envían|entregan|hacen\s+despacho|costo\s+de\s+env[ií]o)\b/i.test(trimmed)
+    && (/\?/.test(trimmed) || /\b(hacen|pueden|cu[aá]nto|a\s+[a-záéíóúñ]+)\b/i.test(trimmed));
+}
+
+/**
+ * REPLY_DISPATCH_SIDEBAR: Respuesta corta de cobertura cuando el cliente mezcla
+ * pedido + duda de despacho en el mismo mensaje (pasos de carrito).
+ */
+export const REPLY_DISPATCH_SIDEBAR =
+  '📦 Sobre *despacho*: trabajamos en toda la *Región Metropolitana* y también *La Serena/Coquimbo*. El costo se calcula según la comuna al armar la cotización.';
+
+/**
+ * stripDeliveryQuestionForCart: Quita la duda de despacho/envío del mensaje
+ * para que el extractor de cócteles no se confunda (multi-intent pedido + pregunta).
+ *
+ * @param {string} messageText
+ * @returns {string} Texto listo para parsear/NLU de productos
+ */
+export function stripDeliveryQuestionForCart(messageText) {
+  return String(messageText || '')
+    .replace(/[¿?][^¿?]*/g, ' ')
+    .replace(/\b(hacen|pueden|hay)\s+(despacho|env[ií]o)\b.*$/i, ' ')
+    .replace(/\s+/g, ' ')
+    .trim()
+    .replace(/[,\s;]+$/g, '')
+    .trim();
+}
+
+/**
  * asksEventCartPriceQuestion: ¿Pregunta por discrepancia de precio con lo ya cotizado?
  * Ej.: "¿y por qué sale otro valor?", "en la lista decía menos".
  *
@@ -200,33 +256,76 @@ export function parseLitrageOnlyMessage(messageText) {
 }
 
 /**
- * parseCocktailNamesWithoutLitrage: Detecta sabores sin tamaño (typos incluidos).
- * Ej.: "Monito aperol" → ["Mojito", "Aperol Spritz"] antes de llamar al NLU.
+ * parseBareQuantityWithoutUnit: Número suelto en el mensaje, sin unidad que lo aclare.
+ * Sirve para saber si "2 mojito" pudo haber sido "2 barriles" (el bot lo lee como litros).
+ * "2 mojito" → 2 | "mojito 10L" → null | "2x mojito" → null | "2 barriles" → null
+ *
+ * @param {string} messageText - Mensaje del cliente
+ * @returns {number|null} El número suelto, o null si no hay ambigüedad
+ */
+export function parseBareQuantityWithoutUnit(messageText) {
+  const text = String(messageText || '').trim();
+  if (!text) return null;
+  // Unidad explícita: el cliente ya dijo si son litros o barriles
+  if (/\d+\s*(?:l|lt|lts|litros?)\b/i.test(text)) return null;
+  if (/\d+\s*[x×]/i.test(text)) return null;
+  if (/\b(?:barril|barriles|unidad|unidades)\b/i.test(text)) return null;
+
+  const numbers = text.match(/\b\d+\b/g) || [];
+  if (numbers.length !== 1) return null;
+
+  const n = parseInt(numbers[0], 10);
+  return n >= 1 && n <= 20 ? n : null;
+}
+
+/**
+ * matchCocktailNamesInText: Nombres del catálogo presentes en el mensaje (fuzzy).
+ * Compartido por parsers con/sin litraje.
  *
  * @param {string} messageText
  * @param {string[]} catalogNames
  * @returns {string[]}
  */
-export function parseCocktailNamesWithoutLitrage(messageText, catalogNames) {
-  const text = String(messageText || '').trim();
-  if (!text) return [];
-  if (/\b\d+\s*(?:l|lt|lts|litros?)\b/i.test(text)) return [];
-  if (asksEventCartPriceQuestion(text) || /\?/.test(text)) return [];
-
-  const norm = normalizeString(text);
+function matchCocktailNamesInText(messageText, catalogNames) {
+  const norm = normalizeString(messageText);
   const matched = [];
 
-  // Nombres completos del catálogo presentes en el mensaje
-  for (const name of catalogNames) {
+  // Nombres más largos primero (evita que "Mojito" robe "Mojito Maracuyá")
+  const sorted = [...catalogNames].sort((a, b) => b.length - a.length);
+  for (const name of sorted) {
     const nameNorm = normalizeString(name);
-    if (norm.includes(nameNorm)) {
-      if (!matched.includes(name)) matched.push(name);
+    if (!nameNorm || !norm.includes(nameNorm)) continue;
+    if (matched.some((m) => normalizeString(m).includes(nameNorm) || nameNorm.includes(normalizeString(m)))) {
+      // Si ya hay uno más específico que contiene este, o viceversa, preferimos el más largo
+      const worse = matched.findIndex((m) => {
+        const mn = normalizeString(m);
+        return mn !== nameNorm && (mn.includes(nameNorm) || nameNorm.includes(mn));
+      });
+      if (worse >= 0) {
+        if (nameNorm.length > normalizeString(matched[worse]).length) matched[worse] = name;
+        continue;
+      }
     }
+    if (!matched.includes(name)) matched.push(name);
   }
 
   // Tokens sueltos con fuzzy match (monito → Mojito, aperol → Aperol Spritz)
-  const stop = new Set(['para', 'con', 'son', 'una', 'unos', 'quiero', 'dame', 'pon', 'agrega', 'y', 'el', 'la']);
-  const tokens = norm.split(/[\s,;/+]+/).filter((t) => t.length >= 3 && !stop.has(t));
+  // No re-matchear palabras ya cubiertas por un nombre completo (ej. "spritz" tras "Aperol Spritz")
+  const covered = new Set();
+  for (const m of matched) {
+    for (const w of normalizeString(m).split(/\s+/)) {
+      if (w.length >= 3) covered.add(w);
+    }
+  }
+
+  const stop = new Set([
+    'para', 'con', 'son', 'una', 'unos', 'quiero', 'dame', 'pon', 'agrega', 'y', 'el', 'la',
+    'de', 'un', 'unos', 'barril', 'barriles', 'litro', 'litros'
+  ]);
+  const tokens = norm
+    .replace(/\b\d+\s*(?:l|lt|lts|litros?)\b/g, ' ')
+    .split(/[\s,;/+x×]+/)
+    .filter((t) => t.length >= 3 && !stop.has(t) && !/^\d+$/.test(t) && !covered.has(t));
 
   for (const token of tokens) {
     const hit = findClosestCatalogMatch(token, catalogNames);
@@ -239,6 +338,144 @@ export function parseCocktailNamesWithoutLitrage(messageText, catalogNames) {
   }
 
   return matched;
+}
+
+/**
+ * parseCocktailNamesWithoutLitrage: Detecta sabores sin tamaño (typos incluidos).
+ * Ej.: "Monito aperol" → ["Mojito", "Aperol Spritz"] antes de llamar al NLU.
+ *
+ * @param {string} messageText
+ * @param {string[]} catalogNames
+ * @returns {string[]}
+ */
+export function parseCocktailNamesWithoutLitrage(messageText, catalogNames) {
+  const text = String(messageText || '').trim();
+  if (!text) return [];
+  if (/\b\d+\s*(?:l|lt|lts|litros?)\b/i.test(text)) return [];
+  if (asksEventCartPriceQuestion(text) || /\?/.test(text)) return [];
+  return matchCocktailNamesInText(text, catalogNames);
+}
+
+/**
+ * parseEventProductsProgrammatic: Parsea pedidos de eventos sin IA.
+ * Orientación litros-primero: "5L Mojito y 10L Aperol", "15L Sangria", "Mojito 10L".
+ * Sin litros: "un mojito" → 1× defaultLitrage (típicamente 5L en dispensador).
+ * Varios cócteles: cada segmento (separado por "y"/","/";") lleva su propio litraje.
+ *
+ * @param {string} messageText
+ * @param {string[]} catalogNames
+ * @param {string[]} allowedLitrages
+ * @param {string} defaultLitrage
+ * @returns {Array<{name: string, quantity: number, litrage: string}>}
+ */
+export function parseEventProductsProgrammatic(messageText, catalogNames, allowedLitrages, defaultLitrage) {
+  // Multi-intent: "5L Mojito, ¿hacen despacho?" → parseamos solo la parte del pedido
+  let text = String(messageText || '').trim();
+  if (asksDeliveryOrDispatchQuestion(text)) {
+    text = stripDeliveryQuestionForCart(text);
+  }
+  if (!text) return [];
+  if (asksEventCartPriceQuestion(text) || /\?/.test(text)) return [];
+
+  // Litrajes en todo el mensaje (para "Mojito y Sangría 10L" → ambos 10L)
+  const allLitrageMatches = [...text.matchAll(/\b(\d+)\s*(?:l|lt|lts|litros?)\b/gi)];
+  const sharedLitrage = allLitrageMatches.length === 1
+    ? `${allLitrageMatches[0][1]}L`
+    : null;
+
+  // Un segmento por cóctel: "5L Mojito y 15L Sangria" → dos pedidos independientes
+  const segments = text
+    .split(/\s*(?:,|;|\by\b)\s+/i)
+    .map((s) => s.trim())
+    .filter(Boolean);
+
+  const parts = segments.length > 0 ? segments : [text];
+  const results = [];
+
+  for (const segment of parts) {
+    const names = matchCocktailNamesInText(segment, catalogNames);
+    if (!names.length) continue;
+
+    const litrageMatch = segment.match(/\b(\d+)\s*(?:l|lt|lts|litros?)\b/i);
+    // Conservamos litrajes no estándar (15L): validate/fixEvent los parte en barriles válidos
+    let litrage = defaultLitrage;
+    if (litrageMatch) {
+      litrage = `${litrageMatch[1]}L`;
+    } else if (sharedLitrage) {
+      litrage = sharedLitrage;
+    }
+
+    // Cantidad de barriles: "2x Mojito 10L" / "2 Mojito" — no confundir con el número de litros
+    let quantity = 1;
+    const qtyMatch = segment.match(/\b(\d+)\s*[x×]\b/i)
+      || segment.match(/\b(\d+)\s+(?:de\s+)?(?:barriles?\s+(?:de\s+)?)?/i)
+      || segment.match(/\b(\d+)\s*[x×]?\s*(?=[A-Za-záéíóúÁÉÍÓÚñÑ])/i);
+    if (qtyMatch) {
+      const n = parseInt(qtyMatch[1], 10);
+      if (litrageMatch && String(n) === litrageMatch[1] && !/[x×]/i.test(segment)) {
+        quantity = 1;
+      } else if (n >= 1 && n <= 20) {
+        quantity = n;
+      }
+    }
+
+    for (const name of names) {
+      results.push({ name, quantity, litrage });
+    }
+  }
+
+  return results;
+}
+
+/**
+ * parseBarrilesProductsProgrammatic: Parsea pedidos de barriles desechables sin IA.
+ * Formato típico: "2 mojitos y 1 sangría", "un aperol".
+ * Si el mensaje mezcla duda de despacho, se limpia antes de parsear.
+ *
+ * @param {string} messageText
+ * @param {string[]} catalogNames
+ * @returns {Array<{name: string, quantity: number}>}
+ */
+export function parseBarrilesProductsProgrammatic(messageText, catalogNames) {
+  let text = String(messageText || '').trim();
+  if (asksDeliveryOrDispatchQuestion(text)) {
+    text = stripDeliveryQuestionForCart(text);
+  }
+  if (!text) return [];
+  // Otras preguntas (precio, ingredientes) las deja la NLU / FAQ
+  if (/\?/.test(text)) return [];
+
+  const segments = text
+    .split(/\s*(?:,|;|\by\b)\s+/i)
+    .map((s) => s.trim())
+    .filter(Boolean);
+  const parts = segments.length > 0 ? segments : [text];
+  const results = [];
+
+  for (const segment of parts) {
+    const names = matchCocktailNamesInText(segment, catalogNames);
+    if (!names.length) continue;
+
+    let quantity = 1;
+    const qtyMatch = segment.match(/\b(\d+)\s*[x×]\b/i)
+      || segment.match(/\b(\d+)\s+(?:de\s+)?(?:barriles?\s+(?:de\s+)?)?/i)
+      || segment.match(/\b(\d+)\s*[x×]?\s*(?=[A-Za-záéíóúÁÉÍÓÚñÑ])/i)
+      || segment.match(/\b(un|una|unos|unas)\b/i);
+    if (qtyMatch) {
+      if (/^(un|una|unos|unas)$/i.test(qtyMatch[1])) {
+        quantity = 1;
+      } else {
+        const n = parseInt(qtyMatch[1], 10);
+        if (n >= 1 && n <= 50) quantity = n;
+      }
+    }
+
+    for (const name of names) {
+      results.push({ name, quantity });
+    }
+  }
+
+  return results;
 }
 
 /**
@@ -312,6 +549,13 @@ export function applyEventDataFromMessage(messageText, session) {
     hasNewInfo = true;
   }
 
+  // Fecha antes que comuna: "en diciembre" es mes, no ubicación
+  const dateSearch = parseDate(messageText);
+  if (dateSearch) {
+    session.date = dateSearch;
+    hasNewInfo = true;
+  }
+
   const locationSearch = findLocationByFuzzyMatch(messageText);
   if (locationSearch) {
     session.location = locationSearch.name;
@@ -326,6 +570,7 @@ export function applyEventDataFromMessage(messageText, session) {
     );
     if (locationMatch) {
       const captured = locationMatch[1].trim();
+      // Si la captura es el mismo mes/fecha que ya detectamos, no la guardamos como comuna
       if (isValidFreeformLocationCapture(captured)) {
         const fuzzyCaptured = findLocationByFuzzyMatch(captured);
         session.location = fuzzyCaptured?.name || captured;
@@ -336,16 +581,15 @@ export function applyEventDataFromMessage(messageText, session) {
     }
   }
 
-  const dateSearch = parseDate(messageText);
-  if (dateSearch) {
-    session.date = dateSearch;
-    hasNewInfo = true;
-  }
-
+  // Invitados: si ya hay un valor, solo lo pisamos con mención explícita
+  // ("50 invitados"). Así "15 de diciembre" no cambia 50 → 15.
   const guests = extractGuestsFromMessage(messageText);
   if (guests !== null) {
-    session.guests = guests;
-    hasNewInfo = true;
+    const explicitGuests = /\b\d+\s*(personas|invitados|pax|inv)\b/i.test(messageText);
+    if (explicitGuests || session.guests == null || session.guests === '') {
+      session.guests = guests;
+      hasNewInfo = true;
+    }
   }
 
   return hasNewInfo;
@@ -419,6 +663,24 @@ export function formatEventCartSummary(products, formatKey) {
 }
 
 /**
+ * formatEventCartTotalsLine: Subtotal + litros (+ mínimo) + cócteles ≈.
+ * Usa totalDrinks de OrderBuilder (tabla rendimientos_barriles / 5 por litro).
+ *
+ * @param {{ subtotal: number, totalLiters?: number, totalDrinks?: number }} quote
+ * @param {{ minLiters?: number }} [opts]
+ * @returns {string}
+ */
+export function formatEventCartTotalsLine(quote, opts = {}) {
+  const liters = Number(quote?.totalLiters) || 0;
+  const drinks = Number(quote?.totalDrinks);
+  const approxDrinks = Number.isFinite(drinks) && drinks > 0
+    ? drinks
+    : liters * 5;
+  const minPart = opts.minLiters != null ? ` (mín. ${opts.minLiters}L)` : '';
+  return `*Subtotal:* ${formatPrice(quote?.subtotal || 0)} | *Litros:* ${liters}L${minPart} | ≈ *${approxDrinks}* cócteles`;
+}
+
+/**
  * getEventPriceListImage: Foto de la carta según formato (Dispensador o Muro).
  * Igual que barriles con barril_desechable_precios.webp.
  *
@@ -446,8 +708,8 @@ export function buildMenuEntryReplies(session, formatKey) {
   return [
     getEventPriceListImage(formatKey),
     litersHint,
-    // Primera vez: solo pedimos sabores (aún no hay carrito → no mencionar *ok*)
-    `¿Qué cócteles te gustaría incluir en tu evento? (ej: "Mojito 10L y 1 Aperol 5L")`
+    // Litros primero: orienta al cliente al patrón más común (ej. "5L Mojito y 10L Aperol")
+    ASK_EVENT_COCKTAILS
   ];
 }
 

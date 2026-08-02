@@ -19,15 +19,51 @@ import {
 import { getBrowseOnlyGoodbye } from '../../../views/templates.js';
 import { withAssistantFooter } from '../../../logic/flow-rails.js';
 import { matchKeywordIntent, rulesWebVsChat } from '../../../logic/keyword-intent.js';
+import { exampleConcreteDateHint, normalizeBotDateText } from '../../../logic/cot-event-quote.js';
 import { BARRILES_RECOGIDA_PRODUCTOS } from './BARRILES_RECOGIDA_PRODUCTOS.js';
 
-const SHORT_Q = withAssistantFooter(`¿De *qué comuna* nos escribes y *para cuándo* lo quieres?
+/**
+ * deliveryExampleLine: Ejemplo con fecha concreta (hoy Chile + 3 días).
+ * Evita "este sábado" para que el cliente diga día+mes desde el inicio.
+ *
+ * @returns {string}
+ */
+function deliveryExampleLine() {
+  return `Ejemplo: _"Providencia, ${exampleConcreteDateHint()}"_`;
+}
 
-Ejemplo: _"Providencia, para este sábado"_`);
+/**
+ * shortQuestionForDelivery: Re-pregunta de comuna + fecha.
+ *
+ * @returns {string}
+ */
+function shortQuestionForDelivery() {
+  return withAssistantFooter(`¿De *qué comuna* nos escribes y *para cuándo* lo quieres?
 
-// Burbuja 1: producto + web. Burbuja 2: pide datos (filtro de interés).
-const WELCOME_TEXTS = [
-  `👋 *Barriles Desechables* listos para servir:
+${deliveryExampleLine()}`);
+}
+
+/**
+ * askDeliveryCopy: Texto largo pidiendo comuna/fecha (burbuja 2 de bienvenida).
+ *
+ * @returns {string}
+ */
+function askDeliveryCopy() {
+  return `Si prefieres seguir por aquí y ver el catálogo, cuéntame de *qué comuna* nos escribes y *para cuándo* lo quieres.
+
+${deliveryExampleLine()}`;
+}
+
+// Si ya vieron el menú del router, entrada directa (sin re-presentar al asistente).
+/**
+ * welcomeForSession: Copy de entrada según si el asistente ya se presentó en el menú.
+ *
+ * @param {object} session
+ * @returns {string[]}
+ */
+function welcomeForSession(session) {
+  const pitch = session?.assistantIntroduced
+    ? `*Barriles Desechables* listos para servir:
 • 5 litros ≈ *25 cócteles*
 • Se conservan refrigerados (+3 semanas)
 • Desde *$31.990* (según sabor)
@@ -35,18 +71,27 @@ const WELCOME_TEXTS = [
 📍 Despacho en toda la RM y a regiones por encomienda.
 
 Puedes cotizar fácil y rápido en la web:
-👉 *www.cocktailsontap.cl/barriles*`,
-  `Si prefieres seguir por aquí y ver el catálogo, cuéntame de *qué comuna* nos escribes y *para cuándo* lo quieres.
+👉 *www.cocktailsontap.cl/barriles*`
+    : `Soy el *asistente virtual* de *Cocktails on Tap* y te guiaré con la información de *Barriles Desechables* listos para servir:
+• 5 litros ≈ *25 cócteles*
+• Se conservan refrigerados (+3 semanas)
+• Desde *$31.990* (según sabor)
 
-Ejemplo: _"Providencia, para este sábado"_`
-];
+📍 Despacho en toda la RM y a regiones por encomienda.
+
+Puedes cotizar fácil y rápido en la web:
+👉 *www.cocktailsontap.cl/barriles*`;
+
+  return [pitch, askDeliveryCopy()];
+}
 
 const AI_PROMPT = `[SISTEMA - ESTADO: DATOS DE ENTREGA BARRILES (entrada)]
-El cliente acaba de entrar a Barriles Desechables. Debe dar *comuna* y *fecha* de entrega, o tiene dudas.
+Eres el asistente virtual de Cocktails on Tap. El cliente acaba de entrar a Barriles Desechables. Debe dar *comuna* y *fecha* de entrega, o tiene dudas.
+0. Si el asistente ya se presentó en el menú anterior, NO digas "hola" ni vuelvas a presentarte.
 1. Responde dudas breves (precios desde *$31.990*, 5L ≈ 25 cócteles, despacho RM / encomienda regiones). NUNCA inventes tarifas.
 2. NUNCA pegues el catálogo completo todavía.
 3. Puedes mencionar la web www.cocktailsontap.cl/barriles si prefiere cotizar solo ahí; no lo presentes como menú obligatorio web vs chat.
-4. Al finalizar, si faltan comuna o fecha, pídelas. Ejemplo: "Providencia, para este sábado".`;
+4. Al finalizar, si faltan comuna o fecha, pídelas con día concreto (ej. "Providencia, 5 de agosto"), no solo "este sábado".`;
 
 /**
  * ensureDesechableCart: Inicializa orderBuilder tipo desechable si falta.
@@ -78,6 +123,8 @@ function hasDeliveryData(session) {
 
 /**
  * applyDeliveryDataFromMessage: Guarda fecha y/o comuna en clientData.
+ * Si la fecha es relativa ("este sábado"), la normaliza a "3 de agosto".
+ *
  * @param {string} messageText
  * @param {object} session
  * @returns {{ gotDate: boolean, gotLocation: boolean }}
@@ -90,7 +137,7 @@ function applyDeliveryDataFromMessage(messageText, session) {
 
   const parsedDate = parseDate(messageText);
   if (parsedDate) {
-    cd.date = parsedDate;
+    cd.date = normalizeBotDateText(parsedDate) || parsedDate;
     gotDate = true;
   }
 
@@ -118,12 +165,13 @@ Ejemplo: *1 mojito y 1 sangría*`
 
 export const BARRILES_FILTRO_CANAL = defineState({
   id: 'BARRILES_FILTRO_CANAL',
-  texts: WELCOME_TEXTS,
-  shortQuestion: SHORT_Q,
+  texts: welcomeForSession,
+  shortQuestion: () => shortQuestionForDelivery(),
   aiPrompt: AI_PROMPT,
 
   async validateAndProcess(messageText, session) {
     ensureDesechableCart(session);
+    const SHORT_Q = shortQuestionForDelivery();
 
     // Mirón / después → despedida + mute (sin anunciarlo en el copy)
     if (wantsBrowseOnlyClose(messageText)
@@ -163,13 +211,15 @@ En la *web* encuentras sabores, fotos y precios, y puedes comprar cuando quieras
         return {
           success: true,
           nextState: 'BARRILES_FILTRO_CANAL',
-          customReply: `${priceLine}\n\n${SHORT_Q}`
+          customReply: `${priceLine}\n\n${SHORT_Q}`,
+          flowProgress: true
         };
       }
       return {
         success: true,
         nextState: 'BARRILES_FILTRO_CANAL',
-        customReply: `Precios desde *$31.990* (5L ≈ 25 cócteles). Catálogo completo: www.cocktailsontap.cl/barriles\n\n${SHORT_Q}`
+        customReply: `Precios desde *$31.990* (5L ≈ 25 cócteles). Catálogo completo: www.cocktailsontap.cl/barriles\n\n${SHORT_Q}`,
+        flowProgress: true
       };
     }
 
@@ -200,7 +250,8 @@ En la *web* encuentras sabores, fotos y precios, y puedes comprar cuando quieras
       return {
         success: true,
         nextState: 'BARRILES_FILTRO_CANAL',
-        customReply: `${ack}Me falta ${missing.join(' y ')}.`
+        customReply: `${ack}Me falta ${missing.join(' y ')}.`,
+        flowProgress: true
       };
     }
 
@@ -210,7 +261,8 @@ En la *web* encuentras sabores, fotos y precios, y puedes comprar cuando quieras
       return {
         success: true,
         nextState: 'BARRILES_FILTRO_CANAL',
-        customReply: `Anoté tus cócteles 🙂 Para seguir, ${SHORT_Q}`
+        customReply: `Anoté tus cócteles 🙂 Para seguir, ${SHORT_Q}`,
+        flowProgress: true
       };
     }
 

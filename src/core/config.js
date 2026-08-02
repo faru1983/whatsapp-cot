@@ -184,6 +184,15 @@ export function loadBotConfig() {
       maxConsecutiveErrors: parsePositiveInt(process.env.SECURITY_MAX_CONSECUTIVE_ERRORS, 2),
       // Cambio de intención: cuántas veces puede alternar barriles ↔ eventos antes de silenciar
       maxIntentSwitches: parsePositiveInt(process.env.SECURITY_MAX_INTENT_SWITCHES, 3),
+    },
+
+    // API web cocktailsontap (crear quotes desde WhatsApp). Ver COT_API_* en .env
+    cotApi: {
+      baseUrl: String(process.env.COT_API_BASE_URL || '').trim().replace(/\/$/, ''),
+      configured: Boolean(
+        String(process.env.COT_API_BASE_URL || '').trim()
+        && String(process.env.COT_API_KEY || '').trim()
+      )
     }
   };
 }
@@ -212,6 +221,21 @@ export function assertRuntimeConfigReady() {
     );
   } else {
     console.log(`Admins configurados: ${adminCount}`);
+  }
+
+  if (config.cotApi?.configured) {
+    console.log(`COT API lista: ${config.cotApi.baseUrl}`);
+  } else {
+    const isProd = String(process.env.NODE_ENV || '').toLowerCase() === 'production';
+    const msg =
+      'COT_API_BASE_URL / COT_API_KEY no configurados: el bot cerrará ventas/cotizaciones '
+      + 'en modo legacy (solo alerta WhatsApp, SIN crear pedido en la web). '
+      + 'En producción esto es obligatorio.';
+    if (isProd) {
+      console.error(`❌  ${msg}`);
+    } else {
+      console.warn(`⚠️  ${msg}`);
+    }
   }
 
   return config;

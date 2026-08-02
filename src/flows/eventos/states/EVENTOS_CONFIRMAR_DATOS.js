@@ -1,5 +1,5 @@
 // ==============================================================================
-// OBJETIVO: Paso EVENTOS_CONFIRMAR_DATOS — resumen + ok / corregir.
+// OBJETIVO: Paso EVENTOS_CONFIRMAR_DATOS — resumen + menú 1️⃣ confirmar / 2️⃣ corregir.
 // Solo invitados es obligatorio; el resto puede quedar "Por confirmar".
 // ==============================================================================
 import { defineState } from '../../../logic/compile-state.js';
@@ -9,16 +9,22 @@ import { resolveDecisionIntent } from '../../../logic/decision-intent.js';
 import { rulesConfirmarOCorregirDatos } from '../../../logic/keyword-intent.js';
 import { applyEventDataFromMessage } from '../../../logic/eventos-helpers.js';
 import { img } from '../../../logic/media.js';
-import { withAssistantFooter } from '../../../logic/flow-rails.js';
+import { withAssistantFooter, formatMenuBlock } from '../../../logic/flow-rails.js';
 
-const SHORT_Q = withAssistantFooter(`¿Todo bien? Escribe *ok* para continuar o corrige un dato.`);
+const MENU_BLOCK = formatMenuBlock(['Confirmar', 'Corregir']);
+
+const SHORT_Q = withAssistantFooter(`¿Todo bien?
+
+${MENU_BLOCK}
+
+Si quieres corregir, también puedes escribir el dato directo (ej. _son 80 invitados_).`);
 
 const AI_PROMPT = `[SISTEMA - ESTADO: CONFIRMAR DATOS DEL EVENTO]
 El cliente ya tiene al menos la cantidad de invitados y recibió un resumen (celebración/fecha/comuna pueden decir "Por confirmar").
-Debe escribir "ok" para seguir, o corregir un dato (ej. "son 80 invitados", "es en Providencia").
+Debe elegir 1️⃣ Confirmar, 2️⃣ Corregir, o escribir el dato nuevo (ej. "son 80 invitados", "es en Providencia").
 1. Responde dudas breves sin inventar precios.
-2. Si corrige un dato, confirma el cambio y vuelve a pedir ok.
-3. NUNCA pases a elegir formato Dispensador/Muro hasta que confirme con ok (o equivalente).
+2. Si corrige un dato, confirma el cambio y vuelve a pedir confirmación.
+3. NUNCA pases a elegir formato Dispensador/Muro hasta que confirme (opción 1 / ok).
 4. No insistas en datos opcionales que dejó en "Por confirmar".`;
 
 export const EVENTOS_CONFIRMAR_DATOS = defineState({
@@ -49,7 +55,7 @@ export const EVENTOS_CONFIRMAR_DATOS = defineState({
       };
     }
 
-    // ¿Confirma con ok / sí / dale?
+    // ¿Confirma con 1️⃣ / ok / sí / dale?
     const intent = await resolveDecisionIntent({
       messageText,
       session,
@@ -57,22 +63,19 @@ export const EVENTOS_CONFIRMAR_DATOS = defineState({
       allowedLabels: ['CONFIRMAR', 'CORREGIR'],
       keywordRules: rulesConfirmarOCorregirDatos(),
       labelHints: {
-        CONFIRMAR: 'Los datos están bien; quiere seguir (ok, sí, dale, correcto, perfecto).',
-        CORREGIR: 'Quiere cambiar algún dato pero aún no dijo el valor nuevo (cambiar, modificar, mal).'
+        CONFIRMAR: 'Opción 1 / los datos están bien; quiere seguir (1, 1️⃣, ok, sí, dale).',
+        CORREGIR: 'Opción 2 / quiere cambiar algún dato pero aún no dijo el valor nuevo (2, 2️⃣, cambiar, modificar).'
       }
     });
 
     if (intent === 'CONFIRMAR') {
       const instalacionMuro = formatPrice(preciosData.instalacion_muro || 50000);
-      // Una sola foto (ambas opciones) con la recomendación de caption; la pregunta va aparte
-      const [recomendacion, pregunta] = getEventFormatRecommendation(session.guests, instalacionMuro);
+      // Una sola burbuja: foto + caption con recomendación y menú 1️⃣/2️⃣
+      const caption = getEventFormatRecommendation(session.guests, instalacionMuro);
       return {
         success: true,
         nextState: 'EVENTOS_ELECCION_FORMATO',
-        customReplies: [
-          img('eventos_ambas.webp', recomendacion),
-          pregunta
-        ]
+        customReply: img('eventos_ambas.webp', caption)
       };
     }
 

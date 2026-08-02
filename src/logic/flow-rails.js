@@ -23,6 +23,53 @@ export const HUMANO_ONLY_FOOTER =
   '_(Escribe *HUMANO* si quieres una persona.)_';
 
 /**
+ * MENU_KEYCAPS: Emojis numéricos (keycap) para menús de decisión en WhatsApp.
+ * El cliente puede responder con el emoji o solo el dígito (1, 2, 3…).
+ */
+export const MENU_KEYCAPS = {
+  1: '1️⃣',
+  2: '2️⃣',
+  3: '3️⃣',
+  4: '4️⃣',
+  5: '5️⃣'
+};
+
+/**
+ * menuKeycap: Devuelve el emoji keycap de una opción (1 → 1️⃣).
+ *
+ * @param {number} n - Número de opción (1–5)
+ * @returns {string}
+ */
+export function menuKeycap(n) {
+  return MENU_KEYCAPS[n] || String(n);
+}
+
+/**
+ * formatMenuOptionLine: Una línea de menú con emoji + etiqueta en negrita.
+ * Ej.: formatMenuOptionLine(1, 'Servicio para Eventos') → "1️⃣ *Servicio para Eventos*"
+ *
+ * @param {number} n - Número de opción
+ * @param {string} label - Texto sin asteriscos
+ * @returns {string}
+ */
+export function formatMenuOptionLine(n, label) {
+  const clean = String(label || '').replace(/\*/g, '').trim();
+  return `${menuKeycap(n)} *${clean}*`;
+}
+
+/**
+ * formatMenuBlock: Bloque de varias opciones numeradas con emoji.
+ *
+ * @param {string[]} labels - Etiquetas en orden (índice 0 = opción 1)
+ * @returns {string}
+ */
+export function formatMenuBlock(labels) {
+  return (Array.isArray(labels) ? labels : [])
+    .map((label, i) => formatMenuOptionLine(i + 1, label))
+    .join('\n');
+}
+
+/**
  * withoutAssistantFooter: Quita el pie ASSISTANT_FOOTER del texto.
  *
  * @param {string} text
@@ -103,16 +150,17 @@ export function withAssistantFooter(question) {
 export function getOnMissHint(stateId, session, pendingKey = null) {
   const key = pendingKey;
   const hints = {
-    intent: 'Para seguir, elige *Barriles Desechables* o *Servicio para Eventos*.',
+    intent: 'Para seguir, elige una opción del menú: 1️⃣ *Eventos*, 2️⃣ *Barriles* o 3️⃣ *Humano*.',
     guests: 'Para cotizar necesito el *número de invitados* (ej. _50 personas_).',
-    confirm: 'Revisa los datos y responde *ok* si están correctos, o dime qué corregir.',
+    confirm: 'Revisa los datos: 1️⃣ *Confirmar* u 2️⃣ *Corregir* (o escribe el dato nuevo).',
     delivery: 'Necesito *fecha* y *comuna* de entrega para continuar.',
     products: 'Dime *qué sabor* y *cuántos* barriles (ej. _2 mojitos_), o escribe *lista*.',
-    format: 'Elige *Dispensador Portátil* o *Muro de Coctelería* para seguir.',
-    continue: 'Escribe *ok* cuando quieras ver la carta y precios.',
-    cart: 'Indica los cócteles con litraje (ej. _Mojito 10L_) o escribe *lista*.',
-    confirm_quote: '¿Te parece bien la cotización? Escribe *ok* para confirmar o dime qué cambiar.',
-    mod_choice: 'Responde *1* para cambiar cócteles o *2* para cambiar fecha/comuna.',
+    format: 'Elige 1️⃣ *Dispensador* o 2️⃣ *Muro* para seguir.',
+    continue: 'Responde 1️⃣ cuando quieras ver la carta y precios.',
+    cart: 'Indica los cócteles con litraje (ej. _5L Mojito_) o escribe *lista*.',
+    confirm_quote: '¿Te parece bien? 1️⃣ *Confirmar* o 2️⃣ *Modificar*.',
+    contact: 'Para enviarte la cotización formal, necesito *nombre*, *apellido* y *email*.',
+    mod_choice: 'Responde 1️⃣ para cambiar cócteles o 2️⃣ para cambiar fecha/comuna.',
     client_data: 'Necesito *fecha* y *comuna* de entrega para armar la cotización.'
   };
 

@@ -23,15 +23,23 @@ import {
   getAllowedLitrages,
   ensureEventOrderBuilder,
   formatEventCartSummary,
+  formatEventCartTotalsLine,
   getEventPriceListImage,
   asksEventCartPriceQuestion,
   parseLitrageOnlyMessage,
   parseCocktailNamesWithoutLitrage,
-  validateEventProductLines
+  parseEventProductsProgrammatic,
+  parseBareQuantityWithoutUnit,
+  validateEventProductLines,
+  ASK_EVENT_COCKTAILS,
+  asksDeliveryOrDispatchQuestion,
+  REPLY_DISPATCH_SIDEBAR,
+  stripDeliveryQuestionForCart
 } from '../../../logic/eventos-helpers.js';
-import { withAssistantFooter } from '../../../logic/flow-rails.js';
+import { withAssistantFooter, formatMenuBlock } from '../../../logic/flow-rails.js';
+import { matchesMenuOption } from '../../../logic/keyword-intent.js';
 
-const ASK_COCKTAILS = `¿Qué cócteles te gustaría incluir en tu evento? (ej: "Mojito 10L y 1 Aperol 5L")`;
+const ASK_COCKTAILS = ASK_EVENT_COCKTAILS;
 const ASK_OK_AFTER_CART = `Si está bien así, escribe *ok* para ver el resumen de tu cotización.
 _(Si quieres cambiar, dime qué agregar o quitar)_`;
 
@@ -87,6 +95,43 @@ function applyProductsToCart(session, products, replaceSameName) {
   }
 }
 
+/**
+ * buildCartReply: Arma el mensaje de carrito (lista + subtotal + qué sigue).
+ * Lo comparten todas las ramas que agregan cócteles, para no repetir el formato.
+ *
+ * @param {object} params
+ * @param {object} params.session - Sesión del cliente
+ * @param {string} params.formatKey - 'dispensador' | 'muro'
+ * @param {number} params.minLiters - Mínimo de litros del formato
+ * @param {string} params.header - Primera línea (confirmación o corrección)
+ * @param {Array<{name: string, litrage: string}>} [params.invalidLitrages] - Líneas que no se pudieron agregar
+ * @param {string[]} [params.allowedLitrages] - Tamaños válidos, para explicar los rechazos
+ * @returns {{ reply: string, totalLiters: number }}
+ */
+function buildCartReply({ session, formatKey, minLiters, header, invalidLitrages = [], allowedLitrages = [] }) {
+  const orderBuilder = new OrderBuilder(formatKey, preciosData);
+  orderBuilder.products = session.orderBuilder.products;
+  const quote = orderBuilder.calculateQuote();
+  const totalLiters = orderBuilder.getTotalLiters();
+
+  let reply = `${header}\n\n`;
+  reply += formatEventCartSummary(session.orderBuilder.products, formatKey);
+  reply += `\n${formatEventCartTotalsLine(quote, { minLiters })}\n`;
+
+  if (invalidLitrages.length > 0) {
+    reply += `\n⚠️ No pude agregar:\n`;
+    for (const inv of invalidLitrages) {
+      reply += `- ${inv.name} (${inv.litrage}): litraje no disponible en ${session.eventoFormato}. Válidos: ${allowedLitrages.join(', ')}.\n`;
+    }
+  }
+
+  reply += totalLiters >= minLiters
+    ? `\n${ASK_OK_AFTER_CART} 🍸`
+    : `\nAún faltan litros para el mínimo (*${minLiters}L*). ¿Qué más agregamos? 🍸`;
+
+  return { reply, totalLiters };
+}
+
 export const EVENTOS_ELECCION_MENU = defineState({
   id: 'EVENTOS_ELECCION_MENU',
   promptQuestion: () => ASK_COCKTAILS,
@@ -100,6 +145,46 @@ export const EVENTOS_ELECCION_MENU = defineState({
     ensureEventOrderBuilder(session, formatKey);
 
     const catalogNames = Object.keys(preciosData.cocteles || {});
+    const defaultLitrage = formatKey === 'muro' ? '10L' : '5L';
+
+    // Respuesta al menú "¿son N barriles?" que hicimos en el turno anterior
+    const pendingBarrels = session.pendingBarrelQuantity;
+    if (pendingBarrels) {
+      const trimmed = String(messageText || '').trim();
+      session.pendingBarrelQuantity = null;
+
+      // 1️⃣ Sí, son N barriles del tamaño por defecto
+      if (matchesMenuOption(trimmed, 1)) {
+        const items = pendingBarrels.names.map((name) => ({
+          name,
+          quantity: pendingBarrels.quantity,
+          litrage: pendingBarrels.litrage
+        }));
+        // Mensaje sintético con la unidad explícita: así no se reinterpreta como litraje
+        const { parsedProducts } = validateEventProductLines(
+          `${pendingBarrels.quantity} barriles`, items, formatKey, allowedLitrages, pendingBarrels.litrage, catalogNames
+        );
+        if (parsedProducts.length > 0) {
+          applyProductsToCart(session, parsedProducts, false);
+          const { reply } = buildCartReply({
+            session, formatKey, minLiters, header: `🍹 Listo, lo anoté así:`
+          });
+          return { success: true, nextState: 'EVENTOS_ELECCION_MENU', customReply: reply };
+        }
+      }
+
+      // 2️⃣ Prefiere indicar otro tamaño → quedan pendientes esos sabores
+      if (matchesMenuOption(trimmed, 2)) {
+        session.pendingEventCocktails = pendingBarrels.names;
+        return {
+          success: true,
+          nextState: 'EVENTOS_ELECCION_MENU',
+          customReply: `Perfecto. Para *${pendingBarrels.names.join('*, *')}*, ¿qué tamaño de barril quieres?\n\nDisponibles: *${allowedLitrages.join(', ')}* (ej. _${allowedLitrages[0]}_).`
+        };
+      }
+      // Si contestó otra cosa, seguimos el flujo normal con ese mensaje
+    }
+
     const cartEmpty = Object.keys(session.orderBuilder.products).length === 0;
     const cartHasItems = !cartEmpty;
     const wantsPriceList = /precio|precios|cu[aá]nto|cuanto|valor|cat[aá]logo|lista|menu|men[uú]/i.test(messageText);
@@ -110,7 +195,6 @@ export const EVENTOS_ELECCION_MENU = defineState({
       const orderBuilder = new OrderBuilder(formatKey, preciosData);
       orderBuilder.products = session.orderBuilder.products;
       const quote = orderBuilder.calculateQuote();
-      const totalLiters = orderBuilder.getTotalLiters();
       return {
         success: true,
         nextState: 'EVENTOS_ELECCION_MENU',
@@ -119,7 +203,7 @@ export const EVENTOS_ELECCION_MENU = defineState({
 Tu pedido actual:
 ${formatEventCartSummary(session.orderBuilder.products, formatKey)}
 
-*Subtotal:* ${formatPrice(quote.subtotal)} | *Litros:* ${totalLiters}L
+${formatEventCartTotalsLine(quote)}
 
 Si en la imagen viste otro valor, suele ser otro tamaño de barril o formato. ¿Quieres cambiar algo o seguimos con *ok*? 🍸`
       };
@@ -138,19 +222,14 @@ Si en la imagen viste otro valor, suele ser otro tamaño de barril o formato. ¿
       }
       const pendingItems = pendingNames.map((name) => ({ name, quantity: 1, litrage: litrageOnly }));
       const { parsedProducts, invalidLitrages } = validateEventProductLines(
-        messageText, pendingItems, formatKey, allowedLitrages, formatKey === 'muro' ? '10L' : '5L', catalogNames
+        messageText, pendingItems, formatKey, allowedLitrages, defaultLitrage, catalogNames
       );
       if (parsedProducts.length > 0) {
         session.pendingEventCocktails = null;
         applyProductsToCart(session, parsedProducts, false);
-        const orderBuilder = new OrderBuilder(formatKey, preciosData);
-        orderBuilder.products = session.orderBuilder.products;
-        const quote = orderBuilder.calculateQuote();
-        const totalLiters = orderBuilder.getTotalLiters();
-        let reply = `🍹 Listo, anoté con *${litrageOnly}*:\n\n`;
-        reply += formatEventCartSummary(session.orderBuilder.products, formatKey);
-        reply += `\n*Subtotal:* ${formatPrice(quote.subtotal)} | *Litros:* ${totalLiters}L (mín. ${minLiters}L)\n`;
-        reply += totalLiters >= minLiters ? `\n${ASK_OK_AFTER_CART} 🍸` : `\nAún faltan litros para el mínimo (*${minLiters}L*). ¿Qué más agregamos? 🍸`;
+        const { reply } = buildCartReply({
+          session, formatKey, minLiters, header: `🍹 Listo, anoté con *${litrageOnly}*:`
+        });
         return { success: true, nextState: 'EVENTOS_ELECCION_MENU', customReply: reply };
       }
       if (invalidLitrages.length > 0) {
@@ -191,7 +270,7 @@ Si en la imagen viste otro valor, suele ser otro tamaño de barril o formato. ¿
 
       let reply = `✅ Eliminado ${name} (${litrage}). Ahora tu pedido incluye:\n\n`;
       reply += formatEventCartSummary(session.orderBuilder.products, formatKey) || '_Vacío_\n';
-      reply += `\n*Subtotal:* ${formatPrice(quote.subtotal)} | *Litros:* ${totalLiters}L (mín. ${minLiters}L)\n\n`;
+      reply += `\n${formatEventCartTotalsLine(quote, { minLiters })}\n\n`;
       if (Object.keys(session.orderBuilder.products).length === 0) {
         reply += ASK_COCKTAILS;
       } else if (totalLiters >= minLiters) {
@@ -210,7 +289,7 @@ Si en la imagen viste otro valor, suele ser otro tamaño de barril o formato. ¿
           success: true,
           nextState: 'EVENTOS_ELECCION_MENU',
           customReply: `Aún no hay cócteles en el pedido 😊
-Dime sabor y litros (ej. *10L de mojito*), o escribe *lista* para ver precios.`
+Dime sabor y litros (ej. *5L de mojito*), o escribe *lista* para ver precios.`
         };
       }
       const earlyBuilder = new OrderBuilder(formatKey, preciosData);
@@ -237,17 +316,27 @@ Dime sabor y litros (ej. *10L de mojito*), o escribe *lista* para ver precios.`
     let extractedList = [];
     let dudas = [];
     let quiere_avanzar = false;
-    const defaultLitrage = formatKey === 'muro' ? '10L' : '5L';
 
-    const programmaticNames = parseCocktailNamesWithoutLitrage(messageText, catalogNames);
-    const interceptedOption = interceptBotOptionsAnswer(messageText, lastBotMessage);
+    // Multi-intent: pedido + despacho → parseamos/NLU sin la pregunta
+    const hasDispatchQ = asksDeliveryOrDispatchQuestion(messageText);
+    const extractText = hasDispatchQ ? stripDeliveryQuestionForCart(messageText) : messageText;
 
-    if (programmaticNames.length > 0 && !litrageOnly && !interceptedOption) {
+    const programmaticNames = parseCocktailNamesWithoutLitrage(extractText || messageText, catalogNames);
+    const programmaticWithLitrage = parseEventProductsProgrammatic(
+      extractText || messageText, catalogNames, allowedLitrages, defaultLitrage
+    );
+    const interceptedOption = interceptBotOptionsAnswer(extractText || messageText, lastBotMessage);
+
+    // Primero reglas locales (con o sin litraje) — evita colgar el chat esperando al LLM.
+    // Si el cliente nombró un cóctel del catálogo, eso manda por sobre el interceptor de opciones.
+    if (programmaticWithLitrage.length > 0) {
+      extractedList = programmaticWithLitrage;
+    } else if (programmaticNames.length > 0 && !litrageOnly) {
       extractedList = programmaticNames.map((name) => ({ name, quantity: 1, litrage: defaultLitrage }));
     } else if (interceptedOption) {
       extractedList.push({ ...interceptedOption, litrage: defaultLitrage });
     } else {
-      const result = await extractEventProductsWithAI(messageText, catalogNames, formatKey, lastBotMessage);
+      const result = await extractEventProductsWithAI(extractText || messageText, catalogNames, formatKey, lastBotMessage);
       extractedList = result.productos;
       dudas = result.dudas;
       quiere_avanzar = result.quiere_avanzar;
@@ -266,7 +355,7 @@ Dime sabor y litros (ej. *10L de mojito*), o escribe *lista* para ver precios.`
         success: true,
         nextState: 'EVENTOS_ELECCION_MENU',
         customReply: `Aún no hay cócteles en el pedido 😊
-Dime sabor y litros (ej. *10L de mojito*), o escribe *lista* para ver precios.`
+Dime sabor y litros (ej. *5L de mojito*), o escribe *lista* para ver precios.`
       };
     }
 
@@ -315,47 +404,63 @@ Dime sabor y litros (ej. *10L de mojito*), o escribe *lista* para ver precios.`
       session.pendingEventCocktails = null;
       applyProductsToCart(session, parsedProducts, isCorrection);
 
-      const orderBuilder = new OrderBuilder(formatKey, preciosData);
-      orderBuilder.products = session.orderBuilder.products;
-      const quote = orderBuilder.calculateQuote();
-      const totalLiters = orderBuilder.getTotalLiters();
+      const cartBuilder = new OrderBuilder(formatKey, preciosData);
+      cartBuilder.products = session.orderBuilder.products;
 
       // "10L mojito seguimos" → si cumple mínimo, cotiza; si no, pide más litros
-      if (wantsAdvance && totalLiters >= minLiters && invalidLitrages.length === 0) {
+      if (wantsAdvance && cartBuilder.getTotalLiters() >= minLiters && invalidLitrages.length === 0) {
         return { success: true, nextState: 'EVENTOS_COTIZACION' };
       }
 
-      let reply = isCorrection
-        ? `✅ Corregido. Tu pedido quedó así:\n\n`
-        : `🍹 Te confirmo los cócteles seleccionados:\n\n`;
-      reply += formatEventCartSummary(session.orderBuilder.products, formatKey);
-      reply += `\n*Subtotal:* ${formatPrice(quote.subtotal)} | *Litros:* ${totalLiters}L (mín. ${minLiters}L)\n`;
-
-      if (invalidLitrages.length > 0) {
-        reply += `\n⚠️ No pude agregar:\n`;
-        for (const inv of invalidLitrages) {
-          reply += `- ${inv.name} (${inv.litrage}): litraje no disponible en ${session.eventoFormato}. Válidos: ${allowedLitrages.join(', ')}.\n`;
-        }
-      }
-
-      if (totalLiters >= minLiters) {
-        reply += `\n${ASK_OK_AFTER_CART} 🍸`;
-      } else {
-        reply += `\nAún faltan litros para el mínimo (*${minLiters}L*). ¿Qué más agregamos? 🍸`;
-      }
-
-      return { success: true, nextState: 'EVENTOS_ELECCION_MENU', customReply: reply };
+      const header = isCorrection
+        ? `✅ Corregido. Tu pedido quedó así:`
+        : `🍹 Te confirmo los cócteles seleccionados:`;
+      const { reply } = buildCartReply({
+        session, formatKey, minLiters, header, invalidLitrages, allowedLitrages
+      });
+      // Multi-intent: cócteles + duda de despacho → carrito + cobertura
+      const withDispatch = hasDispatchQ
+        ? `${reply}\n\n${REPLY_DISPATCH_SIDEBAR}`
+        : reply;
+      return {
+        success: true,
+        nextState: 'EVENTOS_ELECCION_MENU',
+        customReply: withDispatch,
+        flowProgress: true
+      };
     }
 
     // Solo litrajes inválidos (sin productos válidos) → guardar pendientes y guiar
     if (invalidLitrages.length > 0) {
       const pending = [...new Set(invalidLitrages.map((i) => i.name))];
+
+      // "2 mojito": el número suelto se lee como litros, pero 2L no existe.
+      // Antes de pedir litraje preguntamos si en realidad quiso decir 2 barriles.
+      const bareQuantity = parseBareQuantityWithoutUnit(messageText);
+      if (bareQuantity && invalidLitrages.every((i) => i.litrage === `${bareQuantity}L`)) {
+        session.pendingBarrelQuantity = { names: pending, quantity: bareQuantity, litrage: defaultLitrage };
+        session.pendingEventCocktails = null;
+        const totalLiters = bareQuantity * parseInt(defaultLitrage, 10);
+        return {
+          success: true,
+          nextState: 'EVENTOS_ELECCION_MENU',
+          customReply: `En *${session.eventoFormato}* los barriles son de *${allowedLitrages.join(', ')}*, así que *${bareQuantity}L* no existe como tamaño.
+
+¿Te refieres a esto?
+
+${formatMenuBlock([
+  `${bareQuantity} barriles de ${defaultLitrage} de ${pending.join(' y ')} (${totalLiters}L en total)`,
+  `Elegir otro tamaño (${allowedLitrages.join(' / ')})`
+])}`
+        };
+      }
+
       session.pendingEventCocktails = pending;
 
       let reply = `Para *${session.eventoFormato}* los barriles son: *${allowedLitrages.join(', ')}*`;
       if (formatKey === 'muro') reply += ` (no hay 5L)`;
       reply += `.\n\nAnoté: *${pending.join('*, *')}*.`;
-      reply += `\n¿Con qué litraje los quieres? Puedes decir *10L* para todos, o por ejemplo: _"Mojito 10L y Aperol Spritz 10L"_`;
+      reply += `\n¿Con qué litraje los quieres? Puedes decir *10L* para todos, o por ejemplo: _"5L Mojito y 10L Aperol"_`;
       return { success: true, nextState: 'EVENTOS_ELECCION_MENU', customReply: reply };
     }
 
