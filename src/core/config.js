@@ -193,7 +193,70 @@ export function loadBotConfig() {
         String(process.env.COT_API_BASE_URL || '').trim()
         && String(process.env.COT_API_KEY || '').trim()
       )
-    }
+    },
+
+    // Reactivación de clientes que no respondieron (híbrido: horas + cron).
+    // Ver sección NUDGE_* en .env. Por defecto OFF.
+    nudge: loadNudgeConfig()
+  };
+}
+
+/**
+ * parseHourList: Lista de horas 0–23 desde .env (ej. "11,21").
+ *
+ * @param {string|undefined} value
+ * @param {number[]} defaultHours
+ * @returns {number[]}
+ */
+function parseHourList(value, defaultHours) {
+  if (value === undefined || value === null || String(value).trim() === '') {
+    return [...defaultHours];
+  }
+  const hours = String(value)
+    .split(',')
+    .map((part) => parseInt(part.trim(), 10))
+    .filter((n) => Number.isFinite(n) && n >= 0 && n <= 23);
+  return hours.length > 0 ? hours : [...defaultHours];
+}
+
+/**
+ * parseStateList: IDs de estado separados por coma.
+ *
+ * @param {string|undefined} value
+ * @param {string[]} defaults
+ * @returns {string[]}
+ */
+function parseStateList(value, defaults) {
+  if (value === undefined || value === null || String(value).trim() === '') {
+    return [...defaults];
+  }
+  const list = String(value)
+    .split(',')
+    .map((s) => s.trim())
+    .filter(Boolean);
+  return list.length > 0 ? list : [...defaults];
+}
+
+/**
+ * loadNudgeConfig: Lee NUDGE_* del .env (on/off + híbrido inactividad/cron).
+ *
+ * @returns {object}
+ */
+function loadNudgeConfig() {
+  const defaultStates = ['BARRILES_FILTRO_CANAL', 'EVENTOS_RECOGIDA_DATOS'];
+  return {
+    enabled: parseEnvBool(process.env.NUDGE_ENABLED, false),
+    states: parseStateList(process.env.NUDGE_STATES, defaultStates),
+    minInactiveHours: parsePositiveInt(process.env.NUDGE_MIN_INACTIVE_HOURS, 4),
+    cronHours: parseHourList(process.env.NUDGE_CRON_HOURS, [11, 21]),
+    timezone: String(process.env.NUDGE_TIMEZONE || 'America/Santiago').trim() || 'America/Santiago',
+    // Cada cuánto revisamos sesiones (durante las horas cron basta con unos minutos)
+    scanSeconds: parsePositiveInt(process.env.NUDGE_SCAN_SECONDS, 300),
+    maxPerStall: parsePositiveInt(process.env.NUDGE_MAX_PER_STALL, 1),
+    includeWeb: parseEnvBool(process.env.NUDGE_INCLUDE_WEB, true),
+    includeInstagram: parseEnvBool(process.env.NUDGE_INCLUDE_INSTAGRAM, true),
+    // Ventana WhatsApp: no nudgear leads cuyo último mensaje del cliente sea > 24h
+    maxInboundAgeHours: parsePositiveInt(process.env.NUDGE_MAX_INBOUND_AGE_HOURS, 24)
   };
 }
 
@@ -236,6 +299,15 @@ export function assertRuntimeConfigReady() {
     } else {
       console.warn(`⚠️  ${msg}`);
     }
+  }
+
+  if (config.nudge?.enabled) {
+    console.log(
+      `Nudge inactividad: ON | estados=${config.nudge.states.join(',')} | `
+      + `≥${config.nudge.minInactiveHours}h | cron=${config.nudge.cronHours.join(',')}h ${config.nudge.timezone}`
+    );
+  } else {
+    console.log('Nudge inactividad: OFF (NUDGE_ENABLED=false)');
   }
 
   return config;

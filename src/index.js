@@ -23,6 +23,7 @@ import {
   notifyAdmins,
   logLabelReadyStatus
 } from './core/whatsapp-send.js';
+import { startNudgeRunner, stopNudgeRunner } from './core/nudge-runner.js';
 import process from 'node:process';
 import fs from 'node:fs';
 
@@ -427,11 +428,14 @@ async function startBot() {
         setTimeout(() => {
           logLabelReadyStatus(config.labels?.asistencia);
         }, 5000);
+        // Nudge por inactividad (híbrido cron + horas). Off si NUDGE_ENABLED=false.
+        startNudgeRunner(sock, () => loadBotConfig().nudge);
       }
 
       if (connection === 'close') {
         clearTimeout(connectingWatchdog);
         releaseConnecting();
+        stopNudgeRunner();
         const statusCode = lastDisconnect?.error?.output?.statusCode;
         const shouldReconnect = statusCode !== DisconnectReason.loggedOut;
         console.log('Conexión cerrada. ¿Intentar reconectar automáticamente?:', shouldReconnect);

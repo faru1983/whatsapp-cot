@@ -30,8 +30,10 @@ import {
   incrementFaqSidequest,
   buildGuidedStepQuestion,
   withoutAssistantFooter,
-  stepQuestionAfterIdentityBody
+  stepQuestionAfterIdentityBody,
+  MENU_WRITE_REMINDER
 } from '../logic/flow-rails.js';
+import { clearNudgeFlag } from '../logic/inactivity-nudge.js';
 import { jidToE164 } from '../logic/cot-event-quote.js';
 
 const isMainModule = process.argv[1] === fileURLToPath(import.meta.url);
@@ -204,6 +206,20 @@ function failMissingImage(session, sessionId, expectedPath, alertAdmin) {
 }
 
 /**
+ * pushModelTextAndSave: Guarda una respuesta de texto del bot y marca lastOutboundAt.
+ * Usado en fallbacks que no pasan por commitBotReplies (FAQ, plantillas, SOS).
+ *
+ * @param {object} session
+ * @param {string} sessionId
+ * @param {string} text
+ */
+function pushModelTextAndSave(session, sessionId, text) {
+  session.history.turns.push({ role: 'model', text });
+  session.lastOutboundAt = Date.now();
+  saveSession(sessionId, session);
+}
+
+/**
  * commitBotReplies: Guarda cada bloque en el historial y devuelve string, imagen o array.
  * Si alguna imagen no existe en assets/, mute + SOS y no se envía nada al cliente.
  *
@@ -231,6 +247,8 @@ function commitBotReplies(session, sessionId, reply, alertAdmin = null) {
   for (const part of parts) {
     session.history.turns.push({ role: 'model', text: historyTextForPart(part) });
   }
+  // Timestamp de outbound: el nudge-runner sabe que el bot ya preguntó y espera
+  session.lastOutboundAt = Date.now();
   saveSession(sessionId, session);
   return parts.length === 1 ? parts[0] : parts;
 }
@@ -328,6 +346,11 @@ async function processMessageUnlocked(sessionId, messageText, options = {}) {
     return "🤫 Bot silenciado. Usa /unmute para reactivar.";
   }
 
+  // Actividad del cliente: habilita el reloj del nudge y permite un nudge nuevo
+  // si vuelve a escribir (clearNudgeFlag). No muteamos al enviar el nudge.
+  session.lastInboundAt = Date.now();
+  clearNudgeFlag(session);
+
   // Inicialización de la sesión si es cliente nuevo
   if (!session.currentState) {
     session.currentState = 'ESPERANDO_INTENCION';
@@ -355,6 +378,7 @@ async function processMessageUnlocked(sessionId, messageText, options = {}) {
     }
     if (clientReply) {
       session.history.turns.push({ role: 'model', text: clientReply });
+      session.lastOutboundAt = Date.now();
     }
     saveSession(sessionId, session);
     return clientReply;
@@ -556,8 +580,7 @@ async function processMessageUnlocked(sessionId, messageText, options = {}) {
       const guidedQuestion = buildGuidedStepQuestion(finalQuestion, onMissHint);
 
       const reply = appendStepQuestionIfNeeded(sanitizeCustomerFacingReply(faqResponse), guidedQuestion);
-      session.history.turns.push({ role: 'model', text: reply });
-      saveSession(sessionId, session);
+      pushModelTextAndSave(session, sessionId, reply);
       return reply;
     }
   }
@@ -697,13 +720,13 @@ async function processMessageUnlocked(sessionId, messageText, options = {}) {
       // Entrada: miss = menú de nuevo, sin plantilla “no estoy seguro”
       if (currentStateId === 'ESPERANDO_INTENCION' && !hasPath) {
         return stepQuestionAfterIdentityBody(
-          'Disculpa, no te entendí bien 😊 Soy el *asistente virtual* de Cocktails on Tap.\nElige una opción del menú (puedes responder con el número o el emoji).',
+          `Disculpa, no te entendí bien 😊 Soy el *asistente virtual* de Cocktails on Tap.\n${MENU_WRITE_REMINDER}`,
           finalQuestion
         );
       }
 
       if (hasPath && isMenuStep) {
-        return `Disculpa, soy un *asistente virtual* y no estoy seguro de cómo responder a eso. 😔\n\nResponde con el número de la opción (1️⃣, 2️⃣…) o la palabra en *negrita* si puedes.\n\n${q}\n\n${handoff}`;
+        return `Disculpa, soy un *asistente virtual* y no estoy seguro de cómo responder a eso. 😔\n\n${MENU_WRITE_REMINDER}\n\n${q}\n\n${handoff}`;
       }
 
       if (hasPath) {
@@ -722,8 +745,7 @@ async function processMessageUnlocked(sessionId, messageText, options = {}) {
       if (sosReply !== null) return sosReply;
 
       reply = buildNoInfoReply();
-      session.history.turns.push({ role: 'model', text: reply });
-      saveSession(sessionId, session);
+      pushModelTextAndSave(session, sessionId, reply);
       return reply;
     }
 
@@ -740,8 +762,7 @@ async function processMessageUnlocked(sessionId, messageText, options = {}) {
         // Datos libres: no empujar menú 1️⃣/2️⃣
         reply = `Disculpa, no te entendí bien 😊\n\n${finalQuestion}`;
       }
-      session.history.turns.push({ role: 'model', text: reply });
-      saveSession(sessionId, session);
+      pushModelTextAndSave(session, sessionId, reply);
       return reply;
     }
 
@@ -765,9 +786,8 @@ async function processMessageUnlocked(sessionId, messageText, options = {}) {
 
       reply = currentStateId === 'ESPERANDO_INTENCION'
         ? buildNoInfoReply()
-        : `Disculpa, soy un *asistente virtual* y estoy para ayudarte a cotizar 🍸\nResponde con el número de la opción (1️⃣, 2️⃣…) o la palabra en *negrita* si puedes.\n\n${withoutAssistantFooter(finalQuestion)}\n\nO escribe *NO* o *HUMANO* para hablar con alguien del equipo.`;
-      session.history.turns.push({ role: 'model', text: reply });
-      saveSession(sessionId, session);
+        : `Disculpa, soy un *asistente virtual* y estoy para ayudarte a cotizar 🍸\n${MENU_WRITE_REMINDER}\n\n${withoutAssistantFooter(finalQuestion)}\n\nO escribe *NO* o *HUMANO* para hablar con alguien del equipo.`;
+      pushModelTextAndSave(session, sessionId, reply);
       return reply;
     }
 
@@ -802,8 +822,7 @@ async function processMessageUnlocked(sessionId, messageText, options = {}) {
         cliLog('FAQ: match → respondiendo (strikes en 0)');
       }
       reply = appendStepQuestionIfNeeded(sanitizeCustomerFacingReply(faqResponse), finalQuestion);
-      session.history.turns.push({ role: 'model', text: reply });
-      saveSession(sessionId, session);
+      pushModelTextAndSave(session, sessionId, reply);
       return reply;
     }
 
@@ -856,8 +875,7 @@ REGLA ANTI-JERGA: NUNCA digas "DATOS OFICIALES", "FAQ" ni "datos.json".`;
       reply = buildNoInfoReply();
     }
 
-    session.history.turns.push({ role: 'model', text: reply });
-    saveSession(sessionId, session);
+    pushModelTextAndSave(session, sessionId, reply);
     return reply;
   }
 }

@@ -1,5 +1,5 @@
 import { formatPrice, preciosData } from '../logic/utils.js';
-import { formatMenuBlock } from '../logic/flow-rails.js';
+import { formatMenuBlock, MENU_WRITE_CTA } from '../logic/flow-rails.js';
 
 // ==============================================================================
 // OBJETIVO: Textos compartidos (cotización, dudas, alertas admin, pitches eventos).
@@ -535,5 +535,5 @@ Por supuesto, puedes elegir el que prefieras:
 1️⃣ *Dispensador Portátil* — instalación gratis, pedido mín. 10L
 2️⃣ *Muro de Coctelería* — instalación ${instalacionMuroStr}, pedido mín. 30L
 
-Selecciona uno:`;
+${MENU_WRITE_CTA}`;
 }

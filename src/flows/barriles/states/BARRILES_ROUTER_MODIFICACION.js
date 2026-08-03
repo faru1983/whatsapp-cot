@@ -13,7 +13,7 @@ const SHORT_Q = withAssistantFooter(`¿Qué deseas cambiar?
 ${MENU_BLOCK}`);
 
 const AI_PROMPT = `[SISTEMA - ESTADO: MODIFICAR PEDIDO]
-Indica responder 1️⃣ (cócteles) o 2️⃣ (datos). Máximo 2 frases.`;
+Indica que escriba *1* (cócteles) o *2* (datos). Máximo 2 frases.`;
 
 export const BARRILES_ROUTER_MODIFICACION = defineState({
   id: 'BARRILES_ROUTER_MODIFICACION',
@@ -21,7 +21,7 @@ export const BARRILES_ROUTER_MODIFICACION = defineState({
     `Claro, ¿qué deseas cambiar?
 
 ${MENU_BLOCK}`,
-    `Responde con 1️⃣ o 2️⃣ para saber qué necesitas ajustar 🔧`
+    `Escribe *1* o *2* para saber qué necesitas ajustar 🔧`
   ],
   shortQuestion: SHORT_Q,
   aiPrompt: AI_PROMPT,

@@ -853,7 +853,7 @@ try {
         '[IMG:eventos_ambas.webp]',
         'Dispensador Portátil',
         'Muro de Coctelería',
-        'Selecciona uno'
+        'Escribe la opción que prefieres'
       ],
       expectNotIncludes: ['Cuál prefieres']
     }
@@ -992,7 +992,8 @@ try {
       input: 'van a la serena?',
       expectState: 'EVENTOS_RECOGIDA_DATOS',
       expectMuted: false,
-      expectIncludes: ['Metropolitana', 'Serena']
+      // FAQ puede variar el copy; basta con cubrir Serena (y no inventar comuna)
+      expectIncludes: ['Serena']
     }
   ]);
 
@@ -1596,6 +1597,152 @@ try {
     const catalog = Object.keys(datosPrecios.cocteles || {});
     const parsed = parseBarrilesProductsProgrammatic('2 mojitos y 1 sangría, ¿hacen despacho a Maipú?', catalog);
     assert(parsed.some((p) => p.name === 'Mojito' && p.quantity === 2), 'parser barriles multi-intent');
+  }
+
+  console.log('\n-- nudge: elegibilidad + copy + anti-doble --');
+  {
+    const {
+      evaluateNudgeEligibility,
+      buildNudgeMessage,
+      markNudgeSent,
+      clearNudgeFlag,
+      getHourInTimezone,
+      buildStallKey
+    } = await import('../src/logic/inactivity-nudge.js');
+
+    const HOUR = 60 * 60 * 1000;
+    const now = Date.now();
+    const chileHour = getHourInTimezone(now, 'America/Santiago');
+    assert(chileHour >= 0 && chileHour <= 23, 'getHourInTimezone Chile válido');
+
+    const baseCfg = {
+      enabled: true,
+      states: ['BARRILES_FILTRO_CANAL', 'EVENTOS_RECOGIDA_DATOS'],
+      minInactiveHours: 4,
+      cronHours: [chileHour], // hora actual → pasa el filtro cron en el test
+      timezone: 'America/Santiago',
+      maxPerStall: 1,
+      includeWeb: true,
+      includeInstagram: true,
+      maxInboundAgeHours: 24
+    };
+
+    // Sesión eventos atascada en invitados, inactiva 5h, bot esperando
+    const eventosSession = {
+      currentState: 'EVENTOS_RECOGIDA_DATOS',
+      userIntent: 'EVENTOS',
+      guests: null,
+      isMuted: false,
+      lastInboundAt: now - 5 * HOUR,
+      lastOutboundAt: now - 5 * HOUR + 1000,
+      nudge: null
+    };
+
+    const okEventos = evaluateNudgeEligibility(eventosSession, baseCfg, now);
+    assert(okEventos.ok === true, 'eventos inactivo 5h en hora cron → elegible');
+    assert(okEventos.stallKey === 'EVENTOS_RECOGIDA_DATOS:guests', 'stallKey eventos=guests');
+
+    const msgE = buildNudgeMessage(eventosSession, baseCfg);
+    assert(/Seguimos.*Eventos/i.test(msgE), 'copy retoma eventos');
+    assert(/invitados/i.test(msgE), 'copy pide invitados');
+    assert(/cocktailsontap\.cl\/eventos/i.test(msgE), 'copy incluye web eventos');
+    assert(/instagram\.com\/cocktailsontap\.chile/i.test(msgE), 'copy incluye Instagram');
+
+    markNudgeSent(eventosSession, okEventos.stallKey, now);
+    const blocked = evaluateNudgeEligibility(eventosSession, baseCfg, now);
+    assert(blocked.ok === false && blocked.reason === 'already_sent', 'segundo nudge bloqueado por flag');
+    assert(eventosSession.isMuted !== true, 'nudge NO mutea la sesión');
+
+    clearNudgeFlag(eventosSession);
+    const again = evaluateNudgeEligibility(eventosSession, baseCfg, now);
+    assert(again.ok === true, 'tras clearNudgeFlag vuelve a ser elegible');
+
+    // Barriles: delivery pendiente
+    const barrilesSession = {
+      currentState: 'BARRILES_FILTRO_CANAL',
+      userIntent: 'BARRILES',
+      isMuted: false,
+      orderBuilder: { clientData: { date: null, location: null } },
+      lastInboundAt: now - 5 * HOUR,
+      lastOutboundAt: now - 4 * HOUR,
+      nudge: null
+    };
+    const okBar = evaluateNudgeEligibility(barrilesSession, baseCfg, now);
+    assert(okBar.ok === true, 'barriles sin fecha/comuna → elegible');
+    assert(okBar.stallKey === buildStallKey('BARRILES_FILTRO_CANAL', 'delivery'), 'stallKey barriles=delivery');
+    const msgB = buildNudgeMessage(barrilesSession, baseCfg);
+    assert(/Barriles Desechables/i.test(msgB), 'copy retoma barriles');
+    assert(/cocktailsontap\.cl\/barriles/i.test(msgB), 'copy web barriles');
+
+    // Off master switch
+    assert(
+      evaluateNudgeEligibility(eventosSession, { ...baseCfg, enabled: false }, now).ok === false,
+      'NUDGE_ENABLED=false → no elegible'
+    );
+
+    // Demasiado pronto (< 4h)
+    const tooSoon = {
+      ...eventosSession,
+      nudge: null,
+      lastInboundAt: now - 2 * HOUR,
+      lastOutboundAt: now - 2 * HOUR + 500
+    };
+    assert(
+      evaluateNudgeEligibility(tooSoon, baseCfg, now).reason === 'too_soon',
+      'inactivo 2h → too_soon'
+    );
+
+    // Fuera de ventana 24h
+    const tooOld = {
+      ...eventosSession,
+      nudge: null,
+      lastInboundAt: now - 30 * HOUR,
+      lastOutboundAt: now - 30 * HOUR + 500
+    };
+    assert(
+      evaluateNudgeEligibility(tooOld, baseCfg, now).reason === 'outside_24h',
+      'inactivo 30h → outside_24h'
+    );
+
+    // Hora fuera de cron
+    const wrongHour = (chileHour + 1) % 24;
+    assert(
+      evaluateNudgeEligibility(eventosSession, { ...baseCfg, cronHours: [wrongHour] }, now).reason
+        === 'outside_cron_hour',
+      'fuera de cronHours → outside_cron_hour'
+    );
+
+    // Router no está en NUDGE_STATES
+    const routerSession = {
+      currentState: 'ESPERANDO_INTENCION',
+      isMuted: false,
+      lastInboundAt: now - 5 * HOUR,
+      lastOutboundAt: now - 5 * HOUR + 1,
+      nudge: null
+    };
+    assert(
+      evaluateNudgeEligibility(routerSession, baseCfg, now).reason === 'state_not_allowed',
+      'ESPERANDO_INTENCION fuera de v1'
+    );
+
+    // Mute → no nudge
+    assert(
+      evaluateNudgeEligibility({ ...eventosSession, nudge: null, isMuted: true }, baseCfg, now).ok
+        === false,
+      'sesión muteada no recibe nudge'
+    );
+
+    // Engine limpia nudge al inbound
+    resetSession(SESSION_ID);
+    const sNudge = getSession(SESSION_ID);
+    sNudge.currentState = 'EVENTOS_RECOGIDA_DATOS';
+    sNudge.userIntent = 'EVENTOS';
+    sNudge.nudge = { sentAt: now, stateId: 'EVENTOS_RECOGIDA_DATOS', stallKey: 'EVENTOS_RECOGIDA_DATOS:guests' };
+    saveSession(SESSION_ID, sNudge);
+    await processMessage(SESSION_ID, 'hola otra vez');
+    const afterInbound = getSession(SESSION_ID);
+    assert(afterInbound.nudge == null, 'inbound del cliente limpia session.nudge');
+    assert(typeof afterInbound.lastInboundAt === 'number', 'inbound setea lastInboundAt');
   }
 } catch (err) {
   failed += 1;

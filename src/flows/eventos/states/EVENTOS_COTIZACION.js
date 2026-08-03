@@ -25,7 +25,7 @@ Tu tarea es:
 1. Responder dudas breves sobre el pedido, formato, instalación o logística.
 2. REGLA: Instalación Dispensador = $0. Instalación Muro = $50.000. NUNCA inventes tarifas.
 3. NUNCA recalcules ni inventes una cotización nueva con precios distintos a los ya mostrados.
-4. Al finalizar, pide elegir 1️⃣ Continuar o 2️⃣ Modificar.
+4. Al finalizar, pide que escriba *1* Continuar o *2* Modificar.
 REGLA DE NEGRITA: Usa un solo asterisco (*) para negrita en WhatsApp.`;
 
 export const EVENTOS_COTIZACION = defineState({

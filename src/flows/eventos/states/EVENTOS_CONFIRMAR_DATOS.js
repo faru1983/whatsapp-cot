@@ -21,7 +21,7 @@ Si quieres corregir, también puedes escribir el dato directo (ej. _son 80 invit
 
 const AI_PROMPT = `[SISTEMA - ESTADO: CONFIRMAR DATOS DEL EVENTO]
 El cliente ya tiene al menos la cantidad de invitados y recibió un resumen (celebración/fecha/comuna pueden decir "Por confirmar").
-Debe elegir 1️⃣ Confirmar, 2️⃣ Corregir, o escribir el dato nuevo (ej. "son 80 invitados", "es en Providencia").
+Debe escribir *1* Confirmar, *2* Corregir, o el dato nuevo (ej. "son 80 invitados", "es en Providencia").
 1. Responde dudas breves sin inventar precios.
 2. Si corrige un dato, confirma el cambio y vuelve a pedir confirmación.
 3. NUNCA pases a elegir formato Dispensador/Muro hasta que confirme (opción 1 / ok).

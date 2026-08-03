@@ -11,12 +11,16 @@ import {
   ensureEventOrderBuilder
 } from '../../../logic/eventos-helpers.js';
 import { img, vid } from '../../../logic/media.js';
-import { withAssistantFooter, formatMenuBlock } from '../../../logic/flow-rails.js';
+import {
+  withAssistantFooter,
+  formatMenuBlock,
+  MENU_WRITE_CTA
+} from '../../../logic/flow-rails.js';
 
 const MENU_BLOCK = formatMenuBlock(['Dispensador', 'Muro']);
 
 // Re-pregunta corta (si dudó o eligió "ambos"); la entrada inicial ya trae el menú completo en la foto.
-const SHORT_Q = withAssistantFooter(`Selecciona uno:
+const SHORT_Q = withAssistantFooter(`${MENU_WRITE_CTA}
 
 ${MENU_BLOCK}`);
 
@@ -29,7 +33,7 @@ const REPLY_AMBOS = `Idealmente cotizamos *uno* de los dos servicios (*Dispensad
 
 Si tienes un evento especial que requiera *ambos*, podemos evaluarlo con el equipo: escribe *HUMANO*.
 
-Si prefieres seguir acá, selecciona uno:
+Si prefieres seguir acá, ${MENU_WRITE_CTA.toLowerCase()}
 
 ${MENU_BLOCK}`;
 
@@ -39,11 +43,11 @@ El cliente ya recibió la recomendación de formato (Dispensador Portátil o Mur
 2. REGLA DE LOGÍSTICA: Instalación Dispensador = gratis; Muro = $50.000. NUNCA inventes tarifas de envío.
 3. NUNCA cotices ni calcules precios finales todavía.
 4. Si pide AMBOS formatos: explica que el bot cotiza uno a la vez; para ambos puede escribir HUMANO o elegir Dispensador/Muro.
-5. Al finalizar, recuérdale elegir 1️⃣ *Dispensador* o 2️⃣ *Muro*.`;
+5. Al finalizar, recuérdale que escriba *1* *Dispensador* o *2* *Muro*.`;
 
 export const EVENTOS_ELECCION_FORMATO = defineState({
   id: 'EVENTOS_ELECCION_FORMATO',
-  promptQuestion: () => `Selecciona uno:
+  promptQuestion: () => `${MENU_WRITE_CTA}
 
 ${MENU_BLOCK}`,
   shortQuestion: SHORT_Q,

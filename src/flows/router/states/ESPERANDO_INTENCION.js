@@ -7,7 +7,8 @@ import { matchKeywordIntent, rulesRouterIntencion } from '../../../logic/keyword
 import { buildAdminSosBody } from '../../../views/templates.js';
 import {
   withAssistantFooter,
-  formatMenuBlock
+  formatMenuBlock,
+  MENU_WRITE_CONTINUE_CTA
 } from '../../../logic/flow-rails.js';
 
 /** Menú principal (1️⃣ Eventos / 2️⃣ Barriles / 3️⃣ Humano). */
@@ -22,10 +23,10 @@ const WELCOME = `¡Hola! Soy el *asistente virtual* de *Cocktails on Tap* 🍸
 Cuéntame si te ayudo a cotizar nuestro *Servicio para Eventos*
 o si te interesa comprar *Barriles Desechables*.
 
-Selecciona una opción para continuar:
+${MENU_WRITE_CONTINUE_CTA}
 ${MENU_BLOCK}`;
 
-const SHORT_Q = withAssistantFooter(`Selecciona una opción para continuar:
+const SHORT_Q = withAssistantFooter(`${MENU_WRITE_CONTINUE_CTA}
 ${MENU_BLOCK}`);
 
 /**

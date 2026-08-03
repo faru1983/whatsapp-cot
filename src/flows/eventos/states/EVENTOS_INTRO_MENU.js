@@ -20,7 +20,7 @@ ${MENU_BLOCK}`);
 
 const AI_PROMPT = `[SISTEMA - ESTADO: INTRO MENÚ DE EVENTO]
 El cliente ya eligió Dispensador o Muro y recibió el pitch de lo incluido.
-Debe elegir 1️⃣ para ver la carta de precios, o 2️⃣ / HUMANO para una persona.
+Debe escribir *1* para ver la carta de precios, o *2* / HUMANO para una persona.
 1. Responde dudas breves sobre el formato (instalación, qué incluye) sin inventar precios de cócteles.
 2. NUNCA armes el pedido ni cotices totales todavía.
 3. Al final, recuérdale el menú 1️⃣ / 2️⃣.`;

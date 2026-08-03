@@ -35,6 +35,22 @@ export const MENU_KEYCAPS = {
 };
 
 /**
+ * MENU_WRITE_CTA: Antes de un menú numerado — el cliente debe escribir, no tocar botones.
+ */
+export const MENU_WRITE_CTA = 'Escribe la opción que prefieres:';
+
+/**
+ * MENU_WRITE_CONTINUE_CTA: Variante para el router de entrada.
+ */
+export const MENU_WRITE_CONTINUE_CTA = 'Escribe la opción para continuar:';
+
+/**
+ * MENU_WRITE_REMINDER: Recordatorio en on-miss / fallbacks de pasos con menú numerado.
+ */
+export const MENU_WRITE_REMINDER =
+  'Escribe el número de la opción (1, 2…) o la palabra en *negrita*.';
+
+/**
  * menuKeycap: Devuelve el emoji keycap de una opción (1 → 1️⃣).
  *
  * @param {number} n - Número de opción (1–5)
@@ -150,17 +166,17 @@ export function withAssistantFooter(question) {
 export function getOnMissHint(stateId, session, pendingKey = null) {
   const key = pendingKey;
   const hints = {
-    intent: 'Para seguir, elige una opción del menú: 1️⃣ *Eventos*, 2️⃣ *Barriles* o 3️⃣ *Humano*.',
+    intent: 'Para seguir, escribe una opción del menú: 1️⃣ *Eventos*, 2️⃣ *Barriles* o 3️⃣ *Humano*.',
     guests: 'Para cotizar necesito el *número de invitados* (ej. _50 personas_).',
-    confirm: 'Revisa los datos: 1️⃣ *Confirmar* u 2️⃣ *Corregir* (o escribe el dato nuevo).',
+    confirm: 'Revisa los datos: escribe *1* *Confirmar* o *2* *Corregir* (o el dato nuevo).',
     delivery: 'Necesito *fecha* y *comuna* de entrega para continuar.',
     products: 'Dime *qué sabor* y *cuántos* barriles (ej. _2 mojitos_), o escribe *lista*.',
-    format: 'Elige 1️⃣ *Dispensador* o 2️⃣ *Muro* para seguir.',
-    continue: 'Responde 1️⃣ cuando quieras ver la carta y precios.',
+    format: 'Escribe *1* *Dispensador* o *2* *Muro* para seguir.',
+    continue: 'Escribe *1* cuando quieras ver la carta y precios.',
     cart: 'Indica los cócteles con litraje (ej. _5L Mojito_) o escribe *lista*.',
-    confirm_quote: '¿Te parece bien? 1️⃣ *Confirmar* o 2️⃣ *Modificar*.',
+    confirm_quote: '¿Te parece bien? Escribe *1* *Confirmar* o *2* *Modificar*.',
     contact: 'Para enviarte la cotización formal, necesito *nombre*, *apellido* y *email*.',
-    mod_choice: 'Responde 1️⃣ para cambiar cócteles o 2️⃣ para cambiar fecha/comuna.',
+    mod_choice: 'Escribe *1* para cambiar cócteles o *2* para cambiar fecha/comuna.',
     client_data: 'Necesito *fecha* y *comuna* de entrega para armar la cotización.'
   };
 

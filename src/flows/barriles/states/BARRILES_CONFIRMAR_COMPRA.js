@@ -25,11 +25,11 @@ Si quieres corregir, escribe el dato directo.`);
 
 const AI_PROMPT = `[SISTEMA - ESTADO: CONFIRMAR COMPRA DE BARRILES]
 El cliente ya dio todos los datos y recibió un resumen (nombre, email, fecha, comuna, dirección, pedido).
-Debe elegir 1️⃣ Confirmar, 2️⃣ Corregir, o escribir el dato nuevo (ej. "dirección Los Alerces 99").
+Debe escribir *1* Confirmar, *2* Corregir, o el dato nuevo (ej. "dirección Los Alerces 99").
 1. Responde dudas breves sin inventar precios.
 2. Si corrige un dato, confirma el cambio y vuelve a pedir confirmación.
 3. NUNCA crees la compra web hasta que confirme (opción 1 / ok).
-4. Si quiere cambiar cócteles, indícale que puede escribirlo o elegir 2️⃣ Corregir.`;
+4. Si quiere cambiar cócteles, indícale que puede escribirlo o escribir *2* Corregir.`;
 
 export const BARRILES_CONFIRMAR_COMPRA = defineState({
   id: 'BARRILES_CONFIRMAR_COMPRA',

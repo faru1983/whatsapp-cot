@@ -17,7 +17,7 @@ const SHORT_Q = withAssistantFooter(`¿Te parece bien esta cotización?
 ${MENU_BLOCK}`);
 
 const AI_PROMPT = `[SISTEMA - ESTADO: REVISIÓN COTIZACIÓN BARRILES]
-Resuelve dudas breves de precio/despacho. Cierra pidiendo 1️⃣ Generar compra o 2️⃣ Modificar.`;
+Resuelve dudas breves de precio/despacho. Cierra pidiendo que escriba *1* Generar compra o *2* Modificar.`;
 
 export const BARRILES_REVISION_COTIZACION = defineState({
   id: 'BARRILES_REVISION_COTIZACION',

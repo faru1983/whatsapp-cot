@@ -34,7 +34,10 @@ function createSession() {
     currentState: 'ESPERANDO_INTENCION', // Primer paso del embudo (barriles vs eventos)
     errores_paso: 0, // Contador de errores en el paso actual
     silenciado_timestamp: null, // Marca de tiempo (milisegundos) de cuándo se silenciò al bot
-    isMuted: false // Si es 'true', el bot no responde automáticamente en este chat
+    isMuted: false, // Si es 'true', el bot no responde automáticamente en este chat
+    lastInboundAt: null, // Último mensaje del cliente (para nudge por inactividad)
+    lastOutboundAt: null, // Último mensaje del bot
+    nudge: null // { sentAt, stateId, stallKey } — 1 nudge hasta que el cliente escriba
   };
 }
 
@@ -67,6 +70,9 @@ function migrateSession(session) {
   if (session.errores_paso === undefined) session.errores_paso = 0;
   if (session.silenciado_timestamp === undefined) session.silenciado_timestamp = null;
   if (session.isMuted === undefined) session.isMuted = false;
+  if (session.lastInboundAt === undefined) session.lastInboundAt = null;
+  if (session.lastOutboundAt === undefined) session.lastOutboundAt = null;
+  if (session.nudge === undefined) session.nudge = null;
 
   return session;
 }
@@ -138,6 +144,26 @@ export function resetSession(sessionId = 'default') {
 export function listSessionIds() {
   const rows = db.prepare('SELECT id FROM sessions').all();
   return rows.map((row) => row.id);
+}
+
+/**
+ * listAllSessions: Todas las sesiones con datos ya migrados.
+ * Lo usa el nudge-runner para escanear inactividad sin abrir WhatsApp.
+ *
+ * @returns {{ id: string, session: object }[]}
+ */
+export function listAllSessions() {
+  const rows = db.prepare('SELECT id, data FROM sessions').all();
+  const out = [];
+  for (const row of rows) {
+    try {
+      const parsed = JSON.parse(row.data);
+      out.push({ id: row.id, session: migrateSession(parsed) });
+    } catch {
+      // Sesión corrupta: la saltamos (el próximo getSession la recrea si hace falta)
+    }
+  }
+  return out;
 }
 
 /**
