@@ -187,3 +187,71 @@ export async function createDirectSaleViaApi(payload) {
     return { success: false, error: err?.message || 'Error de red al crear la venta.' };
   }
 }
+
+/**
+ * createContactViaApi: Registra/actualiza persona CRM + touchpoint (+ CAPI).
+ * POST /api/v1/contacts — phone-only OK.
+ *
+ * @param {object} payload
+ * @param {string} payload.phone - E.164
+ * @param {string} [payload.touchpointType='bot_started'] - bot_started | intent_selected | human_reply
+ * @param {string} [payload.firstName]
+ * @param {boolean} [payload.sendCapiLead=true]
+ * @param {object} [payload.payload]
+ * @returns {Promise<{ success: boolean, clientId?: string, created?: boolean, lifecycleStage?: string, stageChanged?: boolean, metaEventSent?: string|null, error?: string }>}
+ */
+export async function createContactViaApi(payload) {
+  const config = getCotApiConfig();
+  if (!config) {
+    return { success: false, error: 'API no configurada (falta COT_API_BASE_URL o COT_API_KEY).' };
+  }
+
+  const url = `${config.baseUrl}/api/v1/contacts`;
+
+  try {
+    const response = await fetch(url, {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+        Authorization: `Bearer ${config.apiKey}`
+      },
+      body: JSON.stringify({
+        source: 'whatsapp',
+        sendCapiLead: true,
+        ...payload
+      })
+    });
+
+    let data = null;
+    try {
+      data = await response.json();
+    } catch {
+      data = null;
+    }
+
+    if (!response.ok) {
+      const errMsg = data?.error || `HTTP ${response.status}`;
+      console.error(`COT API contacts falló (${response.status}):`, errMsg);
+      return { success: false, error: errMsg };
+    }
+
+    if (!data?.success || !data?.clientId) {
+      return { success: false, error: data?.error || 'Respuesta incompleta de contacts.' };
+    }
+
+    return {
+      success: true,
+      clientId: data.clientId,
+      created: data.created,
+      merged: data.merged,
+      lifecycleStage: data.lifecycleStage,
+      stageChanged: data.stageChanged,
+      metaEventSent: data.metaEventSent ?? null,
+      touchpointId: data.touchpointId
+    };
+  } catch (err) {
+    console.error('COT API contacts error de red:', err);
+    return { success: false, error: err?.message || 'Error de red al registrar contacto.' };
+  }
+}
+

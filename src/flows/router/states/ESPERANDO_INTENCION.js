@@ -10,6 +10,7 @@ import {
   formatMenuBlock,
   MENU_WRITE_CONTINUE_CTA
 } from '../../../logic/flow-rails.js';
+import { syncCrmCuriousAsync, syncCrmEngagedAsync } from '../../../logic/cot-crm-sync.js';
 
 /** Menú principal (1️⃣ Eventos / 2️⃣ Barriles / 3️⃣ Humano). */
 const MENU_BLOCK = formatMenuBlock([
@@ -86,16 +87,19 @@ export const ESPERANDO_INTENCION = defineState({
     const choice = matchKeywordIntent(messageText, rulesRouterIntencion());
 
     if (choice === 'HUMANO') {
+      syncCrmEngagedAsync(session, 'intent_selected', { choice: 'HUMANO' });
       return handoffHumanoResult();
     }
 
     if (choice === 'BARRILES') {
       session.userIntent = 'BARRILES';
+      syncCrmEngagedAsync(session, 'intent_selected', { choice: 'BARRILES' });
       return { success: true, nextState: 'BARRILES_FILTRO_CANAL' };
     }
 
     if (choice === 'EVENTOS') {
       session.userIntent = 'EVENTOS';
+      syncCrmEngagedAsync(session, 'intent_selected', { choice: 'EVENTOS' });
       return { success: true, nextState: 'EVENTOS_RECOGIDA_DATOS' };
     }
 
@@ -109,6 +113,7 @@ export const ESPERANDO_INTENCION = defineState({
     // Eventos/Barriles usarán un copy más directo si assistantIntroduced=true.
     session.routerMenuShown = true;
     session.assistantIntroduced = true;
+    syncCrmCuriousAsync(session);
     return {
       success: true,
       nextState: 'ESPERANDO_INTENCION',
