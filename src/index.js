@@ -10,6 +10,7 @@ import pino from 'pino';
 import { processMessage } from './core/engine.js';
 import { shouldHandleMessage, stripTriggerPrefix } from './logic/utils.js';
 import { getSession, saveSession, resetSession, findSessionIdsForPhone } from './core/db.js';
+import { resolveClientPhoneE164 } from './logic/cot-phone-resolve.js';
 import { assertRuntimeConfigReady, loadBotConfig } from './core/config.js';
 import { warmCotCatalog } from './logic/cot-catalog.js';
 import { AUTH_DIR, PROJECT_ROOT } from './core/paths.js';
@@ -265,37 +266,18 @@ function getPreferredSessionId(message) {
  * @returns {Promise<string>} Etiqueta lista para alertas admin ("+569... (Nombre)")
  */
 async function resolveClientPhoneLabel(message, sock, sessionId) {
+  const e164 = await resolveClientPhoneE164({ message, sock, sessionId });
+  const nombrePerfil = message.pushName ? ` (${message.pushName})` : '';
+  if (e164) return `${e164}${nombrePerfil}`;
+
   const key = message.key || {};
-  let mappedPn = null;
-
-  // Si el chat llegó como LID, pedimos a Baileys el teléfono asociado
-  try {
-    if (typeof key.remoteJid === 'string' && key.remoteJid.endsWith('@lid')) {
-      mappedPn = await sock.signalRepository?.lidMapping?.getPNForLID?.(key.remoteJid) || null;
-    }
-  } catch (_) { /* ignore */ }
-
-  const realId = key.remoteJidAlt
-    || key.senderPn
-    || mappedPn
-    || (typeof sessionId === 'string' && sessionId.endsWith('@s.whatsapp.net') ? sessionId : null)
-    || key.participantAlt
-    || key.participant
-    || key.remoteJid
-    || '';
-
-  let displayId = String(realId)
-    .replace('@s.whatsapp.net', '')
-    .replace('@c.us', '')
-    .replace('@lid', '');
-
-  // Si solo tenemos LID, dejamos aviso claro (mejor que un número inventado)
-  if (String(realId).endsWith('@lid') && !mappedPn && !key.remoteJidAlt && !key.senderPn) {
-    displayId = `${displayId} [ID Oculto]`;
+  if (String(key.remoteJid || '').endsWith('@lid')) {
+    const lidPart = String(key.remoteJid).split('@')[0];
+    return `+${lidPart} [ID Oculto]${nombrePerfil}`;
   }
 
-  const nombrePerfil = message.pushName ? ` (${message.pushName})` : '';
-  return `+${displayId}${nombrePerfil}`;
+  const fallback = String(sessionId || key.remoteJid || '').replace('@s.whatsapp.net', '');
+  return `+${fallback}${nombrePerfil}`;
 }
 
 /**
@@ -609,6 +591,12 @@ async function startBot() {
         return;
       }
 
+      const clientPhoneE164 = await resolveClientPhoneE164({ message, sock, sessionId });
+      if (clientPhoneE164) {
+        session.clientPhoneE164 = clientPhoneE164;
+        saveSession(sessionId, session);
+      }
+
       const isGroup = message.key.remoteJid?.endsWith('@g.us');
       if (isGroup && !config.allowGroups) {
         return;
@@ -639,7 +627,10 @@ async function startBot() {
           });
         };
 
-        const reply = await processMessage(sessionId, cleanText, { sendAdminAlert });
+        const reply = await processMessage(sessionId, cleanText, {
+          sendAdminAlert,
+          clientPhoneE164: clientPhoneE164 || session.clientPhoneE164 || undefined,
+        });
 
         if (!reply) {
           return;

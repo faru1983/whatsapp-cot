@@ -15,7 +15,10 @@ export async function syncCrmCurious(session) {
   if (!isCotApiConfigured()) return;
 
   const phone = session.clientPhoneE164;
-  if (!phone) return;
+  if (!phone) {
+    console.warn('CRM curious sync omitido: sin teléfono E.164 en sesión', session.sessionId || '');
+    return;
+  }
 
   session.crmCuriousSynced = true;
   try {
@@ -51,7 +54,10 @@ export async function syncCrmEngaged(session, touchpointType = 'intent_selected'
   if (!isCotApiConfigured()) return;
 
   const phone = session.clientPhoneE164;
-  if (!phone) return;
+  if (!phone) {
+    console.warn('CRM curious sync omitido: sin teléfono E.164 en sesión', session.sessionId || '');
+    return;
+  }
 
   session.crmEngagedSynced = true;
   try {

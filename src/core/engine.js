@@ -35,6 +35,7 @@ import {
 } from '../logic/flow-rails.js';
 import { clearNudgeFlag } from '../logic/inactivity-nudge.js';
 import { jidToE164 } from '../logic/cot-event-quote.js';
+import { syncCrmCuriousAsync } from '../logic/cot-crm-sync.js';
 
 const isMainModule = process.argv[1] === fileURLToPath(import.meta.url);
 
@@ -316,8 +317,16 @@ async function processMessageUnlocked(sessionId, messageText, options = {}) {
 
   // Guardamos el JID y el teléfono E.164 para la API de cotizaciones web
   session.sessionId = sessionId;
-  const phone = jidToE164(sessionId);
+  const phone =
+    options.clientPhoneE164 ||
+    session.clientPhoneE164 ||
+    jidToE164(sessionId);
   if (phone) session.clientPhoneE164 = phone;
+
+  // CRM: registrar curioso en el primer mensaje con teléfono resuelto (cualquier estado)
+  if (phone && !session.crmCuriousSynced) {
+    syncCrmCuriousAsync(session);
+  }
 
   // ==============================================================================
   // 1. SILENCIO (MUTE) Y COMANDOS DEL SISTEMA
