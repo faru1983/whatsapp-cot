@@ -108,8 +108,8 @@ export const ESPERANDO_INTENCION = defineState({
       return silentInvalidChoiceResult(messageText);
     }
 
-    // Primer mensaje no reconocido: menú de bienvenida (ya presenta al asistente).
-    // Eventos/Barriles usarán un copy más directo si assistantIntroduced=true.
+    // Primer mensaje no reconocido: menú de bienvenida (presenta al asistente aquí).
+    // Eventos/Barriles ya no repiten esa presentación en su copy de entrada.
     // CRM Curioso: lo cubre el engine en el primer mensaje; refuerzo aquí por claridad.
     session.routerMenuShown = true;
     session.assistantIntroduced = true;

@@ -242,7 +242,7 @@ export function getCoctelesByCategoria() {
  * @param {string} name - Nombre oficial del catálogo
  * @returns {string|null}
  */
-function getProductFamilyBase(name) {
+export function getProductFamilyBase(name) {
 	if (!name) return null;
 	// Familias conocidas con variantes de sabor/marca en el catálogo
 	const knownFamilies = ['Mojito', 'Piscola', 'Sangría'];
@@ -1031,8 +1031,60 @@ export function parseDate(text) {
 }
 
 /**
- * parseElimination: Detecta "quita 1 mojito" en el carrito de barriles
- * (donde products es { "Mojito": 2 }).
+ * pickSpecificCartNameMatches: Resuelve a qué producto(s) del carrito se refiere
+ * el cliente cuando hay familias con nombre compartido (Mojito / Mojito Frambuesa).
+ *
+ * Regla: si el nombre COMPLETO de un candidato aparece en lo que pidió el cliente,
+ * ese candidato es "match completo". Entre los matches completos, gana el más
+ * específico (más palabras) — así "mojito frambuesa" NUNCA selecciona también
+ * "Mojito", y "mojito" solo NUNCA selecciona "Mojito Frambuesa".
+ * Si ningún candidato tiene match completo (ej. "aperol" ↔ "Aperol Spritz",
+ * el cliente omitió una palabra), cae a solapamiento simple como antes.
+ *
+ * @param {string} rawName - Texto tras el verbo/frase de eliminar (sin litraje)
+ * @param {string[]} candidateNames - Nombres de catálogo presentes en el carrito
+ * @returns {string[]} Nombres seleccionados, priorizados por especificidad
+ */
+export function pickSpecificCartNameMatches(rawName, candidateNames) {
+	const nameOnly = normalizeString(rawName).trim();
+	if (!nameOnly || !Array.isArray(candidateNames) || candidateNames.length === 0) return [];
+
+	const requestTokens = nameOnly.split(/\s+/).filter((w) => w.length > 2);
+	const tokenOverlaps = (word) =>
+		requestTokens.some((t) => t === word || t.startsWith(word) || word.startsWith(t));
+
+	const scored = [];
+	for (const itemName of candidateNames) {
+		const normItem = normalizeString(itemName);
+		const entryWords = normItem.split(/\s+/).filter((w) => w.length > 2);
+		if (entryWords.length === 0) continue;
+
+		const overlaps = entryWords.some(tokenOverlaps)
+			|| nameOnly.includes(normItem)
+			|| normItem.includes(nameOnly);
+		if (!overlaps) continue;
+
+		const fullyMatched = entryWords.every(tokenOverlaps);
+		scored.push({ name: itemName, specificity: entryWords.length, fullyMatched });
+	}
+
+	if (scored.length === 0) return [];
+
+	const fullMatches = scored.filter((s) => s.fullyMatched);
+	if (fullMatches.length > 0) {
+		const maxSpecificity = Math.max(...fullMatches.map((s) => s.specificity));
+		return fullMatches.filter((s) => s.specificity === maxSpecificity).map((s) => s.name);
+	}
+
+	// Sin match completo (ej. "aperol" ↔ "Aperol Spritz"): mantenemos el solapamiento simple
+	return scored.map((s) => s.name);
+}
+
+/**
+ * parseElimination: Detecta rechazo de un cóctel en el carrito de barriles
+ * (products = { "Mojito": 2 }). Misma familia de frases que eventos:
+ * "quita 1 mojito", "no quiero el aperol", "sin sangría".
+ * Usa pickSpecificCartNameMatches para no confundir "Mojito" con "Mojito Frambuesa".
  *
  * @param {string} text - Mensaje del cliente
  * @param {object} currentItems - Carrito actual { nombre: cantidad }
@@ -1040,34 +1092,23 @@ export function parseDate(text) {
  * @returns {{ name: string, newQty: number }|null}
  */
 export function parseElimination(text, currentItems, allAvailableItemNames) {
-	const eliminationWords = text.match(/\b(elimina|borra|quita|saca|quiero quitar|quiero sacar)\b/gi);
-	if (eliminationWords && Object.keys(currentItems).length > 0) {
-		const eliminationPattern = /\b(elimina|borra|quita|saca)\s+(\d+)?\s*(?:el\s+|los\s+|las\s+)?([A-Za-záéíóúÁÉÍÓÚñÑ\s]+)/i;
-		const match = text.match(eliminationPattern);
+	if (!text || !currentItems || Object.keys(currentItems).length === 0) return null;
+	if (!hasEventEliminationIntent(text)) return null;
 
-		if (match) {
-			const quantityToRemove = match[2] ? parseInt(match[2], 10) : null;
-			const itemNamePattern = match[3].trim();
+	const target = extractEliminationTarget(text);
+	if (!target) return null;
 
-			for (const itemName of allAvailableItemNames) {
-				const itemWords = itemName.split(/\s+/);
-				for (const word of itemWords) {
-					const wordRegex = new RegExp(`\\b${word}\\b`, 'gi');
-					if (wordRegex.test(itemNamePattern)) {
-						if (currentItems[itemName]) {
-							const currentQty = currentItems[itemName];
-							if (quantityToRemove && quantityToRemove > 0 && quantityToRemove < currentQty) {
-								return { name: itemName, newQty: currentQty - quantityToRemove };
-							}
-							return { name: itemName, newQty: 0 };
-						}
-						break;
-					}
-				}
-			}
-		}
+	const inCartNames = (allAvailableItemNames || []).filter((n) => currentItems[n]);
+	const matchedNames = pickSpecificCartNameMatches(target.rawName, inCartNames);
+	if (matchedNames.length === 0) return null;
+
+	const itemName = matchedNames[0];
+	const currentQty = currentItems[itemName];
+	const { quantityToRemove } = target;
+	if (quantityToRemove && quantityToRemove > 0 && quantityToRemove < currentQty) {
+		return { name: itemName, newQty: currentQty - quantityToRemove };
 	}
-	return null;
+	return { name: itemName, newQty: 0 };
 }
 
 /**
@@ -1085,54 +1126,210 @@ export function isEventMenuCorrection(text) {
 }
 
 /**
- * parseEventElimination: Igual que parseElimination, pero para el carrito de eventos
- * donde cada ítem es { "Mojito::10L": { name, quantity, litrage } }.
- * Si el cliente dice "quita el mojito" y hay varios litrajes, elimina el primero que coincida.
- * También acepta correcciones tipo "me equivoqué... quita/saca...".
- *
- * @param {string} text - Mensaje del cliente
- * @param {object} currentItems - Carrito de eventos con claves name::litrage
- * @returns {{ key: string, name: string, litrage: string, newQty: number }|null}
+ * ELIMINATION_STOP_TAILS: Colas que NO son nombre de cóctel tras "sin/no quiero".
+ * Evita falsos positivos: "sin problema", "no quiero eso", "sin más".
  */
-export function parseEventElimination(text, currentItems) {
-	if (!text || Object.keys(currentItems || {}).length === 0) return null;
+const ELIMINATION_STOP_TAILS = new Set([
+	'problema', 'problemas', 'duda', 'dudas', 'mas', 'más', 'eso', 'esto', 'nada',
+	'alcohol', 'gracias', 'preocupes', 'preocupado', 'preocupada', 'apuro', 'prisa',
+	'avanzar', 'seguir', 'continuar', 'ok', 'okay', 'todo', 'ambos', 'ninguno'
+]);
 
-	// Palabras de quitar + correcciones que implican sacar lo anterior
-	const eliminationWords = text.match(
-		/\b(elimina|borra|quita|saca|quiero quitar|quiero sacar|sacar|quitar)\b/gi
-	);
-	if (!eliminationWords) return null;
+/**
+ * hasEventEliminationIntent: ¿Quiere sacar algo del pedido?
+ * Cubre verbos (quita/elimina) y rechazo natural (no quiero X, sin X, no me gusta X).
+ * "sin problema" / "no quiero eso" no cuentan (sin cola de cóctel usable).
+ *
+ * @param {string} text
+ * @returns {boolean}
+ */
+export function hasEventEliminationIntent(text) {
+	const t = String(text || '');
+	if (!t.trim()) return false;
+	// Verbos explícitos de quitar
+	if (/\b(elimina(?:r)?|borra(?:r)?|quita(?:r)?|saca(?:r)?|quiero\s+quitar|quiero\s+sacar)\b/i.test(t)) {
+		return true;
+	}
+	// Rechazo natural: solo si hay un objetivo parseable, o "no quiero" suelto
+	if (/\bno\s+(?:me\s+)?(?:quiero|gusta)\b/i.test(t)) {
+		if (extractEliminationTarget(t)) return true;
+		return /^(no\s+(?:me\s+)?(?:quiero|gusta))[.!?\s]*$/i.test(t.trim());
+	}
+	if (/\b(?:mejor\s+)?sin\b/i.test(t) || /\bnada\s+de\b/i.test(t) || /\bfuera\b/i.test(t)) {
+		return Boolean(extractEliminationTarget(t));
+	}
+	return false;
+}
 
-	const eliminationPattern = /\b(elimina|borra|quita|saca|sacar|quitar)\s+(\d+)?\s*(?:el\s+|los\s+|las\s+)?([A-Za-záéíóúÁÉÍÓÚñÑ0-9\s]+)/i;
-	const match = text.match(eliminationPattern);
-	if (!match) return null;
+/**
+ * extractEliminationTarget: Saca cantidad opcional + nombre tras la frase de rechazo.
+ * Patrones hermanos: "quita el X", "no quiero la X", "sin X", "no me gusta X", "nada de X".
+ *
+ * @param {string} text
+ * @returns {{ quantityToRemove: number|null, rawName: string }|null}
+ */
+export function extractEliminationTarget(text) {
+	const trimmed = String(text || '').trim();
+	if (!trimmed) return null;
 
-	const quantityToRemove = match[2] ? parseInt(match[2], 10) : null;
-	const itemNamePattern = normalizeString(match[3].trim());
+	const patterns = [
+		// quita / elimina / saca / borra [N] [el|la] NOMBRE
+		/\b(?:quiero\s+)?(?:elimina(?:r)?|borra(?:r)?|quita(?:r)?|saca(?:r)?)\s+(\d+)?\s*(?:el|la|los|las)?\s*(.+)$/i,
+		// no quiero [más] [el|la] NOMBRE | no me gusta [el|la] NOMBRE
+		/\bno\s+(?:me\s+)?(?:quiero|gusta)\s+(?:m[aá]s\s+)?(?:el|la|los|las)?\s*(.+)$/i,
+		// (mejor) sin [el|la] NOMBRE
+		/\b(?:mejor\s+)?sin\s+(?:el|la|los|las)?\s*(.+)$/i,
+		// nada de NOMBRE
+		/\bnada\s+de\s+(?:el|la|los|las)?\s*(.+)$/i,
+		// fuera [el|la] NOMBRE
+		/\bfuera\s+(?:el|la|los|las)?\s*(.+)$/i
+	];
 
-	// Buscamos litraje opcional en el texto ("quita mojito 10L")
-	const litrageInText = itemNamePattern.match(/\b(\d+)\s*l\b/);
-	const wantedLitrage = litrageInText ? `${litrageInText[1]}L` : null;
+	for (const re of patterns) {
+		const match = trimmed.match(re);
+		if (!match) continue;
 
-	for (const [key, entry] of Object.entries(currentItems)) {
-		if (!entry || !entry.name) continue;
-		const normName = normalizeString(entry.name);
-		const nameWords = normName.split(/\s+/).filter((w) => w.length > 2);
-		const matchesName = nameWords.some((w) => itemNamePattern.includes(w))
-			|| itemNamePattern.includes(normName)
-			|| normName.includes(itemNamePattern.replace(/\b\d+\s*l\b/g, '').trim());
-
-		if (!matchesName) continue;
-		if (wantedLitrage && entry.litrage !== wantedLitrage) continue;
-
-		const currentQty = entry.quantity || 0;
-		if (quantityToRemove && quantityToRemove > 0 && quantityToRemove < currentQty) {
-			return { key, name: entry.name, litrage: entry.litrage, newQty: currentQty - quantityToRemove };
+		let quantityToRemove = null;
+		let rawName = '';
+		if (match.length >= 3 && match[1] != null && /^\d+$/.test(String(match[1]).trim())) {
+			quantityToRemove = parseInt(match[1], 10);
+			rawName = String(match[2] || '');
+		} else {
+			rawName = String(match[match.length - 1] || '');
 		}
-		return { key, name: entry.name, litrage: entry.litrage, newQty: 0 };
+
+		rawName = rawName
+			.replace(/[.!?,;]+$/g, '')
+			.replace(/^(el|la|los|las|lo)\s+/i, '')
+			.trim();
+		if (!rawName) continue;
+
+		const normTail = normalizeString(rawName).split(/\s+/).filter(Boolean);
+		// "sin problema" / "no quiero eso" → no es cóctel
+		if (normTail.length === 1 && ELIMINATION_STOP_TAILS.has(normTail[0])) continue;
+		if (normTail.every((w) => ELIMINATION_STOP_TAILS.has(w))) continue;
+
+		return { quantityToRemove, rawName };
 	}
 
 	return null;
+}
+
+/**
+ * isBareEventEliminationRequest: Solo dijo "quitar"/"no quiero"/etc. sin nombrar cóctel.
+ * Hay que preguntar qué sacar; no avanzar ni llamar NLU a ciegas.
+ *
+ * @param {string} text
+ * @returns {boolean}
+ */
+export function isBareEventEliminationRequest(text) {
+	const trimmed = String(text || '').trim();
+	if (!trimmed) return false;
+	if (extractEliminationTarget(trimmed)) return false;
+	return /^(quiero\s+)?(eliminar|elimina|borra(r)?|quita(r)?|saca(r)?)(\s+(algo|uno|una|alguno|alguna|eso|esto|todo))?[.!?\s]*$/i.test(trimmed)
+		|| /^(no\s+(?:me\s+)?(?:quiero|gusta)|sin\s+eso|sin\s+nada|nada\s+de\s+eso)[.!?\s]*$/i.test(trimmed);
+}
+
+/**
+ * hasExplicitEventAddIntent: El cliente pidió sumar, no reemplazar totales.
+ * Ej.: "agrega 10L mojito", "también 5L sangría", "otro aperol".
+ *
+ * @param {string} text
+ * @returns {boolean}
+ */
+export function hasExplicitEventAddIntent(text) {
+	return /\b(agrega(r)?|suma(r)?|a[nñ]ade(r)?|tambi[eé]n|adem[aá]s|otro|otra|m[aá]s\s+\d)\b/i.test(
+		String(text || '')
+	);
+}
+
+/**
+ * parseEventElimination: Detecta rechazo de un cóctel en el carrito de eventos
+ * ({ "Mojito::10L": { name, quantity, litrage } }).
+ * - Match: elimina todas las líneas de ese cóctel (salvo litraje/cantidad explícitos).
+ * - Nombró uno que NO está: { notInCart: true } (el caller NO debe agregarlo).
+ *
+ * @param {string} text - Mensaje del cliente
+ * @param {object} currentItems - Carrito de eventos con claves name::litrage
+ * @returns {{ key: string, keys: string[], name: string, litrage: string, newQty: number, notInCart?: boolean, requestedName?: string }|null}
+ */
+export function parseEventElimination(text, currentItems) {
+	if (!text || Object.keys(currentItems || {}).length === 0) return null;
+	if (!hasEventEliminationIntent(text)) return null;
+
+	const target = extractEliminationTarget(text);
+	if (!target) return null;
+
+	const { quantityToRemove, rawName } = target;
+	const itemNamePattern = normalizeString(rawName);
+	const litrageInText = itemNamePattern.match(/\b(\d+)\s*l\b/);
+	const wantedLitrage = litrageInText ? `${litrageInText[1]}L` : null;
+	const nameOnly = itemNamePattern
+		.replace(/\b\d+\s*l\b/g, '')
+		.replace(/^(el|la|los|las|lo)\s+/, '')
+		.trim();
+	if (!nameOnly) return null;
+
+	// Nombres distintos presentes en el carrito (sin duplicar por litraje)
+	const candidateNames = [...new Set(
+		Object.values(currentItems).map((e) => e?.name).filter(Boolean)
+	)];
+	const matchedNames = pickSpecificCartNameMatches(nameOnly, candidateNames);
+
+	if (matchedNames.length === 0) {
+		return {
+			key: '',
+			keys: [],
+			name: rawName,
+			litrage: wantedLitrage || '',
+			newQty: 0,
+			notInCart: true,
+			requestedName: rawName
+		};
+	}
+
+	// pickSpecificCartNameMatches ya resolvió la ambigüedad de familia (Mojito vs Mojito Frambuesa)
+	const targetName = matchedNames[0];
+	const matches = [];
+	for (const [key, entry] of Object.entries(currentItems)) {
+		if (entry?.name !== targetName) continue;
+		if (wantedLitrage && entry.litrage !== wantedLitrage) continue;
+		matches.push({ key, entry });
+	}
+
+	if (matches.length === 0) {
+		return {
+			key: '',
+			keys: [],
+			name: rawName,
+			litrage: wantedLitrage || '',
+			newQty: 0,
+			notInCart: true,
+			requestedName: rawName
+		};
+	}
+
+	if (quantityToRemove && matches.length === 1) {
+		const { key, entry } = matches[0];
+		const currentQty = entry.quantity || 0;
+		if (quantityToRemove > 0 && quantityToRemove < currentQty) {
+			return {
+				key,
+				keys: [key],
+				name: entry.name,
+				litrage: entry.litrage,
+				newQty: currentQty - quantityToRemove
+			};
+		}
+	}
+
+	return {
+		key: matches[0].key,
+		keys: matches.map((m) => m.key),
+		name: matches[0].entry.name,
+		litrage: wantedLitrage || matches.map((m) => m.entry.litrage).join('+'),
+		newQty: 0
+	};
 }
 
 /**
@@ -1164,6 +1361,102 @@ export function partitionLitersIntoBarrels(totalLiters, allowedLitrages) {
 	}
 	if (rem !== 0 || parts.length === 0) return null;
 	return parts;
+}
+
+/**
+ * formatBarrelPartsLabel: Texto corto de cómo se arma el total en barriles.
+ * Ej.: 2×10L → "2×10L"; 1×10L + 1×5L → "10L + 5L"; 2×10L + 1×5L → "2×10L + 5L".
+ *
+ * @param {Array<{ size: number, count: number }>} parts - Barriles por tamaño (mayor→menor)
+ * @returns {string}
+ */
+export function formatBarrelPartsLabel(parts) {
+	if (!Array.isArray(parts) || parts.length === 0) return '';
+	return parts
+		.filter((p) => p && p.count > 0 && p.size > 0)
+		.map((p) => (p.count === 1 ? `${p.size}L` : `${p.count}×${p.size}L`))
+		.join(' + ');
+}
+
+/**
+ * groupCocktailLinesByName: Agrupa líneas del carrito/cotización por nombre de cóctel.
+ * El cliente piensa en litros totales; internamente seguimos con barriles por litraje.
+ *
+ * @param {Array<{ name: string, quantity: number, litrage: string, price?: number, lineTotal?: number }>} lines
+ * @returns {Array<{ name: string, totalLiters: number, lineTotal: number, parts: Array<{ size: number, count: number }>, unitPriceHint?: string }>}
+ */
+export function groupCocktailLinesByName(lines) {
+	const byName = new Map();
+
+	for (const line of lines || []) {
+		if (!line?.name || line.isExtra) continue;
+		const qty = Number(line.quantity) || 0;
+		const size = parseInt(String(line.litrage || '').replace(/\D/g, ''), 10) || 0;
+		if (qty <= 0 || size <= 0) continue;
+
+		if (!byName.has(line.name)) {
+			byName.set(line.name, {
+				name: line.name,
+				totalLiters: 0,
+				lineTotal: 0,
+				partsMap: new Map(),
+				priceBits: []
+			});
+		}
+		const g = byName.get(line.name);
+		g.totalLiters += size * qty;
+		g.lineTotal += Number(line.lineTotal != null
+			? line.lineTotal
+			: (Number(line.price) || 0) * qty);
+		g.partsMap.set(size, (g.partsMap.get(size) || 0) + qty);
+		if (line.price != null && qty > 0) {
+			g.priceBits.push({ size, qty, price: line.price });
+		}
+	}
+
+	return [...byName.values()].map((g) => {
+		const parts = [...g.partsMap.entries()]
+			.sort((a, b) => b[0] - a[0])
+			.map(([size, count]) => ({ size, count }));
+		return {
+			name: g.name,
+			totalLiters: g.totalLiters,
+			lineTotal: g.lineTotal,
+			parts,
+			priceBits: g.priceBits
+		};
+	});
+}
+
+/**
+ * formatEventCocktailLitersLine: Una línea legible en litros + desglose de barriles.
+ * Ej.: "20L Mojito (2×10L): $219.980" o "15L Aperol Spritz (10L + 5L): $249.980".
+ * Un solo barril: "10L Mojito: $109.990" (sin paréntesis redundante).
+ *
+ * @param {{ name: string, totalLiters: number, lineTotal: number, parts: Array<{ size: number, count: number }> }} group
+ * @param {{ prefix?: string, showUnitMath?: boolean }} [opts]
+ * @returns {string}
+ */
+export function formatEventCocktailLitersLine(group, opts = {}) {
+	if (!group?.name || !(group.totalLiters > 0)) return '';
+	const prefix = opts.prefix != null ? opts.prefix : '-';
+	const head = prefix === '' ? '' : `${prefix} `;
+	const parts = group.parts || [];
+	const breakdown = formatBarrelPartsLabel(parts);
+	const onlyOneBarrel = parts.length === 1 && parts[0].count === 1;
+	const namePart = onlyOneBarrel
+		? `${group.totalLiters}L ${group.name}`
+		: `${group.totalLiters}L ${group.name} (${breakdown})`;
+
+	// Cotización formal: opcional mostrar precio unitario cuando hay un solo tamaño
+	if (opts.showUnitMath && parts.length === 1 && group.priceBits?.length === 1) {
+		const bit = group.priceBits[0];
+		if (bit.qty > 1) {
+			return `${head}${namePart}: ${formatPrice(bit.price)} x ${bit.qty} = ${formatPrice(group.lineTotal)}`;
+		}
+	}
+
+	return `${head}${namePart}: ${formatPrice(group.lineTotal)}`;
 }
 
 /**
@@ -1239,16 +1532,105 @@ export function fixEventLitrageShorthand(userMessage, product, allowedLitrages, 
 	return [{ ...product, quantity: 1, litrage: qtyAsLitrage }];
 }
 
+/**
+ * isBotCartOrPriceLine: ¿La línea del historial es un ítem de carrito/precio?
+ * No debe usarse como "opción de menú" para resolver dudas
+ * (ej. "- 25L Mojito Frambuesa (...): $314.970").
+ *
+ * @param {string} line
+ * @returns {boolean}
+ */
+export function isBotCartOrPriceLine(line) {
+	const t = String(line || '');
+	if (/\$\s*\d/.test(t)) return true;
+	if (/^\s*[-•]\s*\d+\s*[x×]/i.test(t)) return true;
+	if (/^\s*[-•]\s*\d+\s*l\b/i.test(t)) return true;
+	if (/\b\d+\s*l\b/i.test(t) && /\(/i.test(t)) return true;
+	if (/subtotal|litros:|c[oó]cteles/i.test(t)) return true;
+	return false;
+}
+
+/**
+ * asksCocktailFlavorList: ¿Pregunta qué sabores/variedades hay?
+ * Ej.: "qué mojito sabor tienes?", "sabores de mojito", "qué piscolas hay?"
+ *
+ * @param {string} messageText
+ * @returns {boolean}
+ */
+export function asksCocktailFlavorList(messageText) {
+	const raw = String(messageText || '').trim();
+	if (!raw) return false;
+	const norm = normalizeString(raw);
+	const hasFlavorWord = /\b(sabor|sabores|variedad|variedades)\b/.test(norm);
+	const hasAskCue = /\b(que|cual|cuales|tienen|tienes|hay|ofrec|disponible|mostrar|lista)\b/.test(norm)
+		|| /\?/.test(raw);
+	if (hasFlavorWord && hasAskCue) return true;
+	if (/\b(mojito|piscola|sangria)\s+sabores?\b/.test(norm)) return true;
+	if (/\bsabores?\s+(de\s+)?(mojito|piscola|sangria)\b/.test(norm)) return true;
+	return false;
+}
+
+/**
+ * getCatalogFamilyFlavorOptions: Variantes de una familia en el catálogo.
+ * Incluye el clásico ("Mojito") y sabores ("Mojito Maracuyá", …).
+ *
+ * @param {string} familyBase - Ej. "Mojito"
+ * @param {string[]} catalogNames
+ * @returns {string[]}
+ */
+export function getCatalogFamilyFlavorOptions(familyBase, catalogNames) {
+	const fb = normalizeString(familyBase);
+	if (!fb) return [];
+	return (catalogNames || []).filter((name) => {
+		const nn = normalizeString(name);
+		if (nn === fb) return true;
+		if (!nn.startsWith(`${fb} `)) return false;
+		// En carta de eventos/barriles con alcohol no listamos mocktails salvo que pregunten eso
+		if (/\bmocktail\b/i.test(name)) return false;
+		return true;
+	});
+}
+
+/**
+ * detectFlavorListRequest: Si el cliente pregunta por sabores de una familia, arma la lista.
+ *
+ * @param {string} messageText
+ * @param {string[]} catalogNames
+ * @returns {{ family: string, opciones: string[] }|null}
+ */
+export function detectFlavorListRequest(messageText, catalogNames) {
+	if (!asksCocktailFlavorList(messageText)) return null;
+	const norm = normalizeString(messageText);
+	const names = catalogNames || Object.keys(preciosData.cocteles || {});
+
+	/** @type {Map<string, string>} normFamily → label canónico */
+	const families = new Map();
+	for (const name of names) {
+		const base = getProductFamilyBase(name);
+		if (!base) continue;
+		families.set(normalizeString(base), base);
+	}
+
+	for (const [normFamily, label] of families.entries()) {
+		if (!norm.includes(normFamily)) continue;
+		const opciones = getCatalogFamilyFlavorOptions(label, names);
+		if (opciones.length >= 2) return { family: label, opciones };
+	}
+
+	return null;
+}
+
 export function resolveDoubtsProgrammatically(dudas, lastBotMessage = '') {
 	const resolved = [];
 	const remaining = [];
 
-	// Extraer opciones que el bot ofreció en su último mensaje (líneas "- Nombre")
+	// Opciones que el bot listó como *elección* (no líneas del carrito con precio/litros)
 	const botOfferedOptions = [];
 	if (lastBotMessage) {
 		const lines = String(lastBotMessage).split('\n');
 		for (const line of lines) {
-			const m = line.match(/^\s*-\s*([A-Za-záéíóúÁÉÍÓÚñÑ0-9°º\s]+)/);
+			if (isBotCartOrPriceLine(line)) continue;
+			const m = line.match(/^\s*[-•]\s*([A-Za-záéíóúÁÉÍÓÚñÑ0-9°º\s]+)/);
 			if (m && m[1]) {
 				botOfferedOptions.push(normalizeString(m[1].trim()));
 			}
@@ -1330,10 +1712,9 @@ export function interceptBotOptionsAnswer(messageText, lastBotMessage) {
 	const botOfferedOptions = [];
 	const lines = String(lastBotMessage).split('\n');
 	for (const line of lines) {
-		// Las líneas del carrito ("- 1x Mojito (5L): $69.990") no son opciones para elegir:
-		// si las tomáramos como tales, cualquier respuesta siguiente sumaría ese mismo cóctel.
-		if (/^\s*-\s*\d+\s*[x×]/i.test(line) || /\$\s*\d/.test(line)) continue;
-		const m = line.match(/^\s*-\s*([A-Za-záéíóúÁÉÍÓÚñÑ0-9°º\s]+)/);
+		// Las líneas del carrito / precios no son un menú de elección
+		if (isBotCartOrPriceLine(line)) continue;
+		const m = line.match(/^\s*[-•]\s*([A-Za-záéíóúÁÉÍÓÚñÑ0-9°º\s]+)/);
 		if (m && m[1]) {
 			botOfferedOptions.push(m[1].trim());
 		}

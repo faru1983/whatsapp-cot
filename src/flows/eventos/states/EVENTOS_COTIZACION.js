@@ -70,7 +70,7 @@ export const EVENTOS_COTIZACION = defineState({
       session.quotationGenerated = false;
       const formatKey = getEventFormatKey(session.eventoFormato);
       const cart = formatEventCartSummary(session.orderBuilder?.products || {}, formatKey);
-      const reply = `Claro, ajustemos el menú. Actualmente tienes:\n\n${cart || '_(vacío)_'}\n\n¿Qué deseas agregar o eliminar? (ej: "agrega Mojito 10L" o "quita el aperol")`;
+      const reply = `Claro, ajustemos el menú. Actualmente tienes:\n\n${cart || '_(vacío)_'}\n\n¿Qué deseas cambiar?\n• Nuevo total en litros (ej: *"20L Mojito y 10L Aperol"*)\n• Quitar un cóctel (ej: *"quita el aperol"*)\n• Agregar (ej: *"agrega 5L Sangría"*)`;
       return { success: true, nextState: 'EVENTOS_ELECCION_MENU', customReply: reply };
     }
 

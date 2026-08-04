@@ -54,25 +54,14 @@ function askDeliveryCopy() {
 ${deliveryExampleLine()}`;
 }
 
-// Si ya vieron el menú del router, entrada directa (sin re-presentar al asistente).
 /**
- * welcomeForSession: Copy de entrada según si el asistente ya se presentó en el menú.
+ * welcomeForSession: Copy de entrada Barriles (siempre directo, sin “Soy el asistente virtual…”).
  *
- * @param {object} session
+ * @param {object} [_session]
  * @returns {string[]}
  */
-function welcomeForSession(session) {
-  const pitch = session?.assistantIntroduced
-    ? `*Barriles Desechables* listos para servir:
-• 5 litros ≈ *25 cócteles*
-• Se conservan refrigerados (+3 semanas)
-• Desde *$31.990* (según sabor)
-
-📍 Despacho en toda la RM y a regiones por encomienda.
-
-Puedes cotizar fácil y rápido en la web:
-👉 *www.cocktailsontap.cl/barriles*`
-    : `Soy el *asistente virtual* de *Cocktails on Tap* y te guiaré con la información de *Barriles Desechables* listos para servir:
+function welcomeForSession(_session) {
+  const pitch = `*Barriles Desechables* listos para servir:
 • 5 litros ≈ *25 cócteles*
 • Se conservan refrigerados (+3 semanas)
 • Desde *$31.990* (según sabor)
@@ -87,7 +76,7 @@ Puedes cotizar fácil y rápido en la web:
 
 const AI_PROMPT = `[SISTEMA - ESTADO: DATOS DE ENTREGA BARRILES (entrada)]
 Eres el asistente virtual de Cocktails on Tap. El cliente acaba de entrar a Barriles Desechables. Debe dar *comuna* y *fecha* de entrega, o tiene dudas.
-0. Si el asistente ya se presentó en el menú anterior, NO digas "hola" ni vuelvas a presentarte.
+0. NO digas "hola" ni te presentes como asistente virtual en el mensaje al cliente (el copy de entrada ya es directo).
 1. Responde dudas breves (precios desde *$31.990*, 5L ≈ 25 cócteles, despacho RM / encomienda regiones). NUNCA inventes tarifas.
 2. NUNCA pegues el catálogo completo todavía.
 3. Puedes mencionar la web www.cocktailsontap.cl/barriles si prefiere cotizar solo ahí; no lo presentes como menú obligatorio web vs chat.

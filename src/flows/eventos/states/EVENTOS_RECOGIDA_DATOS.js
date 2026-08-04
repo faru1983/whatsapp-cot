@@ -14,18 +14,8 @@ import { applyEventDataFromMessage, extractGuestsFromMessage, asksEventServiceFo
 import { isLikelyThirdPartyBotReply } from '../../../logic/interruptions.js';
 import { withAssistantFooter } from '../../../logic/flow-rails.js';
 
-// Bienvenida al entrar al flujo.
-// Si ya vieron el menú del router (assistantIntroduced), no repetimos la presentación.
-const WELCOME_DIRECT = `*Servicio para Eventos* — estación de coctelería autoservicio para tu celebración.
-
-Puedes cotizar fácil y rápido en la web:
-👉 *www.cocktailsontap.cl/eventos*
-
-Si prefieres seguir por aquí, cuéntame: *qué celebras*, cuántos *invitados*, *fecha* y *comuna*.
-
-Ejemplo: _"Matrimonio, 50 invitados, 15 de mayo, Las Condes"_`;
-
-const WELCOME_WITH_INTRO = `Soy el *asistente virtual* de *Cocktails on Tap* y te guiaré con la información del *Servicio para Eventos* (estación de coctelería autoservicio para tu celebración).
+// Bienvenida al entrar al flujo (siempre directa: sin “Soy el asistente virtual…”).
+const WELCOME = `*Servicio para Eventos* — estación de coctelería autoservicio para tu celebración.
 
 Puedes cotizar fácil y rápido en la web:
 👉 *www.cocktailsontap.cl/eventos*
@@ -35,18 +25,18 @@ Si prefieres seguir por aquí, cuéntame: *qué celebras*, cuántos *invitados*,
 Ejemplo: _"Matrimonio, 50 invitados, 15 de mayo, Las Condes"_`;
 
 /**
- * welcomeForSession: Copy de entrada según si el asistente ya se presentó en el menú.
+ * welcomeForSession: Copy de entrada al flujo Eventos (mismo texto en entrada directa o desde el menú).
  *
- * @param {object} session
+ * @param {object} [_session]
  * @returns {string}
  */
-function welcomeForSession(session) {
-  return session?.assistantIntroduced ? WELCOME_DIRECT : WELCOME_WITH_INTRO;
+function welcomeForSession(_session) {
+  return WELCOME;
 }
 
 const AI_PROMPT = `[SISTEMA - ESTADO: DATOS DEL EVENTO (entrada)]
 Eres el asistente virtual de Cocktails on Tap. El cliente acaba de entrar a Servicio para Eventos. Debe dar datos (celebración, invitados, fecha, comuna) o tiene dudas.
-0. Si el asistente ya se presentó en el menú anterior, NO digas "hola" ni vuelvas a presentarte.
+0. NO digas "hola" ni te presentes como asistente virtual en el mensaje al cliente (el copy de entrada ya es directo).
 1. Responde su duda de forma breve y amigable.
 2. REGLA DE COBERTURA: Si el cliente pregunta si vamos a su comuna o ciudad (ej: "van a la serena?"), debes responder afirmativamente indicando: "Sí, trabajamos en toda la Región Metropolitana y La Serena/Coquimbo."
 3. REGLA DE LOGÍSTICA: La instalación y logística la coordina el equipo; Dispensador gratis, Muro $50.000. NUNCA inventes tarifas de envío.

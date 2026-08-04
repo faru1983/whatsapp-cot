@@ -10,7 +10,9 @@ import {
   normalizeString,
   findClosestCatalogMatch,
   fixEventLitrageShorthand,
-  isValidFreeformLocationCapture
+  isValidFreeformLocationCapture,
+  groupCocktailLinesByName,
+  formatEventCocktailLitersLine
 } from './utils.js';
 import { isLikelyThirdPartyBotReply } from './interruptions.js';
 import { OrderBuilder } from './order-builder.js';
@@ -357,10 +359,209 @@ export function parseCocktailNamesWithoutLitrage(messageText, catalogNames) {
 }
 
 /**
+ * findCatalogNameHits: Ubica cócteles del catálogo en el texto (posiciones).
+ * Nombres largos primero; también tokens fuzzy (monito→Mojito, aperol→Aperol Spritz).
+ *
+ * @param {string} messageText
+ * @param {string[]} catalogNames
+ * @returns {Array<{ name: string, index: number, end: number }>}
+ */
+function findCatalogNameHits(messageText, catalogNames) {
+  const norm = normalizeString(messageText);
+  if (!norm) return [];
+
+  const hits = [];
+  const used = new Array(norm.length).fill(false);
+  const sorted = [...catalogNames].sort((a, b) => b.length - a.length);
+
+  // 1) Nombres completos del catálogo
+  for (const name of sorted) {
+    const nameNorm = normalizeString(name);
+    if (!nameNorm || nameNorm.length < 3) continue;
+    let from = 0;
+    while (from < norm.length) {
+      const idx = norm.indexOf(nameNorm, from);
+      if (idx < 0) break;
+      const end = idx + nameNorm.length;
+      const free = used.slice(idx, end).every((u) => !u);
+      // Borde de palabra aproximado (evita match dentro de otra palabra)
+      const leftOk = idx === 0 || /[\s,;./+]/.test(norm[idx - 1]);
+      const rightOk = end >= norm.length || /[\s,;./+]/.test(norm[end]);
+      if (free && leftOk && rightOk) {
+        for (let i = idx; i < end; i++) used[i] = true;
+        hits.push({ name, index: idx, end });
+      }
+      from = idx + 1;
+    }
+  }
+
+  // 2) Tokens sueltos con fuzzy (solo zonas aún libres)
+  const stop = new Set([
+    'para', 'con', 'son', 'una', 'unos', 'quiero', 'dame', 'pon', 'agrega', 'y', 'el', 'la',
+    'de', 'un', 'unos', 'barril', 'barriles', 'litro', 'litros'
+  ]);
+  const tokenRe = /[a-z0-9]{3,}/g;
+  let tm;
+  while ((tm = tokenRe.exec(norm)) !== null) {
+    const token = tm[0];
+    const idx = tm.index;
+    const end = idx + token.length;
+    if (stop.has(token) || /^\d+$/.test(token)) continue;
+    if (used.slice(idx, end).some((u) => u)) continue;
+    // Misma fuzzy que matchCocktailNamesInText (monito→Mojito, aperol→Aperol Spritz)
+    const fuzzyHits = matchCocktailNamesInText(token, catalogNames);
+    if (fuzzyHits.length !== 1) continue;
+    const name = fuzzyHits[0];
+    // No duplicar si ya está el mismo nombre muy cerca
+    if (hits.some((h) => h.name === name && Math.abs(h.index - idx) < 8)) continue;
+    for (let i = idx; i < end; i++) used[i] = true;
+    hits.push({ name, index: idx, end });
+  }
+
+  return hits.sort((a, b) => a.index - b.index);
+}
+
+/**
+ * assignLitrageToNameHits: Empareja cada cóctel con el litraje más cercano.
+ * Un litraje solo se usa una vez (así "Mojito 5L y Sangria 10L" no deja ambos en 5L).
+ *
+ * @param {Array<{ name: string, index: number, end: number }>} nameHits
+ * @param {Array<{ liters: string, index: number, end: number }>} litHits
+ * @param {string|null} sharedLitrage
+ * @param {string} defaultLitrage
+ * @returns {string[]} litraje por índice de nameHits
+ */
+function assignLitrageToNameHits(nameHits, litHits, sharedLitrage, defaultLitrage) {
+  const result = nameHits.map(() => null);
+  if (nameHits.length === 0) return result;
+
+  const pairs = [];
+  for (let li = 0; li < litHits.length; li++) {
+    const lit = litHits[li];
+    for (let ni = 0; ni < nameHits.length; ni++) {
+      const hit = nameHits[ni];
+      let dist;
+      if (lit.end <= hit.index) dist = hit.index - lit.end;
+      else if (lit.index >= hit.end) dist = lit.index - hit.end;
+      else dist = 0;
+      if (dist > 32) continue;
+      pairs.push({ li, ni, dist });
+    }
+  }
+  // Más cerca primero; empate: preferir litraje pegado al nombre
+  pairs.sort((a, b) => a.dist - b.dist);
+
+  const usedLit = new Set();
+  const usedName = new Set();
+  for (const p of pairs) {
+    if (usedLit.has(p.li) || usedName.has(p.ni)) continue;
+    usedLit.add(p.li);
+    usedName.add(p.ni);
+    result[p.ni] = `${litHits[p.li].liters}L`;
+  }
+
+  for (let i = 0; i < result.length; i++) {
+    if (!result[i]) result[i] = sharedLitrage || defaultLitrage;
+  }
+  return result;
+}
+
+/**
+ * rangesOverlap: ¿Dos rangos [a,b) se cruzan?
+ *
+ * @param {number} a0
+ * @param {number} a1
+ * @param {number} b0
+ * @param {number} b1
+ * @returns {boolean}
+ */
+function rangesOverlap(a0, a1, b0, b1) {
+  return a0 < b1 && a1 > b0;
+}
+
+/**
+ * collectLitrageHits: Números que significan *litros* en el mensaje.
+ * Cubre: "15L", "15 lt", "5 de aperol", "5 aperol" (volumen típico ≥5).
+ * No cubre "2 mojito" (queda para el menú de barriles).
+ *
+ * @param {string} normText - Texto ya normalizado
+ * @param {Array<{ name: string, index: number, end: number }>} nameHits
+ * @returns {Array<{ liters: string, index: number, end: number }>}
+ */
+function collectLitrageHits(normText, nameHits) {
+  const hits = [];
+  const used = [];
+
+  const mark = (start, end, liters) => {
+    if (used.some(([a, b]) => rangesOverlap(start, end, a, b))) return;
+    hits.push({ liters: String(liters), index: start, end });
+    used.push([start, end]);
+  };
+
+  // 1) Explícito: "15L", "10 lt", "20 litros"
+  for (const m of normText.matchAll(/\b(\d+)\s*(?:l|lt|lts|litros?)\b/g)) {
+    mark(m.index, m.index + m[0].length, m[1]);
+  }
+
+  // 2) Atajo chileno: "5 de aperol", "10 de mojito" → siempre litros
+  for (const m of normText.matchAll(/\b(\d+)\s+de\b/g)) {
+    const start = m.index;
+    const end = m.index + m[0].length;
+    const nearName = nameHits.some((h) => h.index >= end - 1 && h.index - end <= 16);
+    if (!nearName) continue;
+    mark(start, end, m[1]);
+  }
+
+  // 3) Número suelto pegado al cóctel: "5 aperol", "15 sangria"
+  // Solo volúmenes típicos (≥5): "2 mojito" no entra aquí (sigue al menú barriles).
+  for (const nameHit of nameHits) {
+    const before = normText.slice(Math.max(0, nameHit.index - 10), nameHit.index);
+    const m = before.match(/(\d+)\s*$/);
+    if (!m) continue;
+    const n = parseInt(m[1], 10);
+    if (!Number.isFinite(n) || n < 5 || n > 60) continue;
+    const start = nameHit.index - m[0].length;
+    const end = nameHit.index;
+    mark(start, end, n);
+  }
+
+  return hits.sort((a, b) => a.index - b.index);
+}
+
+/**
+ * quantityNearNameHit: "2x Mojito 10L" → 2; el número de litros no cuenta como cantidad.
+ *
+ * @param {string} normText
+ * @param {{ index: number, end: number }} hit
+ * @param {string} litrage
+ * @returns {number}
+ */
+function quantityNearNameHit(normText, hit, litrage) {
+  // Solo el texto justo antes del nombre; sacamos litros (con L o "N de") para no contarlos otra vez
+  const windowStart = Math.max(0, hit.index - 18);
+  const before = normText
+    .slice(windowStart, hit.index)
+    .replace(/\b\d+\s*(?:l|lt|lts|litros?)\b/g, ' ')
+    .replace(/\b\d+\s+de\b/g, ' ')
+    .trim();
+  const qtyMatch = before.match(/(\d+)\s*[x×]\s*$/i)
+    || before.match(/(\d+)\s+(?:de\s+)?(?:barriles?\s+(?:de\s+)?)?\s*$/i)
+    || before.match(/(?:^|\s)(\d+)\s*$/);
+  if (!qtyMatch) return 1;
+  const n = parseInt(qtyMatch[1], 10);
+  if (!Number.isFinite(n) || n < 1 || n > 20) return 1;
+  const litNum = String(parseInt(litrage, 10));
+  // "5 aperol" con litrage 5L → el 5 ya es litros, no 5 barriles
+  if (String(n) === litNum && !/[x×]/i.test(before)) return 1;
+  if (n >= 5 && !/[x×]/i.test(before) && !/\bbarriles?\b/i.test(before)) return 1;
+  return n;
+}
+
+/**
  * parseEventProductsProgrammatic: Parsea pedidos de eventos sin IA.
- * Orientación litros-primero: "5L Mojito y 10L Aperol", "15L Sangria", "Mojito 10L".
+ * Orientación litros-primero: "5L Mojito y 10L Aperol", "15L Sangria", "5 de aperol".
+ * Cada cóctel toma su litraje más cercano (así "15L mojito y 5 de aperol" no deja ambos en 15L).
  * Sin litros: "un mojito" → 1× defaultLitrage (típicamente 5L en dispensador).
- * Varios cócteles: cada segmento (separado por "y"/","/";") lleva su propio litraje.
  *
  * @param {string} messageText
  * @param {string[]} catalogNames
@@ -377,51 +578,25 @@ export function parseEventProductsProgrammatic(messageText, catalogNames, allowe
   if (!text) return [];
   if (asksEventCartPriceQuestion(text) || /\?/.test(text)) return [];
 
-  // Litrajes en todo el mensaje (para "Mojito y Sangría 10L" → ambos 10L)
-  const allLitrageMatches = [...text.matchAll(/\b(\d+)\s*(?:l|lt|lts|litros?)\b/gi)];
-  const sharedLitrage = allLitrageMatches.length === 1
-    ? `${allLitrageMatches[0][1]}L`
-    : null;
+  const normText = normalizeString(text);
+  const nameHits = findCatalogNameHits(text, catalogNames);
+  if (nameHits.length === 0) return [];
 
-  // Un segmento por cóctel: "5L Mojito y 15L Sangria" → dos pedidos independientes
-  const segments = text
-    .split(/\s*(?:,|;|\by\b)\s+/i)
-    .map((s) => s.trim())
-    .filter(Boolean);
+  // Litros explícitos + atajos "5 de aperol" / "5 aperol" (≥5)
+  const litHits = collectLitrageHits(normText, nameHits);
+  // Un solo litraje en el mensaje → aplica a todos ("Mojito y Sangría 10L")
+  const sharedLitrage = litHits.length === 1 ? `${litHits[0].liters}L` : null;
 
-  const parts = segments.length > 0 ? segments : [text];
+  const litrages = assignLitrageToNameHits(nameHits, litHits, sharedLitrage, defaultLitrage);
   const results = [];
-
-  for (const segment of parts) {
-    const names = matchCocktailNamesInText(segment, catalogNames);
-    if (!names.length) continue;
-
-    const litrageMatch = segment.match(/\b(\d+)\s*(?:l|lt|lts|litros?)\b/i);
-    // Conservamos litrajes no estándar (15L): validate/fixEvent los parte en barriles válidos
-    let litrage = defaultLitrage;
-    if (litrageMatch) {
-      litrage = `${litrageMatch[1]}L`;
-    } else if (sharedLitrage) {
-      litrage = sharedLitrage;
-    }
-
-    // Cantidad de barriles: "2x Mojito 10L" / "2 Mojito" — no confundir con el número de litros
-    let quantity = 1;
-    const qtyMatch = segment.match(/\b(\d+)\s*[x×]\b/i)
-      || segment.match(/\b(\d+)\s+(?:de\s+)?(?:barriles?\s+(?:de\s+)?)?/i)
-      || segment.match(/\b(\d+)\s*[x×]?\s*(?=[A-Za-záéíóúÁÉÍÓÚñÑ])/i);
-    if (qtyMatch) {
-      const n = parseInt(qtyMatch[1], 10);
-      if (litrageMatch && String(n) === litrageMatch[1] && !/[x×]/i.test(segment)) {
-        quantity = 1;
-      } else if (n >= 1 && n <= 20) {
-        quantity = n;
-      }
-    }
-
-    for (const name of names) {
-      results.push({ name, quantity, litrage });
-    }
+  const seen = new Set();
+  for (let i = 0; i < nameHits.length; i++) {
+    const hit = nameHits[i];
+    if (seen.has(hit.name)) continue;
+    seen.add(hit.name);
+    const litrage = litrages[i];
+    const quantity = quantityNearNameHit(normText, hit, litrage);
+    results.push({ name: hit.name, quantity, litrage });
   }
 
   return results;
@@ -647,19 +822,30 @@ export function ensureEventOrderBuilder(session, formatKey) {
 }
 
 /**
- * formatEventCartSummary: Lista el carrito con precios.
+ * formatEventCartSummary: Lista el carrito en litros (lo que entiende el cliente).
+ * Internamente el carrito sigue en barriles; acá agrupamos por cóctel:
+ * "20L Mojito (2×10L): $…" / "15L Aperol Spritz (10L + 5L): $…".
  *
- * @param {object} products
- * @param {string} formatKey
+ * @param {object} products - session.orderBuilder.products
+ * @param {string} formatKey - 'dispensador' | 'muro'
  * @returns {string}
  */
 export function formatEventCartSummary(products, formatKey) {
-  let reply = '';
-  for (const entry of Object.values(products)) {
-    const price = preciosData.cocteles[entry.name]?.[formatKey]?.[entry.litrage] || 0;
-    reply += `- ${entry.quantity}x ${entry.name} (${entry.litrage}): ${formatPrice(price * entry.quantity)}\n`;
-  }
-  return reply;
+  const lines = Object.values(products || {}).map((entry) => {
+    const unitPrice = preciosData.cocteles[entry.name]?.[formatKey]?.[entry.litrage] || 0;
+    return {
+      name: entry.name,
+      quantity: entry.quantity,
+      litrage: entry.litrage,
+      price: unitPrice,
+      lineTotal: unitPrice * (entry.quantity || 0)
+    };
+  });
+  return groupCocktailLinesByName(lines)
+    .map((g) => formatEventCocktailLitersLine(g, { prefix: '-' }))
+    .filter(Boolean)
+    .map((line) => `${line}\n`)
+    .join('');
 }
 
 /**

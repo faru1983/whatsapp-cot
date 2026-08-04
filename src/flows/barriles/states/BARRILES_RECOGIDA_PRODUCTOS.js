@@ -12,12 +12,18 @@ import {
   resolveDoubtsProgrammatically,
   interceptBotOptionsAnswer,
   isOnlyBrowsing,
-  wantsInstagramOrSocial
+  wantsInstagramOrSocial,
+  hasEventEliminationIntent,
+  isBareEventEliminationRequest,
+  detectFlavorListRequest,
+  asksCocktailFlavorList,
+  getProductFamilyBase,
+  getCatalogFamilyFlavorOptions
 } from '../../../logic/utils.js';
 import { wantsAdvanceProductsOrder, isOnlyAdvanceProductsOrder } from '../../../logic/interruptions.js';
 import { extractProductsWithAI } from '../../../core/llm.js';
 import { OrderBuilder } from '../../../logic/order-builder.js';
-import { getDoubtClarificationTemplate, getBrowseOnlyGoodbye } from '../../../views/templates.js';
+import { getDoubtClarificationTemplate, getBrowseOnlyGoodbye, getFlavorListReply } from '../../../views/templates.js';
 import { withAssistantFooter } from '../../../logic/flow-rails.js';
 import {
   asksDeliveryOrDispatchQuestion,
@@ -160,7 +166,50 @@ _(Si quieres cambiar, dime qué agregar o quitar)_ 🍸`
       };
     }
 
+    // Dijo "quitar" solo, sin nombrar el cóctel → preguntar qué, no asumir "no encontrado"
+    if (Object.keys(session.orderBuilder.products || {}).length > 0
+        && isBareEventEliminationRequest(messageText)) {
+      return {
+        success: true,
+        nextState: 'BARRILES_RECOGIDA_PRODUCTOS',
+        customReply: `Claro 😊 ¿Qué quieres *quitar* de tu pedido?
+
+${formatCartLines(session.orderBuilder.products)}
+
+Dime el cóctel (ej: *quita el mojito*).`
+      };
+    }
+
+    // "no quiero el aperol" / "sin mojito" pero no coincide con nada del carrito:
+    // nunca caer al flujo de agregar
+    if (
+      Object.keys(session.orderBuilder.products || {}).length > 0
+      && hasEventEliminationIntent(messageText)
+    ) {
+      return {
+        success: true,
+        nextState: 'BARRILES_RECOGIDA_PRODUCTOS',
+        customReply: `No encontré ese cóctel en tu pedido 😊
+
+Tu pedido actual:
+${formatCartLines(session.orderBuilder.products)}
+
+Dime qué quitar (ej: *quita el mojito*) o qué agregar.`
+      };
+    }
+
     const catalogNames = Object.keys(preciosData.cocteles || {});
+
+    // Pregunta de sabores → listar sin mutar carrito
+    const flavorAsk = detectFlavorListRequest(messageText, catalogNames);
+    if (flavorAsk) {
+      return {
+        success: true,
+        nextState: 'BARRILES_RECOGIDA_PRODUCTOS',
+        customReply: getFlavorListReply(flavorAsk.family, flavorAsk.opciones, { withLitersHint: false })
+      };
+    }
+
     let lastBotMessage = '';
     if (session.history?.turns?.length > 0) {
       const botTurns = session.history.turns.filter((t) => t.role === 'model');
@@ -196,13 +245,16 @@ _(Si quieres cambiar, dime qué agregar o quitar)_ 🍸`
     }
 
     if (dudas?.length > 0) {
-      const { resolved, remaining } = resolveDoubtsProgrammatically(dudas, lastBotMessage);
-      if (resolved.length > 0) {
-        for (const item of resolved) {
-          if (!extractedList.find((p) => p.name === item.name)) extractedList.push(item);
+      const isFlavorQuestion = asksCocktailFlavorList(messageText);
+      if (!isFlavorQuestion) {
+        const { resolved, remaining } = resolveDoubtsProgrammatically(dudas, lastBotMessage);
+        if (resolved.length > 0) {
+          for (const item of resolved) {
+            if (!extractedList.find((p) => p.name === item.name)) extractedList.push(item);
+          }
         }
+        dudas = remaining;
       }
-      dudas = remaining;
     }
 
     if (dudas?.length > 0) dudas = dudas.filter((d) => d?.opciones?.length > 1);
@@ -220,9 +272,23 @@ _(Si quieres cambiar, dime qué agregar o quitar)_ 🍸`
 
     if (dudas?.length > 0) {
       const duda = dudas[0];
-      if (Object.keys(parsedProducts).length > 0) {
+      const isFlavorQuestion = asksCocktailFlavorList(messageText);
+      if (!isFlavorQuestion && Object.keys(parsedProducts).length > 0) {
         for (const [pName, pQty] of Object.entries(parsedProducts)) {
           session.orderBuilder.products[pName] = (session.orderBuilder.products[pName] || 0) + pQty;
+        }
+      }
+      const familyFromOpts = (duda.opciones || [])
+        .map((n) => getProductFamilyBase(n))
+        .find(Boolean);
+      if (familyFromOpts) {
+        const opciones = getCatalogFamilyFlavorOptions(familyFromOpts, catalogNames);
+        if (opciones.length >= 2) {
+          return {
+            success: true,
+            nextState: 'BARRILES_RECOGIDA_PRODUCTOS',
+            customReply: getFlavorListReply(familyFromOpts, opciones, { withLitersHint: false })
+          };
         }
       }
       return {

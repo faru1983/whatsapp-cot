@@ -51,7 +51,7 @@ export const EVENTOS_CONFIRMAR_ENVIO = defineState({
         nextState: 'EVENTOS_ELECCION_MENU',
         customReply:
           `Claro, ajustemos el menú. Actualmente tienes:\n\n${cart || '_(vacío)_'}\n\n` +
-          `¿Qué deseas agregar o eliminar? (ej: "agrega Mojito 10L" o "quita el aperol")`
+          `¿Qué deseas cambiar?\n• Nuevo total en litros (ej: *"20L Mojito y 10L Aperol"*)\n• Quitar (ej: *"quita el aperol"*)\n• Agregar (ej: *"agrega 5L Sangría"*)`
       };
     }
 

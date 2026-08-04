@@ -4,15 +4,21 @@
 // el carrito cumple el mínimo de litros del formato elegido.
 // ==============================================================================
 import { defineState } from '../../../logic/compile-state.js';
-import { getDoubtClarificationTemplate } from '../../../views/templates.js';
+import { getDoubtClarificationTemplate, getFlavorListReply } from '../../../views/templates.js';
 import {
   hasDrinkSelection,
-  formatPrice,
   preciosData,
   resolveDoubtsProgrammatically,
   interceptBotOptionsAnswer,
   parseEventElimination,
-  isEventMenuCorrection
+  isEventMenuCorrection,
+  isBareEventEliminationRequest,
+  hasEventEliminationIntent,
+  hasExplicitEventAddIntent,
+  detectFlavorListRequest,
+  asksCocktailFlavorList,
+  getProductFamilyBase,
+  getCatalogFamilyFlavorOptions
 } from '../../../logic/utils.js';
 import { wantsAdvanceProductsOrder, isOnlyAdvanceProductsOrder, asksPriceOrCatalog } from '../../../logic/interruptions.js';
 import { extractEventProductsWithAI } from '../../../core/llm.js';
@@ -41,7 +47,7 @@ import { matchesMenuOption } from '../../../logic/keyword-intent.js';
 
 const ASK_COCKTAILS = ASK_EVENT_COCKTAILS;
 const ASK_OK_AFTER_CART = `Si está bien así, escribe *ok* para ver el resumen de tu cotización.
-_(Si quieres cambiar, dime qué agregar o quitar)_`;
+_(Si quieres cambiar, dime el nuevo total en litros —ej. "20L Mojito"— o *quita el aperol*)_`;
 
 const AI_PROMPT = `[SISTEMA - ESTADO: PREGUNTAS SOBRE EL MENÚ O LOGÍSTICA DE EVENTOS]
 El cliente está revisando la recomendación para su evento pero tiene dudas en lugar de elegir los cócteles.
@@ -61,32 +67,73 @@ function shortQuestionForSession(session) {
     && Object.keys(session.orderBuilder.products).length > 0;
   if (hasCart) {
     return withAssistantFooter(`Si está bien, escribe *ok* para el resumen.
-_(Si quieres cambiar, dime qué agregar o quitar.)_`);
+_(Si quieres cambiar, dime litros —ej. "10L Mojito"— o *quita el aperol*.)_`);
   }
   return withAssistantFooter(ASK_COCKTAILS);
 }
 
 /**
+ * askWhatToRemoveReply: El cliente dijo "quitar" sin decir qué.
+ * Listamos el pedido en litros y pedimos el cóctel concreto.
+ *
+ * @param {object} session
+ * @param {string} formatKey
+ * @returns {string}
+ */
+function askWhatToRemoveReply(session, formatKey) {
+  const cart = formatEventCartSummary(session.orderBuilder.products, formatKey) || '_Vacío_\n';
+  return `Claro 😊 ¿Qué quieres *quitar* de tu pedido?
+
+${cart}
+Dime el cóctel (ej: *quita el aperol* o *quita el mojito*).
+Si en realidad quieres *cambiar* la cantidad, escribe el nuevo total en litros (ej: *20L Mojito y 10L Aperol*).`;
+}
+
+/**
+ * namesAlreadyInCart: Nombres de cóctel que ya están en el carrito.
+ *
+ * @param {object} products - session.orderBuilder.products
+ * @returns {Set<string>}
+ */
+function namesAlreadyInCart(products) {
+  const names = new Set();
+  for (const entry of Object.values(products || {})) {
+    if (entry?.name) names.add(entry.name);
+  }
+  return names;
+}
+
+/**
  * applyProductsToCart: Suma productos al carrito, o reemplaza líneas del mismo
- * cóctel si el cliente está corrigiendo ("me equivoqué, son 10L no 10x").
+ * cóctel cuando el cliente corrige el total en litros ("20L Mojito" = dejar en 20L,
+ * no sumar otros 20L encima). Solo suma si dice "agrega"/"también" o el cóctel es nuevo.
  *
  * @param {object} session - Sesión del cliente
  * @param {Array<{name: string, quantity: number, litrage: string}>} products
- * @param {boolean} replaceSameName - true = borrar otras líneas de ese nombre primero
+ * @param {{ forceReplace?: boolean, messageText?: string }} [opts]
  */
-function applyProductsToCart(session, products, replaceSameName) {
-  if (replaceSameName) {
-    const namesToReplace = new Set(products.map((p) => p.name));
+function applyProductsToCart(session, products, opts = {}) {
+  const forceReplace = Boolean(opts.forceReplace);
+  const messageText = opts.messageText || '';
+  const explicitAdd = hasExplicitEventAddIntent(messageText);
+  const inCart = namesAlreadyInCart(session.orderBuilder.products);
+
+  // Por cada cóctel del mensaje: si ya estaba y no dijo "agrega", borramos sus líneas
+  // (el cliente habla en litros totales; nosotros rearmamos los barriles).
+  const namesInMessage = new Set(products.map((p) => p.name).filter(Boolean));
+  for (const name of namesInMessage) {
+    const shouldReplace = forceReplace || (!explicitAdd && inCart.has(name));
+    if (!shouldReplace) continue;
     for (const key of Object.keys(session.orderBuilder.products)) {
       const entry = session.orderBuilder.products[key];
-      if (entry?.name && namesToReplace.has(entry.name)) {
-        delete session.orderBuilder.products[key];
-      }
+      if (entry?.name === name) delete session.orderBuilder.products[key];
     }
   }
+
   for (const p of products) {
     const key = OrderBuilder.productLineKey(p.name, p.litrage);
-    const prev = replaceSameName ? null : session.orderBuilder.products[key];
+    const shouldReplace = forceReplace || (!explicitAdd && inCart.has(p.name));
+    const prev = shouldReplace ? null : session.orderBuilder.products[key];
     session.orderBuilder.products[key] = {
       name: p.name,
       litrage: p.litrage,
@@ -165,7 +212,7 @@ export const EVENTOS_ELECCION_MENU = defineState({
           `${pendingBarrels.quantity} barriles`, items, formatKey, allowedLitrages, pendingBarrels.litrage, catalogNames
         );
         if (parsedProducts.length > 0) {
-          applyProductsToCart(session, parsedProducts, false);
+          applyProductsToCart(session, parsedProducts, { messageText: `${pendingBarrels.quantity} barriles` });
           const { reply } = buildCartReply({
             session, formatKey, minLiters, header: `🍹 Listo, lo anoté así:`
           });
@@ -226,7 +273,7 @@ Si en la imagen viste otro valor, suele ser otro tamaño de barril o formato. ¿
       );
       if (parsedProducts.length > 0) {
         session.pendingEventCocktails = null;
-        applyProductsToCart(session, parsedProducts, false);
+        applyProductsToCart(session, parsedProducts, { messageText });
         const { reply } = buildCartReply({
           session, formatKey, minLiters, header: `🍹 Listo, anoté con *${litrageOnly}*:`
         });
@@ -253,14 +300,44 @@ Si en la imagen viste otro valor, suele ser otro tamaño de barril o formato. ¿
       };
     }
 
-    // Rama: eliminar productos ("quita el mojito 10L")
+    // Rama: eliminar productos ("quita el aperol") — NUNCA caer al flujo de agregar
+    if (cartHasItems && isBareEventEliminationRequest(messageText)) {
+      return {
+        success: true,
+        nextState: 'EVENTOS_ELECCION_MENU',
+        customReply: askWhatToRemoveReply(session, formatKey)
+      };
+    }
+
     const eliminationMatch = parseEventElimination(messageText, session.orderBuilder.products);
+    if (eliminationMatch?.notInCart) {
+      const cart = formatEventCartSummary(session.orderBuilder.products, formatKey) || '_Vacío_\n';
+      return {
+        success: true,
+        nextState: 'EVENTOS_ELECCION_MENU',
+        customReply: `No tienes *${eliminationMatch.requestedName}* en el pedido ahora 😊
+
+Tu pedido actual:
+${cart}
+Si quieres quitar algo, dime el cóctel (ej: *quita el mojito*).
+Para agregar, escribe el total en litros (ej: *5L Aperol*).`
+      };
+    }
+
     if (eliminationMatch) {
-      const { key, newQty, name, litrage } = eliminationMatch;
-      if (newQty > 0) {
-        session.orderBuilder.products[key].quantity = newQty;
-      } else {
-        delete session.orderBuilder.products[key];
+      const keys = Array.isArray(eliminationMatch.keys) && eliminationMatch.keys.length
+        ? eliminationMatch.keys
+        : [eliminationMatch.key];
+      const { newQty, name, litrage } = eliminationMatch;
+
+      for (const key of keys) {
+        if (!key || !session.orderBuilder.products[key]) continue;
+        // Solo bajamos cantidad en la primera línea si pidió "quita 1 …"
+        if (newQty > 0 && key === eliminationMatch.key) {
+          session.orderBuilder.products[key].quantity = newQty;
+        } else {
+          delete session.orderBuilder.products[key];
+        }
       }
 
       const orderBuilder = new OrderBuilder(formatKey, preciosData);
@@ -268,7 +345,9 @@ Si en la imagen viste otro valor, suele ser otro tamaño de barril o formato. ¿
       const quote = orderBuilder.calculateQuote();
       const totalLiters = orderBuilder.getTotalLiters();
 
-      let reply = `✅ Eliminado ${name} (${litrage}). Ahora tu pedido incluye:\n\n`;
+      let reply = `✅ Quité *${name}*`;
+      if (litrage && newQty <= 0) reply += ` (${litrage})`;
+      reply += `. Ahora tu pedido incluye:\n\n`;
       reply += formatEventCartSummary(session.orderBuilder.products, formatKey) || '_Vacío_\n';
       reply += `\n${formatEventCartTotalsLine(quote, { minLiters })}\n\n`;
       if (Object.keys(session.orderBuilder.products).length === 0) {
@@ -279,6 +358,25 @@ Si en la imagen viste otro valor, suele ser otro tamaño de barril o formato. ¿
         reply += `Aún faltan litros para el mínimo (*${minLiters}L*). ¿Qué más agregamos? 🍸`;
       }
       return { success: true, nextState: 'EVENTOS_ELECCION_MENU', customReply: reply };
+    }
+
+    // Dijo "quitar/elimina…" pero no resolvimos el cóctel → preguntar (no agregar)
+    if (cartHasItems && hasEventEliminationIntent(messageText)) {
+      return {
+        success: true,
+        nextState: 'EVENTOS_ELECCION_MENU',
+        customReply: askWhatToRemoveReply(session, formatKey)
+      };
+    }
+
+    // "qué mojito sabor tienes?" → listar variantes del catálogo sin tocar el carrito
+    const flavorAsk = detectFlavorListRequest(messageText, catalogNames);
+    if (flavorAsk) {
+      return {
+        success: true,
+        nextState: 'EVENTOS_ELECCION_MENU',
+        customReply: getFlavorListReply(flavorAsk.family, flavorAsk.opciones, { withLitersHint: true })
+      };
     }
 
     // "seguimos" puro con carrito: avanzar sin NLU (evita que la IA re-sume el pedido)
@@ -368,8 +466,10 @@ Dime sabor y litros (ej. *5L de mojito*), o escribe *lista* para ver precios.`
       return { success: true, nextState: 'EVENTOS_COTIZACION' };
     }
 
-    // Intentar resolver dudas sin preguntar (ej. "piscola alto" → una sola opción clara)
-    if (dudas?.length > 0) {
+    // Intentar resolver dudas sin preguntar (ej. "piscola alto" → una sola opción clara).
+    // Si el cliente *preguntó* por sabores, nunca auto-elegir ni mutar el carrito.
+    const isFlavorQuestion = asksCocktailFlavorList(messageText);
+    if (dudas?.length > 0 && !isFlavorQuestion) {
       const { resolved, remaining } = resolveDoubtsProgrammatically(dudas, lastBotMessage);
       if (resolved.length > 0) {
         for (const item of resolved) {
@@ -393,16 +493,42 @@ Dime sabor y litros (ej. *5L de mojito*), o escribe *lista* para ver precios.`
     );
 
     const isCorrection = isEventMenuCorrection(messageText);
+    const cartOpts = { forceReplace: isCorrection, messageText };
 
     if (dudas?.length > 0) {
-      applyProductsToCart(session, parsedProducts, isCorrection);
+      // Listar opciones: no aplicar productos parciales en una pregunta de sabores
+      if (!isFlavorQuestion && parsedProducts.length > 0) {
+        applyProductsToCart(session, parsedProducts, cartOpts);
+      }
       const duda = dudas[0];
-      return { success: true, nextState: 'EVENTOS_ELECCION_MENU', customReply: getDoubtClarificationTemplate(duda.mencionado, duda.opciones) };
+      const familyFromOpts = (duda.opciones || [])
+        .map((n) => getProductFamilyBase(n))
+        .find(Boolean);
+      if (familyFromOpts) {
+        const opciones = getCatalogFamilyFlavorOptions(familyFromOpts, catalogNames);
+        if (opciones.length >= 2) {
+          return {
+            success: true,
+            nextState: 'EVENTOS_ELECCION_MENU',
+            customReply: getFlavorListReply(familyFromOpts, opciones, { withLitersHint: true })
+          };
+        }
+      }
+      return {
+        success: true,
+        nextState: 'EVENTOS_ELECCION_MENU',
+        customReply: getDoubtClarificationTemplate(duda.mencionado, duda.opciones)
+      };
     }
 
     if (parsedProducts.length > 0) {
       session.pendingEventCocktails = null;
-      applyProductsToCart(session, parsedProducts, isCorrection);
+      const inCartBefore = namesAlreadyInCart(session.orderBuilder.products);
+      const replacing = isCorrection || (
+        !hasExplicitEventAddIntent(messageText)
+        && parsedProducts.some((p) => inCartBefore.has(p.name))
+      );
+      applyProductsToCart(session, parsedProducts, cartOpts);
 
       const cartBuilder = new OrderBuilder(formatKey, preciosData);
       cartBuilder.products = session.orderBuilder.products;
@@ -412,8 +538,8 @@ Dime sabor y litros (ej. *5L de mojito*), o escribe *lista* para ver precios.`
         return { success: true, nextState: 'EVENTOS_COTIZACION' };
       }
 
-      const header = isCorrection
-        ? `✅ Corregido. Tu pedido quedó así:`
+      const header = replacing
+        ? `✅ Listo, actualicé tu pedido:`
         : `🍹 Te confirmo los cócteles seleccionados:`;
       const { reply } = buildCartReply({
         session, formatKey, minLiters, header, invalidLitrages, allowedLitrages

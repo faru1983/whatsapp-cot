@@ -3,6 +3,7 @@
 // sin bloquear el bot.
 // ==============================================================================
 import { createContactViaApi, isCotApiConfigured } from './cot-api.js';
+import { isTestDebug } from '../core/debug-log.js';
 
 /** Nombres basura que no deben quedar como first_name en el CRM. */
 const PLACEHOLDER_NAMES = new Set(['whatsapp', 'whats app', 'cliente', 'cliente wa', 'lead']);
@@ -67,6 +68,8 @@ function buildContactApiPayload(session, { touchpointType, extraPayload = {}, se
 export async function syncCrmCurious(session) {
   if (!session || session.crmCuriousSynced) return;
   if (!isCotApiConfigured()) return;
+  // Simulador local: no crear contactos reales en el CRM (mismo teléfono fijo siempre)
+  if (isTestDebug()) return;
 
   const phone = session.clientPhoneE164;
   if (!phone) {
@@ -104,6 +107,7 @@ export async function syncCrmCurious(session) {
 export async function syncCrmEngaged(session, touchpointType = 'intent_selected', extraPayload = {}) {
   if (!session || session.crmEngagedSynced) return;
   if (!isCotApiConfigured()) return;
+  if (isTestDebug()) return;
 
   const phone = session.clientPhoneE164;
   if (!phone) {
@@ -145,6 +149,7 @@ export async function syncCrmEngaged(session, touchpointType = 'intent_selected'
 export async function syncCrmName(session) {
   if (!session || session.crmNameSynced) return;
   if (!isCotApiConfigured()) return;
+  if (isTestDebug()) return;
 
   const phone = session.clientPhoneE164;
   const firstName = contactFirstNameFromSession(session);

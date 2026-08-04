@@ -1,4 +1,10 @@
-import { formatPrice, preciosData } from '../logic/utils.js';
+import {
+  formatPrice,
+  preciosData,
+  groupCocktailLinesByName,
+  formatEventCocktailLitersLine,
+  formatBarrelPartsLabel
+} from '../logic/utils.js';
 import { formatMenuBlock, MENU_WRITE_CTA } from '../logic/flow-rails.js';
 
 // ==============================================================================
@@ -103,6 +109,29 @@ export function getDoubtClarificationTemplate(mencionado, opciones) {
 }
 
 /**
+ * getFlavorListReply: Lista sabores de una familia (Mojito, Piscola, …) sin mutar el carrito.
+ *
+ * @param {string} family - Ej. "Mojito"
+ * @param {string[]} opciones - Nombres exactos del catálogo
+ * @param {{ withLitersHint?: boolean }} [opts]
+ * @returns {string}
+ */
+export function getFlavorListReply(family, opciones, opts = {}) {
+  const withLiters = opts.withLitersHint !== false;
+  let text = `De *${family}* tenemos estos sabores:\n\n`;
+  for (const opcion of opciones || []) {
+    text += `- ${opcion}\n`;
+  }
+  if (withLiters) {
+    const example = (opciones && opciones[0]) || family;
+    text += `\nDime cuál quieres y los litros (ej: *10L ${example}*). 🍹`;
+  } else {
+    text += `\n*(Dime el nombre de la que quieres para poder agregarla)* 🍹`;
+  }
+  return text;
+}
+
+/**
  * getEventQuotationTemplate: Arma el mensaje de cotización final para eventos.
  * Usa el resultado de OrderBuilder.calculateQuote() con tipo dispensador/muro.
  * Devuelve dos bloques: la cotización completa, y la pregunta de confirmación.
@@ -125,13 +154,14 @@ export function getEventQuotationTemplate(sessionData, quote, deliveryCost, isRM
   text += `📍 *Ubicación:* ${location || 'Por confirmar'}\n`;
   text += `\n📋 *Tu Pedido:*\n`;
 
-  // Cada línea: cantidad x cóctel de litraje = subtotal
-  for (const detail of quote.details) {
-    if (detail.isExtra) {
-      text += `✨ ${detail.quantity}x ${detail.name}: ${formatPrice(detail.lineTotal)}\n`;
-    } else {
-      text += `🍹 ${detail.quantity}x ${detail.name} de ${detail.litrage}: ${formatPrice(detail.price)} x ${detail.quantity} = ${formatPrice(detail.lineTotal)}\n`;
-    }
+  // Pedido en litros (cliente); barriles solo como desglose entre paréntesis
+  const cocktailGroups = groupCocktailLinesByName(quote.details || []);
+  for (const group of cocktailGroups) {
+    text += `🍹 ${formatEventCocktailLitersLine(group, { prefix: '', showUnitMath: true })}\n`;
+  }
+  for (const detail of quote.details || []) {
+    if (!detail.isExtra) continue;
+    text += `✨ ${detail.quantity}x ${detail.name}: ${formatPrice(detail.lineTotal)}\n`;
   }
 
   // Resumen de litros y tragos (útil para comparar con invitados)
@@ -501,9 +531,19 @@ export function getEventosEnvioSummary(session) {
   );
 
   const products = session.orderBuilder?.products || {};
-  const productParts = Object.values(products).map(
-    (entry) => `${entry.quantity}x ${entry.name} ${entry.litrage}`
-  );
+  const productParts = groupCocktailLinesByName(
+    Object.values(products).map((entry) => ({
+      name: entry.name,
+      quantity: entry.quantity,
+      litrage: entry.litrage,
+      lineTotal: 0
+    }))
+  ).map((g) => {
+    const onlyOne = g.parts.length === 1 && g.parts[0].count === 1;
+    return onlyOne
+      ? `${g.totalLiters}L ${g.name}`
+      : `${g.totalLiters}L ${g.name} (${formatBarrelPartsLabel(g.parts)})`;
+  });
   if (productParts.length) {
     lines.push('', `🍹 ${productParts.join(', ')}`);
   }

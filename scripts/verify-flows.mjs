@@ -263,7 +263,7 @@ const {
 const catalogNames = Object.keys(datosPrecios.cocteles || {});
 
 // El resumen del carrito no es un menú: si lo fuera, cualquier respuesta sumaría ese mismo cóctel
-const cartBubble = '🍹 Te confirmo los cócteles seleccionados:\n\n- 1x Mojito (5L): $69.990\n';
+const cartBubble = '🍹 Te confirmo los cócteles seleccionados:\n\n- 5L Mojito: $69.990\n';
 assert(interceptBotOptionsAnswer('5 sangria', cartBubble) === null, `líneas de carrito no se interceptan como opciones`);
 const dudaBubble = '¿Cuál de estas opciones prefieres?\n- Piscola Alto\n- Piscola Mitad\n';
 assert(
@@ -308,6 +308,54 @@ assert(
 assert(
   multiLitros.some((p) => /Sangr/i.test(p.name) && p.litrage === '15L'),
   `Sangría conserva 15L propio (no hereda el 5L)`
+);
+const dotSepLitros = parseEventProductsProgrammatic(
+  '20 L mojito. 10 L aperol',
+  catalogNames,
+  dispLitrages,
+  '5L'
+);
+assert(
+  dotSepLitros.some((p) => p.name === 'Mojito' && p.litrage === '20L'),
+  `punto: Mojito 20L`
+);
+assert(
+  dotSepLitros.some((p) => /Aperol/i.test(p.name) && p.litrage === '10L'),
+  `punto: Aperol 10L (no hereda el 20L)`
+);
+const shorthandDe = parseEventProductsProgrammatic(
+  '15L de mojito y 5 de aperol',
+  catalogNames,
+  dispLitrages,
+  '5L'
+);
+assert(
+  shorthandDe.some((p) => p.name === 'Mojito' && p.litrage === '15L'),
+  `"5 de": Mojito 15L`
+);
+assert(
+  shorthandDe.some((p) => /Aperol/i.test(p.name) && p.litrage === '5L'),
+  `"5 de aperol" = 5L (no hereda el 15L del Mojito)`
+);
+const bareNumAperol = parseEventProductsProgrammatic(
+  '15L mojito y 5 aperol',
+  catalogNames,
+  dispLitrages,
+  '5L'
+);
+assert(
+  bareNumAperol.some((p) => /Aperol/i.test(p.name) && p.litrage === '5L'),
+  `"5 aperol" sin L = 5L`
+);
+const tenDeMojito = parseEventProductsProgrammatic(
+  '10 de mojito',
+  catalogNames,
+  dispLitrages,
+  '5L'
+);
+assert(
+  tenDeMojito.length === 1 && tenDeMojito[0].litrage === '10L',
+  `"10 de mojito" solo = 10L (no default 5L)`
 );
 const multiValidated = validateEventProductLines(
   '5L Mojito y 15L Sangria',
@@ -486,8 +534,8 @@ try {
       input: '1',
       expectState: 'EVENTOS_RECOGIDA_DATOS',
       expectMuted: false,
-      expectIncludes: ['asistente virtual', 'te guiaré', 'Servicio para Eventos', 'invitados'],
-      expectNotIncludes: ['¡Hola!']
+      expectIncludes: ['Servicio para Eventos', 'invitados'],
+      expectNotIncludes: ['¡Hola!', 'te guiaré', 'Soy el', 'asistente virtual']
     }
   ]);
 
@@ -502,7 +550,7 @@ try {
       expectState: 'EVENTOS_RECOGIDA_DATOS',
       expectMuted: false,
       expectIncludes: ['Servicio para Eventos', 'invitados'],
-      expectNotIncludes: ['te guiaré', 'Soy el']
+      expectNotIncludes: ['te guiaré', 'Soy el', 'asistente virtual']
     }
   ]);
 
@@ -511,8 +559,8 @@ try {
       input: '2️⃣',
       expectState: 'BARRILES_FILTRO_CANAL',
       expectMuted: false,
-      expectIncludes: ['asistente virtual', 'te guiaré', 'Barriles Desechables'],
-      expectNotIncludes: ['¡Hola!']
+      expectIncludes: ['Barriles Desechables'],
+      expectNotIncludes: ['¡Hola!', 'te guiaré', 'Soy el', 'asistente virtual']
     }
   ]);
 
@@ -527,7 +575,7 @@ try {
       expectState: 'BARRILES_FILTRO_CANAL',
       expectMuted: false,
       expectIncludes: ['Barriles Desechables', 'comuna'],
-      expectNotIncludes: ['te guiaré', 'Soy el']
+      expectNotIncludes: ['te guiaré', 'Soy el', 'asistente virtual']
     }
   ]);
 
@@ -566,8 +614,8 @@ try {
       input: '¡Hola! Quiero más información sobre el Servicio para Eventos',
       expectState: 'EVENTOS_RECOGIDA_DATOS',
       expectMuted: false,
-      expectIncludes: ['asistente virtual', 'te guiaré', 'Eventos', 'invitados'],
-      expectNotIncludes: ['¡Hola!']
+      expectIncludes: ['Eventos', 'invitados'],
+      expectNotIncludes: ['¡Hola!', 'te guiaré', 'Soy el', 'asistente virtual']
     }
   ]);
 
@@ -576,8 +624,8 @@ try {
       input: 'Hola, quiero más info sobre los barriles desechables',
       expectState: 'BARRILES_FILTRO_CANAL',
       expectMuted: false,
-      expectIncludes: ['asistente virtual', 'te guiaré', 'Barriles Desechables'],
-      expectNotIncludes: ['¡Hola!']
+      expectIncludes: ['Barriles Desechables'],
+      expectNotIncludes: ['¡Hola!', 'te guiaré', 'Soy el', 'asistente virtual']
     }
   ]);
 
@@ -614,7 +662,8 @@ try {
       input: 'barriles',
       expectState: 'BARRILES_FILTRO_CANAL',
       expectMuted: false,
-      expectIncludes: ['asistente virtual', 'te guiaré', 'Barriles Desechables']
+      expectIncludes: ['Barriles Desechables'],
+      expectNotIncludes: ['te guiaré', 'Soy el', 'asistente virtual']
     }
   ]);
 
@@ -821,7 +870,8 @@ try {
       input: 'evento',
       expectState: 'EVENTOS_RECOGIDA_DATOS',
       expectMuted: false,
-      expectIncludes: ['asistente virtual', 'te guiaré', 'Eventos']
+      expectIncludes: ['Eventos'],
+      expectNotIncludes: ['te guiaré', 'Soy el', 'asistente virtual']
     }
   ]);
 
@@ -1065,13 +1115,230 @@ try {
     const st = statesMap.EVENTOS_ELECCION_MENU;
     const r1 = await st.validateAndProcess('5L Mojito y 15L Sangria', session);
     const t1 = typeof r1.customReply === 'string' ? r1.customReply : '';
-    assert(t1.includes('1x Mojito (5L)'), `Mojito queda en 5L`);
+    assert(/5L Mojito/.test(t1), `Mojito queda en 5L (formato litros)`);
     assert(t1.includes('Sangría') || t1.includes('Sangria'), `incluye Sangría`);
-    assert(t1.includes('(10L)') && t1.includes('(5L)'), `15L Sangría se parte en 10L+5L`);
-    assert(!/2x Mojito \(5L\)/.test(t1), `no duplica Mojito al 5L de Sangría`);
+    assert(/15L Sangr[ií]a \(10L \+ 5L\)/.test(t1), `15L Sangría se muestra como 10L+5L`);
+    assert(!/10L Mojito/.test(t1), `no duplica Mojito al partir la Sangría`);
     const totalMatch = t1.match(/\*Litros:\*\s*(\d+)L/i);
     assert(totalMatch && Number(totalMatch[1]) === 20, `total 5+15 = 20L`);
     assert(/≈\s*\*100\*\s*cócteles/i.test(t1), `20L muestra ≈ 100 cócteles`);
+  }
+
+  console.log('\n-- Eventos: "Quitar" solo pide qué eliminar (no avanza) --');
+  resetSession(SESSION_ID);
+  {
+    const session = getSession(SESSION_ID);
+    session.currentState = 'EVENTOS_ELECCION_MENU';
+    session.userIntent = 'EVENTOS';
+    session.eventoFormato = 'Dispensador Portátil';
+    session.guests = 60;
+    session.orderBuilder = {
+      type: 'dispensador',
+      products: {
+        'Mojito::10L': { name: 'Mojito', quantity: 2, litrage: '10L' },
+        'Aperol Spritz::10L': { name: 'Aperol Spritz', quantity: 2, litrage: '10L' }
+      },
+      extras: {}
+    };
+
+    const st = statesMap.EVENTOS_ELECCION_MENU;
+    const r1 = await st.validateAndProcess('Quitar', session);
+    const t1 = typeof r1.customReply === 'string' ? r1.customReply : '';
+    assert(r1.nextState === 'EVENTOS_ELECCION_MENU', `Quitar solo no avanza a cotización`);
+    assert(/qu[eé] quieres \*quitar\*/i.test(t1), `pregunta qué quitar`);
+    assert(/20L Mojito \(2×10L\)/.test(t1), `lista pedido en litros al pedir qué quitar`);
+    assert(Object.keys(session.orderBuilder.products).length === 2, `Quitar solo no borra el carrito`);
+  }
+
+  console.log('\n-- Eventos: "quita el aperol" elimina (no agrega) --');
+  resetSession(SESSION_ID);
+  {
+    const session = getSession(SESSION_ID);
+    session.currentState = 'EVENTOS_ELECCION_MENU';
+    session.userIntent = 'EVENTOS';
+    session.eventoFormato = 'Dispensador Portátil';
+    session.guests = 60;
+    session.orderBuilder = {
+      type: 'dispensador',
+      products: {
+        'Mojito::10L': { name: 'Mojito', quantity: 1, litrage: '10L' },
+        'Aperol Spritz::5L': { name: 'Aperol Spritz', quantity: 1, litrage: '5L' },
+        'Aperol Spritz::10L': { name: 'Aperol Spritz', quantity: 1, litrage: '10L' }
+      },
+      extras: {}
+    };
+
+    const st = statesMap.EVENTOS_ELECCION_MENU;
+    const r1 = await st.validateAndProcess('quita el aperol', session);
+    const t1 = typeof r1.customReply === 'string' ? r1.customReply : '';
+    assert(/Quit[eé].*Aperol/i.test(t1), `confirma que quitó Aperol`);
+    assert(/10L Mojito/.test(t1), `conserva Mojito`);
+    assert(!/Aperol Spritz/.test(t1) || /Quit[eé]/i.test(t1), `Aperol fuera del listado de pedido`);
+    assert(!session.orderBuilder.products['Aperol Spritz::5L'], `borra Aperol 5L`);
+    assert(!session.orderBuilder.products['Aperol Spritz::10L'], `borra Aperol 10L`);
+    assert(session.orderBuilder.products['Mojito::10L'], `Mojito sigue`);
+
+    // Misma frase sin Aperol en carrito → avisar, NO agregar
+    const r2 = await st.validateAndProcess('quita el aperol', session);
+    const t2 = typeof r2.customReply === 'string' ? r2.customReply : '';
+    assert(/No tienes/i.test(t2), `si no está, avisa en vez de sumar`);
+    assert(!session.orderBuilder.products['Aperol Spritz::5L'], `no re-agrega Aperol`);
+    assert(!/Te confirmo los cócteles/i.test(t2), `no usa copy de agregado`);
+  }
+
+  console.log('\n-- Eventos: rechazo natural "no quiero / sin" elimina --');
+  resetSession(SESSION_ID);
+  {
+    const session = getSession(SESSION_ID);
+    session.currentState = 'EVENTOS_ELECCION_MENU';
+    session.userIntent = 'EVENTOS';
+    session.eventoFormato = 'Dispensador Portátil';
+    session.guests = 60;
+    session.orderBuilder = {
+      type: 'dispensador',
+      products: {
+        'Caipiriña::10L': { name: 'Caipiriña', quantity: 2, litrage: '10L' },
+        'Caipiriña::5L': { name: 'Caipiriña', quantity: 1, litrage: '5L' }
+      },
+      extras: {}
+    };
+
+    const st = statesMap.EVENTOS_ELECCION_MENU;
+    const r1 = await st.validateAndProcess('no quiero la caipiriña', session);
+    const t1 = typeof r1.customReply === 'string' ? r1.customReply : '';
+    assert(/Quit[eé].*Caipiri/i.test(t1), `"no quiero la caipiriña" confirma quitar`);
+    assert(!session.orderBuilder.products['Caipiriña::10L'], `borra Caipiriña 10L`);
+    assert(!session.orderBuilder.products['Caipiriña::5L'], `borra Caipiriña 5L (no deja 5L)`);
+    assert(!/5L Caipiri/i.test(t1) || /Quit[eé]/i.test(t1), `no deja 5L como "actualización"`);
+    assert(Object.keys(session.orderBuilder.products).length === 0, `carrito vacío tras rechazo`);
+
+    // Variantes hermanas
+    session.orderBuilder.products = {
+      'Mojito::10L': { name: 'Mojito', quantity: 1, litrage: '10L' },
+      'Aperol Spritz::10L': { name: 'Aperol Spritz', quantity: 1, litrage: '10L' }
+    };
+    const r2 = await st.validateAndProcess('sin el aperol', session);
+    assert(!session.orderBuilder.products['Aperol Spritz::10L'], `"sin el aperol" elimina`);
+    assert(session.orderBuilder.products['Mojito::10L'], `conserva Mojito`);
+
+    session.orderBuilder.products = {
+      'Sangría::10L': { name: 'Sangría', quantity: 1, litrage: '10L' }
+    };
+    const r3 = await st.validateAndProcess('no me gusta la sangria', session);
+    assert(!session.orderBuilder.products['Sangría::10L'], `"no me gusta la sangria" elimina`);
+  }
+
+  console.log('\n-- Eventos: pregunta sabores lista sin mutar carrito --');
+  resetSession(SESSION_ID);
+  {
+    const session = getSession(SESSION_ID);
+    session.currentState = 'EVENTOS_ELECCION_MENU';
+    session.userIntent = 'EVENTOS';
+    session.eventoFormato = 'Dispensador Portátil';
+    session.guests = 60;
+    session.orderBuilder = {
+      type: 'dispensador',
+      products: {
+        'Mojito Frambuesa::10L': { name: 'Mojito Frambuesa', quantity: 2, litrage: '10L' },
+        'Mojito Frambuesa::5L': { name: 'Mojito Frambuesa', quantity: 1, litrage: '5L' },
+        'Sangría::10L': { name: 'Sangría', quantity: 1, litrage: '10L' },
+        'Sangría::5L': { name: 'Sangría', quantity: 1, litrage: '5L' }
+      },
+      extras: {}
+    };
+    // Historial tipo carrito: no debe auto-resolver "Mojito Frambuesa"
+    session.history = {
+      turns: [{
+        role: 'model',
+        text: `🍹 Te confirmo los cócteles seleccionados:\n\n- 25L Mojito Frambuesa (2×10L + 5L): $314.970\n- 15L Sangría (10L + 5L): $179.980\n`
+      }]
+    };
+
+    const st = statesMap.EVENTOS_ELECCION_MENU;
+    const beforeKeys = Object.keys(session.orderBuilder.products).sort().join('|');
+    const r1 = await st.validateAndProcess('que mojito sabor tienes?', session);
+    const t1 = typeof r1.customReply === 'string' ? r1.customReply : '';
+    assert(/Mojito Maracuy/i.test(t1) && /Frambuesa/i.test(t1) && /Mango/i.test(t1), `lista sabores de Mojito`);
+    assert(/10L/i.test(t1), `invita a elegir con litros`);
+    assert(!/actualic[eé] tu pedido|Te confirmo los cócteles/i.test(t1), `no muta/confirma carrito`);
+    const afterKeys = Object.keys(session.orderBuilder.products).sort().join('|');
+    assert(beforeKeys === afterKeys, `carrito intacto tras pregunta de sabores`);
+    assert(session.orderBuilder.products['Mojito Frambuesa::10L']?.quantity === 2, `conserva 25L Frambuesa`);
+  }
+
+  console.log('\n-- Eventos: "saca X" no confunde familia (Mojito vs Mojito Frambuesa) --');
+  resetSession(SESSION_ID);
+  {
+    const session = getSession(SESSION_ID);
+    session.currentState = 'EVENTOS_ELECCION_MENU';
+    session.userIntent = 'EVENTOS';
+    session.eventoFormato = 'Dispensador Portátil';
+    session.guests = 60;
+    session.orderBuilder = {
+      type: 'dispensador',
+      products: {
+        'Mojito::10L': { name: 'Mojito', quantity: 2, litrage: '10L' },
+        'Mojito::5L': { name: 'Mojito', quantity: 1, litrage: '5L' },
+        'Mojito Frambuesa::10L': { name: 'Mojito Frambuesa', quantity: 1, litrage: '10L' },
+        'Mojito Frambuesa::5L': { name: 'Mojito Frambuesa', quantity: 1, litrage: '5L' }
+      },
+      extras: {}
+    };
+
+    const st = statesMap.EVENTOS_ELECCION_MENU;
+    const r1 = await st.validateAndProcess('saca el mojito frambuesa', session);
+    const t1 = typeof r1.customReply === 'string' ? r1.customReply : '';
+    assert(/Quit[eé].*Mojito Frambuesa/i.test(t1), `"saca el mojito frambuesa" confirma quitar la variante`);
+    assert(!session.orderBuilder.products['Mojito Frambuesa::10L'], `borra Mojito Frambuesa 10L`);
+    assert(!session.orderBuilder.products['Mojito Frambuesa::5L'], `borra Mojito Frambuesa 5L`);
+    assert(session.orderBuilder.products['Mojito::10L'], `NO toca el Mojito base (10L)`);
+    assert(session.orderBuilder.products['Mojito::5L'], `NO toca el Mojito base (5L)`);
+    const remainingCartBlock = t1.split('Ahora tu pedido incluye:')[1] || '';
+    assert(!/Frambuesa/i.test(remainingCartBlock), `el pedido restante ya no incluye Frambuesa`);
+
+    // Caso inverso: pedir el base no debe tocar la variante
+    session.orderBuilder.products = {
+      'Mojito::10L': { name: 'Mojito', quantity: 2, litrage: '10L' },
+      'Mojito Frambuesa::10L': { name: 'Mojito Frambuesa', quantity: 1, litrage: '10L' }
+    };
+    const r2 = await st.validateAndProcess('saca el mojito', session);
+    const t2 = typeof r2.customReply === 'string' ? r2.customReply : '';
+    assert(!session.orderBuilder.products['Mojito::10L'], `"saca el mojito" borra el Mojito base`);
+    assert(session.orderBuilder.products['Mojito Frambuesa::10L'], `"saca el mojito" NO toca Mojito Frambuesa`);
+    assert(/10L Mojito Frambuesa/i.test(t2), `Frambuesa sigue en el resumen`);
+  }
+
+  console.log('\n-- Eventos: re-pedir litros reemplaza (no suma) --');
+  resetSession(SESSION_ID);
+  {
+    const session = getSession(SESSION_ID);
+    session.currentState = 'EVENTOS_ELECCION_MENU';
+    session.userIntent = 'EVENTOS';
+    session.eventoFormato = 'Dispensador Portátil';
+    session.guests = 60;
+    session.orderBuilder = {
+      type: 'dispensador',
+      products: {
+        'Mojito::10L': { name: 'Mojito', quantity: 2, litrage: '10L' },
+        'Aperol Spritz::10L': { name: 'Aperol Spritz', quantity: 2, litrage: '10L' }
+      },
+      extras: {}
+    };
+
+    const st = statesMap.EVENTOS_ELECCION_MENU;
+    const r1 = await st.validateAndProcess('20 L mojito. 10 L aperol', session);
+    const t1 = typeof r1.customReply === 'string' ? r1.customReply : '';
+    assert(/20L Mojito \(2×10L\)/.test(t1), `deja Mojito en 20L (no 40L)`);
+    assert(/10L Aperol/.test(t1), `deja Aperol en 10L (no 30L)`);
+    assert(!/40L Mojito/.test(t1) && !/30L Aperol/.test(t1), `no suma encima del carrito`);
+    const liters = t1.match(/\*Litros:\*\s*(\d+)L/i);
+    assert(liters && Number(liters[1]) === 30, `total tras reemplazo = 30L`);
+
+    // Agregar explícito sí suma
+    const r2 = await st.validateAndProcess('agrega 5L sangria', session);
+    const t2 = typeof r2.customReply === 'string' ? r2.customReply : '';
+    assert(/5L Sangr[ií]a/.test(t2), `agrega Sangría nueva`);
+    assert(/20L Mojito/.test(t2), `conserva Mojito al agregar otro`);
   }
 
   console.log('\n-- Eventos: número suelto tras el carrito no repite el cóctel anterior --');
@@ -1087,14 +1354,15 @@ try {
     const st = statesMap.EVENTOS_ELECCION_MENU;
     const r1 = await st.validateAndProcess('mojito 5L', session);
     const t1 = typeof r1.customReply === 'string' ? r1.customReply : '';
-    assert(t1.includes('1x Mojito (5L)'), `mojito 5L entra como un barril de 5L`);
+    assert(/5L Mojito/.test(t1), `mojito 5L entra como 5 litros`);
 
     // El último mensaje del bot lista el carrito; eso no debe leerse como menú de opciones
     session.history = { turns: [{ role: 'model', text: t1 }] };
     const r2 = await st.validateAndProcess('5 sangria', session);
     const t2 = typeof r2.customReply === 'string' ? r2.customReply : '';
-    assert(t2.includes('1x Sangría (5L)'), `5 sangria agrega Sangría como 5 litros`);
-    assert(!t2.includes('2x Mojito'), `5 sangria no vuelve a sumar el Mojito del carrito`);
+    assert(/5L Sangr[ií]a/.test(t2), `5 sangria agrega Sangría como 5 litros`);
+    assert(/5L Mojito/.test(t2), `conserva el Mojito`);
+    assert(!/10L Mojito/.test(t2), `5 sangria no vuelve a sumar el Mojito del carrito`);
   }
 
   console.log('\n-- Eventos: "2 mojito" pregunta si son barriles --');
@@ -1115,7 +1383,7 @@ try {
     // 1️⃣ = sí, son barriles del tamaño por defecto
     const r2 = await st.validateAndProcess('1', session);
     const t2 = typeof r2.customReply === 'string' ? r2.customReply : '';
-    assert(t2.includes('2x Mojito (5L)'), `opción 1 anota 2 barriles de 5L`);
+    assert(/10L Mojito \(2×5L\)/.test(t2), `opción 1 anota 2 barriles de 5L (=10L)`);
 
     // 2️⃣ = prefiere indicar el tamaño, y luego lo responde
     await st.validateAndProcess('3 sangria', session);
@@ -1124,7 +1392,7 @@ try {
     assert(/tama[nñ]o de barril/i.test(t3), `opción 2 pide el tamaño`);
     const r4 = await st.validateAndProcess('10L', session);
     const t4 = typeof r4.customReply === 'string' ? r4.customReply : '';
-    assert(t4.includes('1x Sangría (10L)'), `tras elegir tamaño, agrega Sangría 10L`);
+    assert(/10L Sangr[ií]a/.test(t4), `tras elegir tamaño, agrega Sangría 10L`);
   }
 
   console.log('\n-- Eventos bot ajeno no extrae comuna falsa --');
