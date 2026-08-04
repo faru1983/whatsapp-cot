@@ -592,8 +592,10 @@ async function startBot() {
       }
 
       const clientPhoneE164 = await resolveClientPhoneE164({ message, sock, sessionId });
-      if (clientPhoneE164) {
-        session.clientPhoneE164 = clientPhoneE164;
+      const pushName = String(message.pushName || '').trim();
+      if (clientPhoneE164) session.clientPhoneE164 = clientPhoneE164;
+      if (pushName) session.clientPushName = pushName;
+      if (clientPhoneE164 || pushName) {
         saveSession(sessionId, session);
       }
 
@@ -630,6 +632,7 @@ async function startBot() {
         const reply = await processMessage(sessionId, cleanText, {
           sendAdminAlert,
           clientPhoneE164: clientPhoneE164 || session.clientPhoneE164 || undefined,
+          pushName: pushName || session.clientPushName || undefined,
         });
 
         if (!reply) {

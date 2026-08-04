@@ -323,6 +323,9 @@ async function processMessageUnlocked(sessionId, messageText, options = {}) {
     jidToE164(sessionId);
   if (phone) session.clientPhoneE164 = phone;
 
+  const pushName = String(options.pushName || '').trim();
+  if (pushName) session.clientPushName = pushName;
+
   // CRM: registrar curioso en el primer mensaje con teléfono resuelto (cualquier estado)
   if (phone && !session.crmCuriousSynced) {
     syncCrmCuriousAsync(session);

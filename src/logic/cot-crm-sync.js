@@ -4,6 +4,38 @@
 import { createContactViaApi, isCotApiConfigured } from './cot-api.js';
 
 /**
+ * contactFirstNameFromSession: Nombre de perfil WA (pushName) si existe.
+ *
+ * @param {object} session
+ * @returns {string|undefined}
+ */
+function contactFirstNameFromSession(session) {
+  const name = String(session?.clientPushName || '').trim();
+  return name.length >= 1 ? name : undefined;
+}
+
+/**
+ * buildContactApiPayload: Body común para POST /api/v1/contacts.
+ *
+ * @param {object} session
+ * @param {{ touchpointType: string, extraPayload?: object }} opts
+ */
+function buildContactApiPayload(session, { touchpointType, extraPayload = {} }) {
+  const firstName = contactFirstNameFromSession(session);
+  return {
+    phone: session.clientPhoneE164,
+    touchpointType,
+    sendCapiLead: true,
+    ...(firstName ? { firstName } : {}),
+    payload: {
+      sessionId: session.sessionId || null,
+      pushName: firstName || null,
+      ...extraPayload,
+    },
+  };
+}
+
+/**
  * syncCrmCurious: Primer contacto WA → stage curious + Lead CAPI (si aplica).
  * Idempotente a nivel session (crmCuriousSynced).
  *
@@ -22,12 +54,9 @@ export async function syncCrmCurious(session) {
 
   session.crmCuriousSynced = true;
   try {
-    const res = await createContactViaApi({
-      phone,
-      touchpointType: 'bot_started',
-      sendCapiLead: true,
-      payload: { sessionId: session.sessionId || null }
-    });
+    const res = await createContactViaApi(
+      buildContactApiPayload(session, { touchpointType: 'bot_started' })
+    );
     if (res.success && res.clientId) {
       session.crmClientId = res.clientId;
     } else if (!res.success) {
@@ -55,22 +84,21 @@ export async function syncCrmEngaged(session, touchpointType = 'intent_selected'
 
   const phone = session.clientPhoneE164;
   if (!phone) {
-    console.warn('CRM curious sync omitido: sin teléfono E.164 en sesión', session.sessionId || '');
+    console.warn('CRM engaged sync omitido: sin teléfono E.164 en sesión', session.sessionId || '');
     return;
   }
 
   session.crmEngagedSynced = true;
   try {
-    const res = await createContactViaApi({
-      phone,
-      touchpointType,
-      sendCapiLead: true,
-      payload: {
-        sessionId: session.sessionId || null,
-        userIntent: session.userIntent || null,
-        ...extraPayload
-      }
-    });
+    const res = await createContactViaApi(
+      buildContactApiPayload(session, {
+        touchpointType,
+        extraPayload: {
+          userIntent: session.userIntent || null,
+          ...extraPayload,
+        },
+      })
+    );
     if (res.success && res.clientId) {
       session.crmClientId = res.clientId;
     } else if (!res.success) {
