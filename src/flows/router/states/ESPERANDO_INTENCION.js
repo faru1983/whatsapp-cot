@@ -1,6 +1,8 @@
 // ==============================================================================
 // OBJETIVO: Paso ESPERANDO_INTENCION — router determinístico de entrada.
 // Solo abre Eventos o Barriles con reglas claras; un segundo miss hace SOS silencioso.
+// CRM: Curioso en welcome; Engaged lo dispara el engine al cambiar de estado
+// (menú ya mostrado → elección, o avance dentro de Eventos/Barriles).
 // ==============================================================================
 import { defineState } from '../../../logic/compile-state.js';
 import { matchKeywordIntent, rulesRouterIntencion } from '../../../logic/keyword-intent.js';
@@ -10,7 +12,7 @@ import {
   formatMenuBlock,
   MENU_WRITE_CONTINUE_CTA
 } from '../../../logic/flow-rails.js';
-import { syncCrmCuriousAsync, syncCrmEngagedAsync } from '../../../logic/cot-crm-sync.js';
+import { syncCrmCuriousAsync } from '../../../logic/cot-crm-sync.js';
 
 /** Menú principal (1️⃣ Eventos / 2️⃣ Barriles / 3️⃣ Humano). */
 const MENU_BLOCK = formatMenuBlock([
@@ -87,19 +89,16 @@ export const ESPERANDO_INTENCION = defineState({
     const choice = matchKeywordIntent(messageText, rulesRouterIntencion());
 
     if (choice === 'HUMANO') {
-      syncCrmEngagedAsync(session, 'intent_selected', { choice: 'HUMANO' });
       return handoffHumanoResult();
     }
 
     if (choice === 'BARRILES') {
       session.userIntent = 'BARRILES';
-      syncCrmEngagedAsync(session, 'intent_selected', { choice: 'BARRILES' });
       return { success: true, nextState: 'BARRILES_FILTRO_CANAL' };
     }
 
     if (choice === 'EVENTOS') {
       session.userIntent = 'EVENTOS';
-      syncCrmEngagedAsync(session, 'intent_selected', { choice: 'EVENTOS' });
       return { success: true, nextState: 'EVENTOS_RECOGIDA_DATOS' };
     }
 
@@ -111,6 +110,7 @@ export const ESPERANDO_INTENCION = defineState({
 
     // Primer mensaje no reconocido: menú de bienvenida (ya presenta al asistente).
     // Eventos/Barriles usarán un copy más directo si assistantIntroduced=true.
+    // CRM Curioso: lo cubre el engine en el primer mensaje; refuerzo aquí por claridad.
     session.routerMenuShown = true;
     session.assistantIntroduced = true;
     syncCrmCuriousAsync(session);

@@ -35,7 +35,7 @@ import {
 } from '../logic/flow-rails.js';
 import { clearNudgeFlag } from '../logic/inactivity-nudge.js';
 import { jidToE164 } from '../logic/cot-event-quote.js';
-import { syncCrmCuriousAsync } from '../logic/cot-crm-sync.js';
+import { syncCrmCuriousAsync, syncCrmNameAsync, notifyCrmOnBotStateChange } from '../logic/cot-crm-sync.js';
 
 const isMainModule = process.argv[1] === fileURLToPath(import.meta.url);
 
@@ -326,9 +326,12 @@ async function processMessageUnlocked(sessionId, messageText, options = {}) {
   const pushName = String(options.pushName || '').trim();
   if (pushName) session.clientPushName = pushName;
 
-  // CRM: registrar curioso en el primer mensaje con teléfono resuelto (cualquier estado)
+  // CRM Curioso: primer mensaje con teléfono (cualquier estado / CTWA Meta)
   if (phone && !session.crmCuriousSynced) {
     syncCrmCuriousAsync(session);
+  } else if (phone && pushName && !session.crmNameSynced) {
+    // Baileys a veces omite pushName al inicio; cuando aparece, actualiza el CRM
+    syncCrmNameAsync(session);
   }
 
   // ==============================================================================
@@ -641,7 +644,9 @@ async function processMessageUnlocked(sessionId, messageText, options = {}) {
     }
     
     if (processResult.nextState && processResult.nextState !== currentStateId) {
+       const previousState = currentStateId;
        session.currentState = processResult.nextState;
+       notifyCrmOnBotStateChange(session, previousState, processResult.nextState);
     }
     
     if (processResult.mute) {
