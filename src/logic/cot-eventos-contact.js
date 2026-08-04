@@ -200,7 +200,7 @@ export function legacyCloseEventosWithoutApi(session) {
   const alert = {
     type: 'SUCCESS',
     title: 'EVENTOS',
-    labelKey: 'cotizacionEventos',
+    labelKey: 'nuevoPedido',
     body: buildAdminEventosOrderBody({
       eventoFormato: session.eventoFormato,
       celebrationType: session.celebrationType,
@@ -288,7 +288,7 @@ export async function submitEventosQuoteConfirmed(session) {
     notifyAdmin: {
       type: 'SUCCESS',
       title: 'EVENTOS (WEB)',
-      labelKey: 'cotizacionEventos',
+      labelKey: 'nuevoPedido',
       body: result.adminBody
     },
     customReply: result.closingReply

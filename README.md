@@ -237,15 +237,18 @@ Si escribes el comando sin número, el bot te responde con el formato correcto. 
 
 **Mensajes temporales:** si el cliente los tiene activos, el bot igual puede leer el texto (los desempaqueta). A veces WhatsApp los desactiva al responder; eso es normal y no debe silenciar el bot.
 
-**Etiquetas WhatsApp Business:** el bot etiqueta el chat del cliente al avisar a los admins. Config en `.env` (`LABEL_*`):
+**Etiquetas WhatsApp Business:** el bot etiqueta el chat del cliente en engaged / cierre / SOS. Config en `.env` (`LABEL_*`):
 
-| Uso | Nombre (default) | ID | Marcar no leído |
-|---|---|---|---|
-| SOS / asistencia | `Asistencia` | `99` | `true` |
-| Cierre cotización barriles | `Cotizacion Barriles` | `98` | `false` |
-| Cierre cotización eventos | `Cotizacion Eventos` | `97` | `false` |
+| Uso | Nombre (default) | ID | ensure (crear) | Marcar no leído |
+|---|---|---|---|---|
+| Engaged (CRM) | `Cliente potencial` | `4` | `false` (default WA) | `false` |
+| Cotización / venta | `Nuevo pedido` | `6` | `false` (default WA) | `false` |
+| SOS / asistencia | `Asistencia` | `99` | `true` | `true` |
+| (opcional) Cierre barriles | `Cotizacion Barriles` | `98` | `true` | `false` |
+| (opcional) Cierre eventos | `Cotizacion Eventos` | `97` | `true` | `false` |
 
-El bot crea/asegura la etiqueta con ese ID (las del celular a menudo no sincronizan a Baileys) y la aplica al chat (prioriza `@lid`).
+- **ensure=false** (Cliente potencial / Nuevo pedido): solo `addChatLabel` con el ID descubierto (`scripts/try-chat-label.mjs --watch`). **No** usar `addLabel` o se pisan las default de WhatsApp.
+- **ensure=true** (Asistencia, etc.): el bot crea/asegura la etiqueta (las del celular a menudo no sincronizan a Baileys) y la aplica al chat (prioriza `@lid`).
 
 > Nota: a veces la etiqueta se ve primero en WhatsApp Web / dispositivo vinculado y tarda o no aparece en el celular principal (limitación conocida de sync de etiquetas en Baileys).
 

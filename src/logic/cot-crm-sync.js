@@ -210,36 +210,52 @@ const FLOW_ENTRY_STATES = new Set([
  * @param {object} session
  * @param {string} fromState
  * @param {string} toState
+ * @returns {boolean} true si este turno debe etiquetar "Cliente potencial" (una vez)
  */
 export function notifyCrmOnBotStateChange(session, fromState, toState) {
-  if (!session || !toState || fromState === toState) return;
-  if (session.crmEngagedSynced) return;
+  if (!session || !toState || fromState === toState) return false;
 
   const from = String(fromState || '');
   const to = String(toState || '');
 
+  let shouldEngage = false;
+  let engageMeta = null;
+
   // A) Avanzó dentro de Eventos / Barriles (salió del intro del flujo)
   if (FLOW_ENTRY_STATES.has(from) && to !== from) {
-    syncCrmEngagedAsync(session, 'intent_selected', {
+    shouldEngage = true;
+    engageMeta = {
       choice: session.userIntent || to,
       fromState: from,
       toState: to,
       trigger: 'flow_entry_exit',
-    });
-    return;
+    };
   }
 
   // B) Eligió en el menú de bienvenida (ya hubo mensaje del bot)
   if (
-    from === 'ESPERANDO_INTENCION' &&
-    to !== 'ESPERANDO_INTENCION' &&
-    session.routerMenuShown
+    !shouldEngage
+    && from === 'ESPERANDO_INTENCION'
+    && to !== 'ESPERANDO_INTENCION'
+    && session.routerMenuShown
   ) {
-    syncCrmEngagedAsync(session, 'intent_selected', {
+    shouldEngage = true;
+    engageMeta = {
       choice: session.userIntent || to,
       fromState: from,
       toState: to,
       trigger: 'router_menu_choice',
-    });
+    };
   }
+
+  if (!shouldEngage) return false;
+
+  // CRM: fire-and-forget (idempotente vía crmEngagedSynced dentro de sync)
+  if (!session.crmEngagedSynced) {
+    syncCrmEngagedAsync(session, 'intent_selected', engageMeta || {});
+  }
+
+  // WA label: pedir al caller solo una vez por sesión
+  if (session.waLabelClientePotencialApplied) return false;
+  return true;
 }

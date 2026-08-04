@@ -112,7 +112,7 @@ IDs semánticos (`BARRILES_*` / `EVENTOS_*`); transiciones reales en cada `nextS
 - **Ephemeral:** desempaquetar con `normalizeMessageContent`.
 - **Fallback `success: false`:** ruido → re-pregunta; FAQ OK resetea strikes; sin FAQ → plantilla / LLM corto / SOS.
 - **Admin WhatsApp:** `/detenerbot`, `/iniciarbot`, `/reiniciarbot` + número, desde chat admin / “Mensaje para ti mismo”.
-- **Labels Business:** SOS → asistencia; cierre → `cotizacionBarriles` / `cotizacionEventos`.
+- **Labels Business:** engaged → `clientePotencial` (id 4, ensure=false); cierre cotización/venta → `nuevoPedido` (id 6, ensure=false); SOS → `asistencia` (ensure=true).
 - **CLI:** `/reset`, `/mute`, `/unmute`, `/exit`.
 
 ## Datos y config

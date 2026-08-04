@@ -71,7 +71,7 @@ function parseEnvBool(value, defaultValue) {
 }
 
 /**
- * resolveLabelConfig: Arma { name, id, markUnread } para una etiqueta Business.
+ * resolveLabelConfig: Arma { name, id, markUnread, ensure } para una etiqueta Business.
  * Prioriza LABEL_* ; para asistencia también acepta alias legacy SOS_LABEL_*.
  *
  * @param {object} opts
@@ -81,10 +81,11 @@ function parseEnvBool(value, defaultValue) {
  * @param {string} opts.defaultName
  * @param {string} opts.defaultId
  * @param {boolean} opts.defaultMarkUnread
+ * @param {boolean} [opts.defaultEnsure=true] - false = etiqueta default WA (solo addChatLabel)
  * @param {string} [opts.legacyNameKey] - Alias opcional (SOS_LABEL_NAME)
  * @param {string} [opts.legacyIdKey]
  * @param {string} [opts.legacyMarkKey]
- * @returns {{ name: string, id: string, markUnread: boolean }}
+ * @returns {{ name: string, id: string, markUnread: boolean, ensure: boolean }}
  */
 function resolveLabelConfig({
   envNameKey,
@@ -93,6 +94,7 @@ function resolveLabelConfig({
   defaultName,
   defaultId,
   defaultMarkUnread,
+  defaultEnsure = true,
   legacyNameKey,
   legacyIdKey,
   legacyMarkKey
@@ -119,7 +121,7 @@ function resolveLabelConfig({
     markUnread = parseEnvBool(process.env[legacyMarkKey], defaultMarkUnread);
   }
 
-  return { name, id, markUnread };
+  return { name, id, markUnread, ensure: defaultEnsure !== false };
 }
 
 /**
@@ -135,7 +137,10 @@ export function loadBotConfig() {
     ? process.env.ADMIN_NUMBERS.split(',').map(n => n.trim() + '@s.whatsapp.net') // Les añadimos la terminación de WhatsApp
     : [];
 
-  // Etiquetas Business: IDs estables que el bot crea/asegura (el celular a menudo no sincroniza).
+  // Etiquetas Business:
+  // - Propias (ensure=true): el bot crea/asegura el id (Asistencia, Cotizacion *).
+  // - Default WA (ensure=false): solo addChatLabel; IDs descubiertos vía labels.association
+  //   (Cliente potencial=4, Nuevo pedido=6 en esta cuenta).
   // Asistencia acepta alias legacy SOS_LABEL_* / SOS_MARK_UNREAD.
   const labels = {
     asistencia: resolveLabelConfig({
@@ -149,6 +154,27 @@ export function loadBotConfig() {
       legacyIdKey: 'SOS_LABEL_ID',
       legacyMarkKey: 'SOS_MARK_UNREAD'
     }),
+    // CRM engaged → etiqueta default WA (no crear con addLabel)
+    clientePotencial: resolveLabelConfig({
+      envNameKey: 'LABEL_CLIENTE_POTENCIAL_NAME',
+      envIdKey: 'LABEL_CLIENTE_POTENCIAL_ID',
+      envMarkKey: 'LABEL_CLIENTE_POTENCIAL_MARK_UNREAD',
+      defaultName: 'Cliente potencial',
+      defaultId: '4',
+      defaultMarkUnread: false,
+      defaultEnsure: false
+    }),
+    // CRM quoted (cotización evento / venta barril) → etiqueta default WA
+    nuevoPedido: resolveLabelConfig({
+      envNameKey: 'LABEL_NUEVO_PEDIDO_NAME',
+      envIdKey: 'LABEL_NUEVO_PEDIDO_ID',
+      envMarkKey: 'LABEL_NUEVO_PEDIDO_MARK_UNREAD',
+      defaultName: 'Nuevo pedido',
+      defaultId: '6',
+      defaultMarkUnread: false,
+      defaultEnsure: false
+    }),
+    // Legacy / opcionales (siguen disponibles por LABEL_* si se quieren en alertas)
     cotizacionBarriles: resolveLabelConfig({
       envNameKey: 'LABEL_COTIZACION_BARRILES_NAME',
       envIdKey: 'LABEL_COTIZACION_BARRILES_ID',

@@ -279,7 +279,7 @@ export function legacyCloseBarrilesWithoutApi(session) {
   const alert = {
     type: 'SUCCESS',
     title: 'BARRILES DESECHABLES',
-    labelKey: 'cotizacionBarriles',
+    labelKey: 'nuevoPedido',
     body: buildAdminBarrilesOrderBody({
       location,
       date,
@@ -367,7 +367,7 @@ export async function submitBarrilesSaleConfirmed(session) {
     notifyAdmin: {
       type: 'SUCCESS',
       title: 'BARRILES (WEB)',
-      labelKey: 'cotizacionBarriles',
+      labelKey: 'nuevoPedido',
       body: result.adminBody
     },
     customReply: result.closingReply

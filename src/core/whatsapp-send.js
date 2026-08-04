@@ -206,20 +206,25 @@ export async function notifyAdmins({
 }
 
 /**
- * logLabelReadyStatus: Tras conectar, informa si ya resolvemos la etiqueta de asistencia.
- * (Solo log de arranque; no crea la etiqueta todavía.)
+ * logLabelReadyStatus: Tras conectar, informa IDs de etiquetas clave (sin crearlas).
  *
- * @param {{ name: string, id: string }} asistenciaConfig
+ * @param {object} labels - botConfig.labels
  */
-export function logLabelReadyStatus(asistenciaConfig) {
-  const name = asistenciaConfig?.name || 'Asistencia';
-  const id = asistenciaConfig?.id || findLabelIdByName(name);
-  if (id) {
-    console.log(`🏷️ Etiquetas: asistencia usará id=${id} (nombre="${name}")`);
-  } else {
-    console.log(
-      `🏷️ Etiquetas: aún no hay "${name}" en caché. `
-      + 'Se creará al primer SOS/cierre con LABEL_ASISTENCIA_ID del .env.'
-    );
+export function logLabelReadyStatus(labels) {
+  const rows = [
+    ['asistencia', labels?.asistencia],
+    ['clientePotencial', labels?.clientePotencial],
+    ['nuevoPedido', labels?.nuevoPedido]
+  ];
+  for (const [key, cfg] of rows) {
+    if (!cfg) continue;
+    const name = cfg.name || key;
+    const id = cfg.id || findLabelIdByName(name);
+    const mode = cfg.ensure === false ? 'predefined' : 'ensure';
+    if (id) {
+      console.log(`🏷️ Etiquetas: ${key} usará id=${id} (nombre="${name}", ${mode})`);
+    } else {
+      console.log(`🏷️ Etiquetas: ${key} sin id — define LABEL_*_ID en .env`);
+    }
   }
 }

@@ -144,27 +144,38 @@ export async function resolveLabelTargetJids(sock, message, sessionId) {
 // ==============================================================================
 
 /**
- * applyChatLabel: Asegura la etiqueta y la aplica a los JIDs del chat del cliente.
+ * applyChatLabel: Aplica una etiqueta Business a los JIDs del chat del cliente.
+ *
+ * - ensure !== false (default): crea/asegura la etiqueta con addLabel (Asistencia, etc.).
+ * - ensure === false: SOLO addChatLabel con el id del .env (etiquetas default de WA:
+ *   "Cliente potencial", "Nuevo pedido"). Nunca llamar addLabel ahí: pisa el predefined.
  *
  * @param {object} sock
  * @param {object} message
  * @param {string} sessionId
- * @param {{ id?: string, name: string, color?: number }} labelConfig
+ * @param {{ id?: string, name: string, color?: number, ensure?: boolean }} labelConfig
  * @returns {Promise<string|null>} labelId usado, o null si falló
  */
 export async function applyChatLabel(sock, message, sessionId, labelConfig) {
   const name = String(labelConfig?.name || '').trim();
-  if (!name) {
+  const shouldEnsure = labelConfig?.ensure !== false;
+
+  if (shouldEnsure && !name) {
     console.warn('⚠️ applyChatLabel: falta nombre de etiqueta en config.');
     return null;
   }
 
   const targetJids = await resolveLabelTargetJids(sock, message, sessionId);
-  const labelId = await ensureLabel(sock, labelConfig);
+
+  // Predefined: solo el id conocido (descubierto vía labels.association).
+  // Propias del bot: ensureLabel crea/asegura en el dispositivo vinculado.
+  const labelId = shouldEnsure
+    ? await ensureLabel(sock, labelConfig)
+    : resolveLabelIdFromConfig(labelConfig);
 
   if (!labelId) {
     console.warn(
-      `⚠️ Etiqueta no disponible (nombre="${name}"). `
+      `⚠️ Etiqueta no disponible (nombre="${name || '?'}", ensure=${shouldEnsure}). `
       + 'Define LABEL_*_ID en .env o revisa permisos de etiquetas en WhatsApp Business.'
     );
     return null;
@@ -180,7 +191,10 @@ export async function applyChatLabel(sock, message, sessionId, labelConfig) {
     try {
       await sock.addChatLabel(jid, labelId);
       labeledOk += 1;
-      console.log(`🏷️ Etiqueta id=${labelId} ("${name}") aplicada a ${jid}`);
+      console.log(
+        `🏷️ Etiqueta id=${labelId} ("${name || labelId}")`
+        + `${shouldEnsure ? '' : ' [predefined]'} aplicada a ${jid}`
+      );
     } catch (e) {
       console.warn(`No se pudo etiquetar ${jid}:`, e.message);
     }

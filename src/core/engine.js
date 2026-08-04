@@ -290,7 +290,7 @@ function lastPromptPart(prompt) {
  *
  * @param {string} sessionId - JID / id de sesión
  * @param {string} messageText - Texto del cliente (o comando CLI)
- * @param {{ sendAdminAlert?: (alert: object) => void|Promise<void> }} [options]
+ * @param {{ sendAdminAlert?: (alert: object) => void|Promise<void>, applyBusinessLabel?: (labelKey: string) => void|Promise<void>, clientPhoneE164?: string, pushName?: string }} [options]
  * @returns {Promise<string|object|Array|null>}
  */
 export async function processMessage(sessionId, messageText, options = {}) {
@@ -304,13 +304,16 @@ export async function processMessage(sessionId, messageText, options = {}) {
  *
  * @param {string} sessionId
  * @param {string} messageText
- * @param {{ sendAdminAlert?: (alert: object) => void|Promise<void> }} options
+ * @param {{ sendAdminAlert?: (alert: object) => void|Promise<void>, applyBusinessLabel?: (labelKey: string) => void|Promise<void>, clientPhoneE164?: string, pushName?: string }} options
  * @returns {Promise<string|object|Array|null>}
  */
 async function processMessageUnlocked(sessionId, messageText, options = {}) {
   // Callback de este mensaje concreto (no variable global compartida)
   const alertAdmin = typeof options.sendAdminAlert === 'function'
     ? options.sendAdminAlert
+    : null;
+  const applyBusinessLabel = typeof options.applyBusinessLabel === 'function'
+    ? options.applyBusinessLabel
     : null;
 
   let session = getSession(sessionId);
@@ -646,7 +649,16 @@ async function processMessageUnlocked(sessionId, messageText, options = {}) {
     if (processResult.nextState && processResult.nextState !== currentStateId) {
        const previousState = currentStateId;
        session.currentState = processResult.nextState;
-       notifyCrmOnBotStateChange(session, previousState, processResult.nextState);
+       // Engaged CRM + (opcional) etiqueta WA "Cliente potencial"
+       if (notifyCrmOnBotStateChange(session, previousState, processResult.nextState)) {
+         session.waLabelClientePotencialApplied = true;
+         if (applyBusinessLabel) {
+           void Promise.resolve(applyBusinessLabel('clientePotencial')).catch((err) => {
+             console.warn('No se pudo aplicar etiqueta Cliente potencial:', err?.message || err);
+             session.waLabelClientePotencialApplied = false;
+           });
+         }
+       }
     }
     
     if (processResult.mute) {

@@ -15,7 +15,7 @@ import { assertRuntimeConfigReady, loadBotConfig } from './core/config.js';
 import { warmCotCatalog } from './logic/cot-catalog.js';
 import { AUTH_DIR, PROJECT_ROOT } from './core/paths.js';
 import { isImagePart, isVideoPart, assertImageExists } from './logic/media.js';
-import { rememberLabel } from './core/business-labels.js';
+import { rememberLabel, applyChatLabel } from './core/business-labels.js';
 import {
   sendTracked,
   rememberMessage,
@@ -408,7 +408,7 @@ async function startBot() {
         console.log('WhatsApp conectado. El bot está listo para trabajar.');
         // Tras sync de etiquetas Business, logueamos si ya resolvemos "Asistencia"
         setTimeout(() => {
-          logLabelReadyStatus(config.labels?.asistencia);
+          logLabelReadyStatus(config.labels);
         }, 5000);
         // Nudge por inactividad (híbrido cron + horas). Off si NUDGE_ENABLED=false.
         startNudgeRunner(sock, () => loadBotConfig().nudge);
@@ -629,8 +629,19 @@ async function startBot() {
           });
         };
 
+        // Etiqueta Business sin pasar por alerta admin (engaged → Cliente potencial)
+        const applyBusinessLabel = async (labelKey) => {
+          const labelConfig = botConfig.labels?.[labelKey];
+          if (!labelConfig) {
+            console.warn(`⚠️ applyBusinessLabel: labelKey desconocido "${labelKey}"`);
+            return null;
+          }
+          return applyChatLabel(sock, message, sessionId, labelConfig);
+        };
+
         const reply = await processMessage(sessionId, cleanText, {
           sendAdminAlert,
+          applyBusinessLabel,
           clientPhoneE164: clientPhoneE164 || session.clientPhoneE164 || undefined,
           pushName: pushName || session.clientPushName || undefined,
         });
