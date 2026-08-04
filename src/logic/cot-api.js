@@ -196,6 +196,9 @@ export async function createDirectSaleViaApi(payload) {
  * @param {string} payload.phone - E.164
  * @param {string} [payload.touchpointType='bot_started'] - bot_started | intent_selected | human_reply
  * @param {string} [payload.firstName]
+ * @param {string} [payload.ctwaClid] - Click ID Meta CTWA → CAPI custom_data.ctwa_clid
+ * @param {string} [payload.fbc]
+ * @param {string} [payload.fbp]
  * @param {boolean} [payload.sendCapiLead=true]
  * @param {object} [payload.payload]
  * @returns {Promise<{ success: boolean, clientId?: string, created?: boolean, lifecycleStage?: string, stageChanged?: boolean, metaEventSent?: string|null, error?: string }>}

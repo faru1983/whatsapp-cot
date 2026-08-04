@@ -331,6 +331,8 @@ async function processMessageUnlocked(sessionId, messageText, options = {}) {
 
   // CRM Curioso: primer mensaje con teléfono (cualquier estado / CTWA Meta)
   if (phone && !session.crmCuriousSynced) {
+    // Si ya tenemos clid en sesión, el Lead CAPI saldrá con atribución CTWA
+    if (session.metaCtwaClid) session.metaCtwaSyncedToCrm = true;
     syncCrmCuriousAsync(session);
   } else if (phone && pushName && !session.crmNameSynced) {
     // Baileys a veces omite pushName al inicio; cuando aparece, actualiza el CRM

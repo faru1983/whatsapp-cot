@@ -38,21 +38,29 @@ function contactFirstNameFromSession(session) {
 
 /**
  * buildContactApiPayload: Body común para POST /api/v1/contacts.
+ * Si la sesión trae metaCtwaClid (clic Meta Ads → WA), lo manda para CAPI.
  *
  * @param {object} session
- * @param {{ touchpointType: string, extraPayload?: object }} opts
+ * @param {{ touchpointType: string, extraPayload?: object, sendCapiLead?: boolean }} opts
  */
 function buildContactApiPayload(session, { touchpointType, extraPayload = {}, sendCapiLead = true }) {
   const firstName = contactFirstNameFromSession(session);
+  const ctwaClid = String(session?.metaCtwaClid || '').trim() || undefined;
   return {
     phone: session.clientPhoneE164,
     touchpointType,
     sendCapiLead,
     ...(firstName ? { firstName } : {}),
+    ...(ctwaClid ? { ctwaClid } : {}),
     payload: {
       sessionId: session.sessionId || null,
       pushName: session.clientPushName || null,
       pushNameClean: firstName || null,
+      ...(session?.metaAdSourceId ? { metaAdSourceId: session.metaAdSourceId } : {}),
+      ...(session?.metaConversionSource
+        ? { metaConversionSource: session.metaConversionSource }
+        : {}),
+      ...(session?.metaFromCtwa ? { metaFromCtwa: true } : {}),
       ...extraPayload,
     },
   };
@@ -177,6 +185,48 @@ export async function syncCrmName(session) {
 }
 
 /**
+ * syncCrmCtwaAttribution: Si el ctwa_clid llegó *después* del primer Lead CAPI
+ * (típico en resend CTWA de Baileys), guarda un touchpoint con el clid sin
+ * volver a disparar Lead/Contact. Así Purchase/Lead de cotización sí atribuyen.
+ *
+ * @param {object} session
+ * @returns {Promise<void>}
+ */
+export async function syncCrmCtwaAttribution(session) {
+  if (!session || session.metaCtwaSyncedToCrm) return;
+  const ctwaClid = String(session.metaCtwaClid || '').trim();
+  if (!ctwaClid) return;
+  if (!session.crmCuriousSynced) {
+    // El primer sync (curious) ya llevará el clid; solo marcamos para no duplicar touchpoint
+    session.metaCtwaSyncedToCrm = true;
+    return;
+  }
+  if (!isCotApiConfigured()) return;
+  if (isTestDebug()) return;
+
+  const phone = session.clientPhoneE164;
+  if (!phone) return;
+
+  session.metaCtwaSyncedToCrm = true;
+  try {
+    const res = await createContactViaApi(
+      buildContactApiPayload(session, {
+        touchpointType: 'ctwa_attribution',
+        sendCapiLead: false,
+        extraPayload: { ctwaBackfill: true },
+      })
+    );
+    if (!res.success) {
+      session.metaCtwaSyncedToCrm = false;
+      console.error('CRM CTWA attribution sync falló:', res.error);
+    }
+  } catch (err) {
+    session.metaCtwaSyncedToCrm = false;
+    console.error('CRM CTWA attribution sync error:', err);
+  }
+}
+
+/**
  * Fire-and-forget wrappers so the conversation never waits on CRM/Meta.
  */
 export function syncCrmCuriousAsync(session) {
@@ -189,6 +239,10 @@ export function syncCrmEngagedAsync(session, touchpointType, extraPayload) {
 
 export function syncCrmNameAsync(session) {
   void syncCrmName(session);
+}
+
+export function syncCrmCtwaAttributionAsync(session) {
+  void syncCrmCtwaAttribution(session);
 }
 
 /**

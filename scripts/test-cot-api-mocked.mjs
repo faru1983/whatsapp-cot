@@ -182,4 +182,118 @@ if (failed > 0) {
   process.exit(1);
 }
 console.log('COT API MOCKED PASSED');
+
+// ==============================================================================
+// Meta CTWA extractor (patrón: externalAdReply.ctwaClid + señales opacas)
+// ==============================================================================
+console.log('\n=== Meta CTWA attribution ===\n');
+{
+  const {
+    extractMetaCtwaAttribution,
+    applyMetaCtwaToSession
+  } = await import('../src/logic/meta-ctwa.js');
+
+  const withClid = extractMetaCtwaAttribution({
+    message: {
+      extendedTextMessage: {
+        text: 'Hola, quiero cotizar',
+        contextInfo: {
+          externalAdReply: {
+            ctwaClid: 'ARAtestclid1234567890',
+            sourceId: 'ad_123',
+            sourceUrl: 'https://fb.me/x',
+            sourceApp: 'instagram'
+          }
+        }
+      }
+    }
+  });
+  assert(withClid.ctwaClid === 'ARAtestclid1234567890', 'extrae ctwaClid de externalAdReply');
+  assert(withClid.sourceId === 'ad_123', 'extrae sourceId del anuncio');
+  assert(withClid.isCtwaSignal === true, 'marca isCtwaSignal con clid');
+
+  const opaque = extractMetaCtwaAttribution({
+    message: {
+      extendedTextMessage: {
+        text: 'Hola',
+        contextInfo: {
+          conversionSource: 'FB_Ads',
+          entryPointConversionSource: 'ctwa_ad',
+          entryPointConversionApp: 'instagram',
+          ctwaPayload: 'QWZjRDdjZHQ3OTJWNEx...'
+        }
+      }
+    }
+  });
+  assert(opaque.ctwaClid === null, 'payload opaco no inventa clid');
+  assert(opaque.isCtwaSignal === true, 'señal CTWA sin clid legible');
+  assert(opaque.conversionSource === 'FB_Ads', 'lee conversionSource');
+
+  const ephemeral = extractMetaCtwaAttribution({
+    message: {
+      ephemeralMessage: {
+        message: {
+          extendedTextMessage: {
+            text: 'hola',
+            contextInfo: {
+              externalAdReply: { ctwaClid: 'CLID_EPHEMERAL_99' }
+            }
+          }
+        }
+      }
+    }
+  });
+  assert(ephemeral.ctwaClid === 'CLID_EPHEMERAL_99', 'extrae clid dentro de ephemeralMessage');
+
+  const session = {};
+  assert(applyMetaCtwaToSession(session, withClid) === true, 'aplica clid a sesión vacía');
+  assert(session.metaCtwaClid === 'ARAtestclid1234567890', 'sesión guarda metaCtwaClid');
+  const secondApply = applyMetaCtwaToSession(session, {
+    ctwaClid: 'OTRO',
+    sourceId: null,
+    sourceUrl: null,
+    conversionSource: null,
+    entryPoint: null,
+    isCtwaSignal: true
+  });
+  assert(secondApply === false, 'no pisa clid existente');
+  assert(session.metaCtwaClid === 'ARAtestclid1234567890', 'clid original intacto');
+
+  // createContactViaApi debe reenviar ctwaClid al body
+  const { createContactViaApi } = await import('../src/logic/cot-api.js');
+  let bodySeen = null;
+  const restore = installFetchMock(async (url, init) => {
+    assert(url.includes('/api/v1/contacts'), `URL contacts (es ${url})`);
+    bodySeen = JSON.parse(String(init?.body || '{}'));
+    return {
+      ok: true,
+      status: 200,
+      json: async () => ({
+        success: true,
+        clientId: 'client-ctwa-1',
+        created: true,
+        lifecycleStage: 'curious',
+        stageChanged: true,
+        metaEventSent: 'lead_client_x',
+        touchpointId: 'tp-1'
+      })
+    };
+  });
+  const contactRes = await createContactViaApi({
+    phone: '+56912345678',
+    touchpointType: 'bot_started',
+    ctwaClid: 'ARAtestclid1234567890',
+    firstName: 'Test'
+  });
+  restore();
+  assert(contactRes.success === true, 'contacts API mock éxito con ctwa');
+  assert(bodySeen?.ctwaClid === 'ARAtestclid1234567890', 'POST /contacts incluye ctwaClid');
+  assert(bodySeen?.source === 'whatsapp', 'POST /contacts source whatsapp');
+}
+
+if (failed > 0) {
+  console.error(`VERIFY EXTRA FAILED (${failed} assertion(s))`);
+  process.exit(1);
+}
+console.log('\nALL MOCKED + CTWA PASSED');
 process.exit(0);

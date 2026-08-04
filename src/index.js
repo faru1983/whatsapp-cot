@@ -11,6 +11,8 @@ import { processMessage } from './core/engine.js';
 import { shouldHandleMessage, stripTriggerPrefix } from './logic/utils.js';
 import { getSession, saveSession, resetSession, findSessionIdsForPhone } from './core/db.js';
 import { resolveClientPhoneE164 } from './logic/cot-phone-resolve.js';
+import { extractMetaCtwaAttribution, applyMetaCtwaToSession } from './logic/meta-ctwa.js';
+import { syncCrmCtwaAttributionAsync } from './logic/cot-crm-sync.js';
 import { assertRuntimeConfigReady, loadBotConfig } from './core/config.js';
 import { warmCotCatalog } from './logic/cot-catalog.js';
 import { AUTH_DIR, PROJECT_ROOT } from './core/paths.js';
@@ -595,8 +597,26 @@ async function startBot() {
       const pushName = String(message.pushName || '').trim();
       if (clientPhoneE164) session.clientPhoneE164 = clientPhoneE164;
       if (pushName) session.clientPushName = pushName;
-      if (clientPhoneE164 || pushName) {
+
+      // Meta Click-to-WhatsApp: ctwa_clid vive en contextInfo del primer mensaje del anuncio
+      const ctwaAttr = extractMetaCtwaAttribution(message);
+      const ctwaChanged = applyMetaCtwaToSession(session, ctwaAttr);
+      if (ctwaAttr.ctwaClid) {
+        console.log(`📎 CTWA clid capturado para ${sessionId}: ${String(ctwaAttr.ctwaClid).slice(0, 24)}…`);
+      } else if (ctwaAttr.isCtwaSignal && !session.metaCtwaClid) {
+        // Señal de anuncio sin clid legible (payload opaco de Meta) — igual marcamos origen
+        console.log(
+          `📎 CTWA señal sin clid (${ctwaAttr.conversionSource || ctwaAttr.entryPoint || 'ads'}) en ${sessionId}`
+        );
+      }
+
+      if (clientPhoneE164 || pushName || ctwaChanged) {
         saveSession(sessionId, session);
+      }
+
+      // Si el clid llegó tarde (después del Lead curious), backfill touchpoint sin re-disparar CAPI
+      if (ctwaChanged && session.metaCtwaClid) {
+        syncCrmCtwaAttributionAsync(session);
       }
 
       const isGroup = message.key.remoteJid?.endsWith('@g.us');
