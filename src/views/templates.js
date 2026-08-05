@@ -573,6 +573,7 @@ export function getEventFormatRecommendation(guests, instalacionMuroStr) {
 Por supuesto, puedes elegir el que prefieras:
 
 1️⃣ *Dispensador Portátil* — instalación gratis, pedido mín. 10L
+
 2️⃣ *Muro de Coctelería* — instalación ${instalacionMuroStr}, pedido mín. 30L
 
 ${MENU_WRITE_CTA}`;
