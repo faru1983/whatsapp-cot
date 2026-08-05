@@ -507,9 +507,9 @@ Responde SOLO JSON válido:
 
 REGLAS:
 1. Si INFORMÁ el tipo (ej. "es un bautizo", "fiesta de egresados") → celebrationType breve en español, skip:false, confidence high/medium.
-2. Menú implícito: cumpleaños→"Cumpleaños"; matrimonio/boda→"Matrimonio"; empresa→"Empresa"; otro/otros→"Otro".
+2. Tipos típicos: cumpleaños→"Cumpleaños"; matrimonio/boda→"Matrimonio"; empresa/corporativo→"Empresa"; otro/otros→"Otro". Cualquier otro tipo válido → etiqueta corta real.
 3. Si NO SABE o NO QUIERE decirlo (ninguno, no sé, aún no lo sé, todavía no, sin definir, da igual, prefiero no decir) → celebrationType null, skip:true, confidence high/medium. Así el bot sigue sin ese dato.
-4. Si es duda (precios, cobertura, formato), saludo vacío, solo invitados/fecha/comuna, o no responde al paso → skip:false, celebrationType null, confidence low (o no uses skip).
+4. Si es duda (precios, cobertura, formato), saludo vacío, solo invitados/fecha/comuna, texto sin sentido / gibberish, o no responde al paso → skip:false, celebrationType null, confidence low. NUNCA uses skip:true con texto que no hable de incertidumbre.
 5. PROHIBIDO inventar un tipo. PROHIBIDO texto fuera del JSON.
 6. No uses "Otro" solo porque no encaja: usa el nombre real. "Otro" solo si el cliente dijo otro/otros.
 
@@ -608,7 +608,7 @@ Responde SOLO JSON:
 REGLAS:
 1. INFO_ONLY: NO tiene un evento/celebración concreta (o no la está armando ahora) y solo quiere precios, cotizar por curiosidad, info para el futuro, "solo quiero cotizar" sin datos, mirar opciones en la web. → lo mandaremos a la web.
 2. UNKNOWN_GUESTS: SÍ quiere seguir cotizando por chat pero aún no sabe cuántos invitados ("aún no sé cuántos serán", "no tengo el número"). NO es INFO_ONLY.
-3. UNCLEAR: duda de producto, saludo, responde otra cosa, o no encaja en 1–2.
+3. UNCLEAR: duda de producto, saludo, responde otra cosa, o no encaja en 1–2. Incluye "¿se pueden comprar?", "¿venden el dispensador?", compra de equipo → UNCLEAR (FAQ/humano), NUNCA INFO_ONLY.
 4. Si dice un número de invitados o un tipo de evento claro → UNCLEAR (otro extractor lo maneja).
 5. PROHIBIDO texto fuera del JSON.
 

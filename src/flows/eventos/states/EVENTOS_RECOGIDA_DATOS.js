@@ -1,7 +1,7 @@
 // ==============================================================================
 // OBJETIVO: Paso EVENTOS_RECOGIDA_DATOS — entrada Eventos con preguntas en cadena.
-// A) tipo de evento (menú / parser / NLU texto libre) → B) invitados → C) fecha+comuna (opcionales).
-// Solo invitados es obligatorio; fecha/comuna se pueden saltar con ok/después.
+// A) tipo de evento (pregunta abierta + parser/NLU) → B) invitados → C) fecha+comuna (opcionales).
+// Solo invitados es obligatorio; fecha/comuna se pueden saltar con *después*.
 // ==============================================================================
 import { defineState } from '../../../logic/compile-state.js';
 import { getEventDataSummary, getBrowseOnlyGoodbye } from '../../../views/templates.js';
@@ -9,7 +9,7 @@ import {
   asksPriceOrCatalog,
   wantsBrowseOnlyClose
 } from '../../../logic/interruptions.js';
-import { matchKeywordIntent, matchesMenuOption, rulesWebVsChat } from '../../../logic/keyword-intent.js';
+import { matchKeywordIntent, rulesWebVsChat } from '../../../logic/keyword-intent.js';
 import {
   applyEventDataFromMessage,
   extractGuestsFromMessage,
@@ -20,14 +20,12 @@ import {
   wantsEventInfoOnly,
   wantsUnknownGuestsCount,
   wantsSkipEventLogistics,
-  wantsUnknownLocationOnly
+  wantsUnknownLocationOnly,
+  looksLikeCelebrationUncertainty,
+  asksEquipmentOrResaleQuestion
 } from '../../../logic/eventos-helpers.js';
 import { isLikelyThirdPartyBotReply, isGreetingOrNoise } from '../../../logic/interruptions.js';
-import {
-  withAssistantFooter,
-  formatMenuBlock,
-  MENU_WRITE_CTA
-} from '../../../logic/flow-rails.js';
+import { withAssistantFooter } from '../../../logic/flow-rails.js';
 import {
   extractCelebrationTypeWithAI,
   classifyEventosInfoOnlyWithAI,
@@ -36,19 +34,18 @@ import {
 } from '../../../logic/nlu-intent.js';
 import { findLocationByFuzzyMatch, parseDate } from '../../../logic/utils.js';
 
-/** Menú de tipo de evento (pregunta A). */
-const TIPO_MENU = formatMenuBlock(['Cumpleaños', 'Matrimonio', 'Empresa', 'Otro']);
+/** Pregunta A: tipo de evento (abierta, con ejemplo en cursiva). */
+const ASK_CELEBRATION = `¿Qué tipo de evento estás organizando?
+
+_Ejemplo: "Matrimonio", "Cumpleaños" o "Empresa"_`;
 
 /** Pitch + pregunta A al entrar al flujo (sin web como CTA principal). */
 const WELCOME = `*Cocktails on Tap* es una estación de coctelería autoservicio: convierte tu celebración en una experiencia moderna, entretenida y sin filas, con cócteles listos en segundos directo a la copa. 🍸
 
-Para partir, ¿qué tipo de evento estás organizando?
-
-${MENU_WRITE_CTA}
-${TIPO_MENU}`;
+${ASK_CELEBRATION}`;
 
 /** Pregunta C: fecha y comuna opcionales. */
-const ASK_LOGISTICS = `¿Me compartes *fecha* y *comuna* del evento? (si aún no las tienes, escribe *después* o *ok* para seguir)
+const ASK_LOGISTICS = `¿Me compartes *fecha* y *comuna* del evento? (si aún no las tienes, escribe *después* para seguir)
 
 Ejemplo: _"15 de mayo, Las Condes"_`;
 
@@ -65,7 +62,7 @@ const ASK_GUESTS_APPROX = `Sin problema: un *aproximado* sirve perfecto.
 
 const AI_PROMPT = `[SISTEMA - ESTADO: DATOS DEL EVENTO (entrada progresiva)]
 Eres el asistente virtual de Cocktails on Tap. El cliente está en Servicio para Eventos.
-Orden: (A) tipo de evento (menú/parser/NLU; o skip → Por confirmar), (B) invitados, (C) fecha+comuna opcionales.
+Orden: (A) tipo de evento (pregunta abierta + parser/NLU; o skip → Por confirmar), (B) invitados, (C) fecha+comuna opcionales.
 Si el cliente NO tiene evento y solo quiere precios/info a futuro → invitar a la web (Cotizar), no insistir con datos.
 0. NO digas "hola" ni te presentes como asistente virtual (el copy de entrada ya es directo).
 1. Responde dudas breves y amigables.
@@ -74,7 +71,7 @@ Si el cliente NO tiene evento y solo quiere precios/info a futuro → invitar a 
 4. NUNCA cotices ni calcules precios finales todavía.
 5. Puedes mencionar www.cocktailsontap.cl/eventos si pregunta precios; no lo presentes como menú obligatorio.
 6. Si faltan invitados, pídelos (un aproximado sirve). Si no tiene evento y solo quiere precios/info a futuro, invítalo a cotizar en la web.
-7. Fecha y comuna son opcionales: acepta "ok"/"después" para seguir.
+7. Fecha y comuna son opcionales: acepta "después" (u omitir) para seguir.
 8. Al final, re-pregunta solo el dato pendiente (tipo, invitados o fecha/comuna).`;
 
 /**
@@ -171,10 +168,7 @@ function skipCelebrationAndAskGuests(session) {
  */
 function shortQuestionForSession(session) {
   if (needsCelebrationType(session) && !hasGuests(session)) {
-    return withAssistantFooter(`¿Qué tipo de evento estás organizando?
-
-${MENU_WRITE_CTA}
-${TIPO_MENU}`);
+    return withAssistantFooter(ASK_CELEBRATION);
   }
   if (!hasGuests(session)) {
     return withAssistantFooter(`¿Cuántos *invitados* serán aproximadamente?`);
@@ -261,36 +255,6 @@ function goConfirm(session) {
   };
 }
 
-/**
- * tryApplyCelebrationMenu: Menú 1️⃣–4️⃣ de tipo de evento (sin NLU).
- * Opción 4️⃣ = *Otro* (valor fijo; no pide escribir el tipo).
- *
- * @param {string} messageText
- * @param {object} session
- * @returns {'set'|'none'}
- */
-function tryApplyCelebrationMenu(messageText, session) {
-  const trimmed = String(messageText || '').trim();
-
-  if (matchesMenuOption(trimmed, 1) || /^(cumplea[nñ]os|cumple)$/i.test(trimmed)) {
-    session.celebrationType = 'Cumpleaños';
-    return 'set';
-  }
-  if (matchesMenuOption(trimmed, 2) || /^(matrimonio|casamiento|boda|wedding)$/i.test(trimmed)) {
-    session.celebrationType = 'Matrimonio';
-    return 'set';
-  }
-  if (matchesMenuOption(trimmed, 3) || /^(empresa|corporativ[oa]?|trabajo)$/i.test(trimmed)) {
-    session.celebrationType = 'Empresa';
-    return 'set';
-  }
-  if (matchesMenuOption(trimmed, 4) || /^(otros?|otra)$/i.test(trimmed)) {
-    session.celebrationType = 'Otro';
-    return 'set';
-  }
-  return 'none';
-}
-
 export const EVENTOS_RECOGIDA_DATOS = defineState({
   id: 'EVENTOS_RECOGIDA_DATOS',
   texts: welcomeForSession,
@@ -335,7 +299,10 @@ export const EVENTOS_RECOGIDA_DATOS = defineState({
     }
 
     // Sin evento real / solo precios o info a futuro → web (simulador Cotizar)
-    if (!hasGuests(session) && !messageLooksLikeGuests(messageText) && wantsEventInfoOnly(messageText)) {
+    // Compra de equipo ≠ info-only (va a FAQ / strike / handoff)
+    if (!hasGuests(session) && !messageLooksLikeGuests(messageText)
+        && !asksEquipmentOrResaleQuestion(messageText)
+        && wantsEventInfoOnly(messageText)) {
       return goInfoOnlyWeb();
     }
 
@@ -354,29 +321,16 @@ export const EVENTOS_RECOGIDA_DATOS = defineState({
       };
     }
 
-    // Menú A / skip de tipo: solo si aún pedimos celebración
-    if (needsCelebrationType(session)) {
-      if (wantsSkipCelebrationType(messageText)) {
-        return skipCelebrationAndAskGuests(session);
-      }
-
-      const menuResult = tryApplyCelebrationMenu(messageText, session);
-      if (menuResult === 'set') {
-        // No llamar extractGuests: "1" = Cumpleaños, no "1 invitado"
-        return {
-          success: true,
-          nextState: 'EVENTOS_RECOGIDA_DATOS',
-          customReply: askGuestsCopy(session),
-          flowProgress: true
-        };
-      }
+    // Skip de tipo (“aún no lo sé”) → Por confirmar + invitados
+    if (needsCelebrationType(session) && wantsSkipCelebrationType(messageText)) {
+      return skipCelebrationAndAskGuests(session);
     }
 
-    // Extraemos lo que venga (puede ser 1 dato o varios de un dump)
+    // Extraemos lo que venga (tipo típico / invitados / fecha / comuna en un dump)
     const hasNewInfo = applyEventDataFromMessage(messageText, session);
     const guestsJustParsed = messageLooksLikeGuests(messageText);
 
-    // Si el dump traía "empresa/corporativo", unificamos etiqueta del menú
+    // Si el dump traía "empresa/corporativo", unificamos etiqueta
     if (session.celebrationType && /corporativ/i.test(session.celebrationType)) {
       session.celebrationType = 'Empresa';
     }
@@ -390,7 +344,7 @@ export const EVENTOS_RECOGIDA_DATOS = defineState({
         return goInfoOnlyWeb();
       }
       const pending = needsCelebrationType(session)
-        ? `Para orientarte, ¿qué tipo de evento es?\n\n${MENU_WRITE_CTA}\n${TIPO_MENU}`
+        ? ASK_CELEBRATION
         : `Para recomendarte el mejor formato, ¿cuántos *invitados* serán aproximadamente?`;
       return {
         success: true,
@@ -470,7 +424,7 @@ ${pendingAsk}`,
           success: true,
           nextState: 'EVENTOS_RECOGIDA_DATOS',
           customReply: `No capté una *fecha* o *comuna* concretas 😊
-Puedes escribirlas (ej. _"15 de mayo, Las Condes"_) o *ok* / *después* para seguir sin eso.`,
+Puedes escribirlas (ej. _"15 de mayo, Las Condes"_) o *después* para seguir sin eso.`,
           flowProgress: true
         };
       }
@@ -513,10 +467,11 @@ Puedes escribirlas (ej. _"15 de mayo, Las Condes"_) o *ok* / *después* para seg
       };
     }
 
-    // Tipo aún vacío: NLU texto libre o skip ("no sé")
+    // Tipo aún vacío: NLU texto libre o skip (“no sé”)
+    // Skip del NLU solo si el mensaje también suena a incertidumbre (no gibberish)
     if (needsCelebrationType(session) && !guestsJustParsed && !isGreetingOrNoise(messageText) && trimmed.length >= 2) {
       const ai = await extractCelebrationTypeWithAI(messageText, lastBotText(session));
-      if (ai?.skip) {
+      if (ai?.skip && looksLikeCelebrationUncertainty(messageText)) {
         return skipCelebrationAndAskGuests(session);
       }
       const fromAi = normalizeCelebrationLabel(ai?.celebrationType);
@@ -532,7 +487,12 @@ Puedes escribirlas (ej. _"15 de mayo, Las Condes"_) o *ok* / *después* para seg
     }
 
     // Sin invitados: NLU — ¿solo info/sin evento (web) o no sabe cantidad (aproximado)?
-    if (!hasGuests(session) && !guestsJustParsed && !isGreetingOrNoise(messageText) && trimmed.length >= 4) {
+    // Con strikes activos no soft-close a web (anti-loop / FAQ del engine).
+    // Preguntas de compra de equipo ≠ INFO_ONLY.
+    if (!hasGuests(session) && !guestsJustParsed && !isGreetingOrNoise(messageText)
+        && trimmed.length >= 4
+        && !(session.consecutiveErrors > 0)
+        && !asksEquipmentOrResaleQuestion(messageText)) {
       const browse = await classifyEventosInfoOnlyWithAI(messageText, lastBotText(session));
       if (browse === 'INFO_ONLY') {
         return goInfoOnlyWeb();

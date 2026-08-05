@@ -216,11 +216,11 @@ export function buildNudgeMessage(session, nudgeConfig) {
   if (stateId === 'EVENTOS_RECOGIDA_DATOS') {
     lines.push('');
     if (pendingKey === 'celebration') {
-      lines.push('Ejemplo: escribe *1* Cumpleaños, *2* Matrimonio, *3* Empresa o el tipo.');
+      lines.push('Ejemplo: _"Matrimonio"_, _"Cumpleaños"_ o _"Empresa"_ (si aún no lo sabes: *aún no lo sé*).');
     } else if (pendingKey === 'guests') {
       lines.push('Ejemplo: _"50 invitados"_ o _"unas 80 personas"_');
     } else {
-      lines.push('Ejemplo: _"15 de mayo, Las Condes"_ (o *ok* para seguir)');
+      lines.push('Ejemplo: _"15 de mayo, Las Condes"_ (o *después* para seguir)');
     }
   } else if (stateId === 'BARRILES_FILTRO_CANAL') {
     lines.push('');

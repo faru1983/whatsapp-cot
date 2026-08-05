@@ -121,6 +121,30 @@ export function wantsSkipCelebrationType(messageText) {
 }
 
 /**
+ * looksLikeCelebrationUncertainty: ¿El texto habla de no saber / no tener claro el tipo?
+ * Sirve para corroborar un skip del NLU (evitar que gibberish avance a "Por confirmar").
+ *
+ * @param {string} messageText
+ * @returns {boolean}
+ */
+export function looksLikeCelebrationUncertainty(messageText) {
+  if (wantsSkipCelebrationType(messageText)) return true;
+
+  const norm = String(messageText || '')
+    .toLowerCase()
+    .normalize('NFD')
+    .replace(/[\u0300-\u036f]/g, '')
+    .replace(/[¡!¿?.…,;:]+/g, ' ')
+    .replace(/\s+/g, ' ')
+    .trim();
+
+  if (!norm || norm.length < 3) return false;
+
+  // Señales de incertidumbre (más amplias que el skip exacto de keywords)
+  return /\b(no\s+se|no\s+lo\s+se|aun\s+no|todavia\s+no|sin\s+definir|por\s+definir|no\s+tengo|no\s+lo\s+tengo|da\s+igual|prefiero\s+no|ningun[oa]?|no\s+claro|sin\s+definir|mas\s+adelante|por\s+ahora\s+no)\b/.test(norm);
+}
+
+/**
  * wantsSkipEventLogistics: ¿Quiere omitir fecha y/o comuna (pregunta C)?
  * Cubre "después"/"ok" cortos y frases naturales ("el lugar aún no lo sé").
  *
@@ -196,6 +220,20 @@ export function wantsEventInfoOnly(messageText) {
     return true;
   }
   return false;
+}
+
+/**
+ * asksEquipmentOrResaleQuestion: ¿Pregunta si se vende/compra el equipo (dispensador/muro)?
+ * No es “solo info sin evento”: debe ir a FAQ / strike, no soft-close a la web.
+ *
+ * @param {string} messageText
+ * @returns {boolean}
+ */
+export function asksEquipmentOrResaleQuestion(messageText) {
+  const t = String(messageText || '').trim();
+  if (!t) return false;
+  const lower = t.toLowerCase();
+  return /\b(se\s+pueden\s+comprar|puedo\s+comprar|se\s+vende|venden|comprar\s+(el\s+)?(dispensador|muro|equipo|m[aá]quina)|vendemos|para\s+comprar)\b/i.test(lower);
 }
 
 /**

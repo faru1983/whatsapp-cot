@@ -167,9 +167,9 @@ export function getOnMissHint(stateId, session, pendingKey = null) {
   const key = pendingKey;
   const hints = {
     intent: 'Para seguir, escribe una opción del menú: 1️⃣ *Eventos*, 2️⃣ *Barriles* o 3️⃣ *Humano*.',
-    celebration: 'Para partir, escribe el tipo de evento: 1️⃣ *Cumpleaños*, 2️⃣ *Matrimonio*, 3️⃣ *Empresa* o 4️⃣ *Otro*.',
+    celebration: 'Cuéntame el tipo de evento (ej. _"Matrimonio"_, _"Cumpleaños"_ o _"Empresa"_). Si aún no lo tienes claro, escribe *aún no lo sé*.',
     guests: 'Para cotizar necesito el *número de invitados* (ej. _50 personas_).',
-    logistics: 'Si quieres, comparte *fecha* y *comuna* (o escribe *ok* / *después* para seguir).',
+    logistics: 'Si quieres, comparte *fecha* y *comuna* (o escribe *después* para seguir).',
     confirm: 'Revisa los datos: escribe *1* *Confirmar* o *2* *Corregir* (o el dato nuevo).',
     delivery: 'Necesito *fecha* y *comuna* de entrega para continuar.',
     products: 'Dime *qué sabor* y *cuántos* barriles (ej. _2 mojitos_), o escribe *lista*.',
