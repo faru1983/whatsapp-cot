@@ -41,17 +41,30 @@ function contactFirstNameFromSession(session) {
  * Si la sesión trae metaCtwaClid (clic Meta Ads → WA), lo manda para CAPI.
  *
  * @param {object} session
- * @param {{ touchpointType: string, extraPayload?: object, sendCapiLead?: boolean }} opts
+ * @param {{ touchpointType: string, extraPayload?: object, sendCapiLead?: boolean, engagedContext?: object }} opts
  */
-function buildContactApiPayload(session, { touchpointType, extraPayload = {}, sendCapiLead = true }) {
+function buildContactApiPayload(session, {
+  touchpointType,
+  extraPayload = {},
+  sendCapiLead = true,
+  engagedContext = null,
+}) {
   const firstName = contactFirstNameFromSession(session);
   const ctwaClid = String(session?.metaCtwaClid || '').trim() || undefined;
+  const ctx = engagedContext || {};
+
   return {
     phone: session.clientPhoneE164,
     touchpointType,
     sendCapiLead,
     ...(firstName ? { firstName } : {}),
     ...(ctwaClid ? { ctwaClid } : {}),
+    ...(ctx.intent ? { intent: ctx.intent } : {}),
+    ...(ctx.crmNote ? { crmNote: ctx.crmNote } : {}),
+    ...(ctx.guests != null && ctx.guests > 0 ? { engagedGuests: ctx.guests } : {}),
+    ...(ctx.celebration ? { engagedCelebration: ctx.celebration } : {}),
+    ...(ctx.eventDate ? { engagedEventDate: ctx.eventDate } : {}),
+    ...(ctx.comuna ? { engagedComuna: ctx.comuna } : {}),
     payload: {
       sessionId: session.sessionId || null,
       pushName: session.clientPushName || null,
@@ -67,7 +80,78 @@ function buildContactApiPayload(session, { touchpointType, extraPayload = {}, se
 }
 
 /**
- * syncCrmCurious: Primer contacto WA → stage curious + Lead CAPI (si aplica).
+ * resolveCrmIntentFromSession: Mapea userIntent del bot → intent CRM (event | direct).
+ *
+ * @param {object} session
+ * @returns {'event'|'direct'|undefined}
+ */
+function resolveCrmIntentFromSession(session) {
+  const ui = String(session?.userIntent || '').toUpperCase();
+  if (ui === 'EVENTOS') return 'event';
+  if (ui === 'BARRILES') return 'direct';
+  return undefined;
+}
+
+/**
+ * buildEngagedLeadContext: Snapshot de datos del flujo al pasar a Interesado.
+ *
+ * @param {object} session
+ * @returns {{ intent?: 'event'|'direct', snapshot: object, crmNote?: string, guests?: number, comuna?: string }}
+ */
+export function buildEngagedLeadContext(session) {
+  const intent = resolveCrmIntentFromSession(session);
+  const snapshot = {
+    userIntent: session?.userIntent || null,
+  };
+
+  if (intent === 'event' || session.guests || session.celebrationType || session.date || session.location) {
+    if (session.guests != null) snapshot.guests = session.guests;
+    if (session.celebrationType) snapshot.celebration = session.celebrationType;
+    if (session.date) snapshot.eventDate = session.date;
+    if (session.location) snapshot.comuna = session.location;
+  }
+
+  const cd = session?.orderBuilder?.clientData;
+  if (intent === 'direct' || cd?.date || cd?.location) {
+    if (cd?.location) snapshot.comuna = cd.location;
+    if (cd?.date) snapshot.deliveryDate = cd.date;
+    if (!snapshot.eventDate && cd?.date) snapshot.eventDate = cd.date;
+  }
+
+  const crmNote = buildEngagedCrmNote(intent, snapshot);
+
+  return {
+    intent,
+    snapshot,
+    crmNote,
+    guests: snapshot.guests,
+    celebration: snapshot.celebration,
+    eventDate: snapshot.eventDate || snapshot.deliveryDate,
+    comuna: snapshot.comuna,
+  };
+}
+
+/**
+ * buildEngagedCrmNote: Una línea para clients.notes en el CRM.
+ *
+ * @param {'event'|'direct'|undefined} intent
+ * @param {object} snapshot
+ * @returns {string|undefined}
+ */
+function buildEngagedCrmNote(intent, snapshot) {
+  const parts = [];
+  if (intent === 'event') parts.push('Eventos');
+  else if (intent === 'direct') parts.push('Barriles');
+  if (snapshot.guests != null) parts.push(`${snapshot.guests} invitados`);
+  if (snapshot.celebration) parts.push(snapshot.celebration);
+  if (snapshot.eventDate) parts.push(snapshot.eventDate);
+  if (snapshot.comuna) parts.push(snapshot.comuna);
+  if (!parts.length) return undefined;
+  return `WA Interesado: ${parts.join(', ')}`;
+}
+
+/**
+ * syncCrmCurious: Primer contacto WA → stage curious (CRM/touchpoint; CAPI solo en engaged).
  * Idempotente a nivel session (crmCuriousSynced).
  *
  * @param {object} session
@@ -104,7 +188,7 @@ export async function syncCrmCurious(session) {
 }
 
 /**
- * syncCrmEngaged: Cliente eligió menú / respondió → stage engaged + Contact CAPI.
+ * syncCrmEngaged: Cliente con datos mínimos del flujo → stage Interesado + Contact CAPI.
  * Idempotente a nivel session (crmEngagedSynced).
  *
  * @param {object} session
@@ -123,13 +207,16 @@ export async function syncCrmEngaged(session, touchpointType = 'intent_selected'
     return;
   }
 
+  const engagedContext = buildEngagedLeadContext(session);
+
   session.crmEngagedSynced = true;
   try {
     const res = await createContactViaApi(
       buildContactApiPayload(session, {
         touchpointType,
+        engagedContext,
         extraPayload: {
-          userIntent: session.userIntent || null,
+          ...engagedContext.snapshot,
           ...extraPayload,
         },
       })
@@ -185,9 +272,9 @@ export async function syncCrmName(session) {
 }
 
 /**
- * syncCrmCtwaAttribution: Si el ctwa_clid llegó *después* del primer Lead CAPI
- * (típico en resend CTWA de Baileys), guarda un touchpoint con el clid sin
- * volver a disparar Lead/Contact. Así Purchase/Lead de cotización sí atribuyen.
+ * syncCrmCtwaAttribution: Si el ctwa_clid llegó *después* del primer sync curious
+ * (típico en resend CTWA de Baileys), guarda un touchpoint con el clid sin CAPI.
+ * Contact/Purchase de cotización sí atribuyen con ese touchpoint.
  *
  * @param {object} session
  * @returns {Promise<void>}
@@ -255,16 +342,12 @@ const FLOW_ENTRY_STATES = new Set([
 ]);
 
 /**
- * notifyCrmOnBotStateChange: Dispara Engaged según transiciones reales del bot.
+ * notifyCrmOnBotStateChange: Dispara Interesado al salir del intro Eventos/Barriles.
  *
  * Reglas:
- * - Curioso: lo marca el primer mensaje (syncCrmCurious), no este helper.
- * - Engaged A: sale del estado de entrada Eventos/Barriles hacia otro paso
- *   (el cliente respondió el intro y el flujo avanzó).
- * - Engaged B: desde el menú de bienvenida (routerMenuShown) elige Eventos,
- *   Barriles, Humano o cierra — ya respondió a nuestro welcome.
- * - No Engaged: primer clic Meta ESPERANDO_INTENCION → EVENTOS/BARRILES
- *   (routerMenuShown=false): solo Curioso.
+ * - Curioso: primer mensaje (syncCrmCurious), no este helper.
+ * - Interesado: sale de EVENTOS_RECOGIDA_DATOS o BARRILES_FILTRO_CANAL con datos mínimos.
+ * - No Interesado: elección en menú welcome sin avanzar intro (solo Curioso).
  *
  * @param {object} session
  * @param {string} fromState
@@ -277,44 +360,20 @@ export function notifyCrmOnBotStateChange(session, fromState, toState) {
   const from = String(fromState || '');
   const to = String(toState || '');
 
-  let shouldEngage = false;
-  let engageMeta = null;
+  // Solo al salir del intro del flujo (invitados o comuna+fecha ya en sesión)
+  if (!FLOW_ENTRY_STATES.has(from) || to === from) return false;
 
-  // A) Avanzó dentro de Eventos / Barriles (salió del intro del flujo)
-  if (FLOW_ENTRY_STATES.has(from) && to !== from) {
-    shouldEngage = true;
-    engageMeta = {
-      choice: session.userIntent || to,
-      fromState: from,
-      toState: to,
-      trigger: 'flow_entry_exit',
-    };
-  }
+  const engageMeta = {
+    choice: session.userIntent || to,
+    fromState: from,
+    toState: to,
+    trigger: 'flow_entry_exit',
+  };
 
-  // B) Eligió en el menú de bienvenida (ya hubo mensaje del bot)
-  if (
-    !shouldEngage
-    && from === 'ESPERANDO_INTENCION'
-    && to !== 'ESPERANDO_INTENCION'
-    && session.routerMenuShown
-  ) {
-    shouldEngage = true;
-    engageMeta = {
-      choice: session.userIntent || to,
-      fromState: from,
-      toState: to,
-      trigger: 'router_menu_choice',
-    };
-  }
-
-  if (!shouldEngage) return false;
-
-  // CRM: fire-and-forget (idempotente vía crmEngagedSynced dentro de sync)
   if (!session.crmEngagedSynced) {
-    syncCrmEngagedAsync(session, 'intent_selected', engageMeta || {});
+    syncCrmEngagedAsync(session, 'intent_selected', engageMeta);
   }
 
-  // WA label: pedir al caller solo una vez por sesión
   if (session.waLabelClientePotencialApplied) return false;
   return true;
 }

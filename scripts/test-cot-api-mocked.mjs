@@ -291,9 +291,43 @@ console.log('\n=== Meta CTWA attribution ===\n');
   assert(bodySeen?.source === 'whatsapp', 'POST /contacts source whatsapp');
 }
 
+// ==============================================================================
+// Engaged snapshot (Interesado con datos del flujo)
+// ==============================================================================
+console.log('\n=== Engaged lead context ===\n');
+{
+  const { buildEngagedLeadContext } = await import('../src/logic/cot-crm-sync.js');
+
+  const eventos = buildEngagedLeadContext({
+    userIntent: 'EVENTOS',
+    guests: 50,
+    celebrationType: 'Matrimonio',
+    date: '15 de mayo',
+    location: 'Las Condes',
+  });
+  assert(eventos.intent === 'event', 'intent eventos → event');
+  assert(eventos.guests === 50, 'guests en snapshot');
+  assert(eventos.comuna === 'Las Condes', 'comuna eventos');
+  assert(
+    eventos.crmNote?.includes('WA Interesado') && eventos.crmNote.includes('50 invitados'),
+    'crmNote eventos'
+  );
+
+  const barriles = buildEngagedLeadContext({
+    userIntent: 'BARRILES',
+    orderBuilder: {
+      type: 'desechable',
+      clientData: { date: '5 de agosto', location: 'Providencia' },
+    },
+  });
+  assert(barriles.intent === 'direct', 'intent barriles → direct');
+  assert(barriles.comuna === 'Providencia', 'comuna barriles');
+  assert(barriles.eventDate === '5 de agosto', 'fecha barriles');
+}
+
 if (failed > 0) {
   console.error(`VERIFY EXTRA FAILED (${failed} assertion(s))`);
   process.exit(1);
 }
-console.log('\nALL MOCKED + CTWA PASSED');
+console.log('\nALL MOCKED + CTWA + ENGAGED PASSED');
 process.exit(0);
