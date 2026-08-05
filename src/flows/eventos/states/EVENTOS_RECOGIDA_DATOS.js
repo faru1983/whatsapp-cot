@@ -35,9 +35,8 @@ import {
 import { findLocationByFuzzyMatch, parseDate } from '../../../logic/utils.js';
 
 /** Pregunta A: tipo de evento (abierta, con ejemplo en cursiva). */
-const ASK_CELEBRATION = `¿Qué tipo de evento estás organizando?
-
-_Ejemplo: "Matrimonio", "Cumpleaños" o "Empresa"_`;
+const ASK_CELEBRATION = `*¿Qué tipo de evento estás organizando?*
+_(Ej: Matrimonio, Cumpleaños, Empresa, etc.)_`;
 
 /** Pitch + pregunta A al entrar al flujo (sin web como CTA principal). */
 const WELCOME = `*Cocktails on Tap* es una estación de coctelería autoservicio: convierte tu celebración en una experiencia moderna, entretenida y sin filas, con cócteles listos en segundos directo a la copa. 🍸
@@ -45,9 +44,12 @@ const WELCOME = `*Cocktails on Tap* es una estación de coctelería autoservicio
 ${ASK_CELEBRATION}`;
 
 /** Pregunta C: fecha y comuna opcionales. */
-const ASK_LOGISTICS = `¿Me compartes *fecha* y *comuna* del evento? (si aún no las tienes, escribe *después* para seguir)
+const ASK_LOGISTICS = `
 
-Ejemplo: _"15 de mayo, Las Condes"_`;
+*¿Me compartes Fecha y Comuna del evento?*
+_(Ej: 15 de mayo, Las Condes)_
+
+_(si aún no las tienes, escribe *después* para seguir)_`;
 
 /** Cierre suave: sin evento concreto, solo info/precios → web. */
 const REPLY_INFO_ONLY_WEB = `Entiendo: si aún no tienes un evento o celebración definida y solo necesitas información, te invitamos a revisar nuestra web. En *Cotizar* puedes simular distintas opciones y ver precios:
@@ -139,8 +141,10 @@ function askGuestsCopy(session) {
   } else if (session.eventosCelebrationSkipped) {
     ack = `Sin problema, el tipo lo dejamos por confirmar. 🍸\n`;
   }
-  return `${ack}Para recomendarte el mejor formato (Dispensador o Muro), ¿cuántos *invitados* serán aproximadamente?
-(Ej: "50" o "unas 80")`;
+  return `${ack}Para recomendarte el mejor formato Dispensador o Muro.
+  
+  *¿Cuántos invitados serán aproximadamente?*
+_(Ej: 50 u 80 aprox.)_`;
 }
 
 /**
