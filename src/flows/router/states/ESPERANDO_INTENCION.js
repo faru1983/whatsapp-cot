@@ -1,7 +1,7 @@
 // ==============================================================================
 // OBJETIVO: Paso ESPERANDO_INTENCION — router determinístico de entrada.
 // Solo abre Eventos o Barriles con reglas claras; un segundo miss hace SOS silencioso.
-// CRM: Curioso en welcome; Interesado lo dispara el engine al salir del intro Eventos/Barriles.
+// CRM: Curioso en welcome; Interesado Eventos al confirmar datos→formato; Barriles al salir del filtro.
 // ==============================================================================
 import { defineState } from '../../../logic/compile-state.js';
 import { matchKeywordIntent, rulesRouterIntencion } from '../../../logic/keyword-intent.js';

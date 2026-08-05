@@ -333,21 +333,33 @@ export function syncCrmCtwaAttributionAsync(session) {
 }
 
 /**
- * Estados de “entrada” de cada flujo: el cliente ya vio el intro del bot aquí,
- * pero aún no avanzó (ej. clic Meta → EVENTOS_RECOGIDA_DATOS = sigue Curioso).
+ * ¿Esta transición debe marcar Interesado (engaged) en el CRM?
+ *
+ * Eventos: recién al confirmar datos → elegir formato (ya hay invitados + resumen OK).
+ * Barriles: al salir del filtro de canal (comuna+fecha mínimas).
+ * Seguir en recogida / menú welcome = solo Curioso.
+ *
+ * @param {string} from
+ * @param {string} to
+ * @returns {boolean}
  */
-const FLOW_ENTRY_STATES = new Set([
-  'EVENTOS_RECOGIDA_DATOS',
-  'BARRILES_FILTRO_CANAL',
-]);
+function shouldEngageCrmOnTransition(from, to) {
+  if (!from || !to || from === to) return false;
+  // Eventos: Interesado con el snapshot completo al pasar a formato
+  if (from === 'EVENTOS_CONFIRMAR_DATOS' && to === 'EVENTOS_ELECCION_FORMATO') return true;
+  // Barriles: sin cambio — sale del intro con fecha/comuna
+  if (from === 'BARRILES_FILTRO_CANAL') return true;
+  return false;
+}
 
 /**
- * notifyCrmOnBotStateChange: Dispara Interesado al salir del intro Eventos/Barriles.
+ * notifyCrmOnBotStateChange: Dispara Interesado en la transición correcta del flujo.
  *
  * Reglas:
  * - Curioso: primer mensaje (syncCrmCurious), no este helper.
- * - Interesado: sale de EVENTOS_RECOGIDA_DATOS o BARRILES_FILTRO_CANAL con datos mínimos.
- * - No Interesado: elección en menú welcome sin avanzar intro (solo Curioso).
+ * - Interesado Eventos: CONFIRMAR_DATOS → ELECCION_FORMATO (datos ya confirmados).
+ * - Interesado Barriles: sale de BARRILES_FILTRO_CANAL.
+ * - No Interesado: menú welcome o solo avanzar recogida Eventos.
  *
  * @param {object} session
  * @param {string} fromState
@@ -360,14 +372,13 @@ export function notifyCrmOnBotStateChange(session, fromState, toState) {
   const from = String(fromState || '');
   const to = String(toState || '');
 
-  // Solo al salir del intro del flujo (invitados o comuna+fecha ya en sesión)
-  if (!FLOW_ENTRY_STATES.has(from) || to === from) return false;
+  if (!shouldEngageCrmOnTransition(from, to)) return false;
 
   const engageMeta = {
     choice: session.userIntent || to,
     fromState: from,
     toState: to,
-    trigger: 'flow_entry_exit',
+    trigger: from === 'EVENTOS_CONFIRMAR_DATOS' ? 'eventos_datos_confirmados' : 'flow_entry_exit',
   };
 
   if (!session.crmEngagedSynced) {

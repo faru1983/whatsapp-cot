@@ -4,7 +4,12 @@
 // (typos, sinónimos, frases naturales). NO busca FAQ ni genera respuesta al cliente.
 // La llamada al modelo vive en llm.js; este archivo es la puerta clara de NLU.
 // ==============================================================================
-export { classifyStepIntent } from '../core/llm.js';
+export {
+  classifyStepIntent,
+  extractCelebrationTypeWithAI,
+  classifyEventosInfoOnlyWithAI,
+  extractEventLogisticsWithAI
+} from '../core/llm.js';
 
 /**
  * lastBotText: Último mensaje del bot en el historial (contexto para el clasificador).

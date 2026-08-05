@@ -1005,18 +1005,21 @@ export function parseDate(text) {
 
 	const datePatterns = [
 		// Día + mes (+ año opcional): "15 de mayo", "15 diciembre", "el 3 dic… 2027"
+		// \b evita falsos positivos (ej. "enero" dentro de "género")
 		new RegExp(
-			`((?:el\\s+)?\\d{1,2}\\s+(?:de\\s+)?(?:${months})(?:\\s+(?:de\\s+)?\\d{4})?)`,
+			`\\b((?:el\\s+)?\\d{1,2}\\s+(?:de\\s+)?(?:${months})(?:\\s+(?:de\\s+)?\\d{4})?)\\b`,
 			'i'
 		),
 		// Solo mes (con o sin preposición/año): "diciembre", "para diciembre", "en marzo 2027"
 		new RegExp(
-			`((?:(?:para|en|durante|este|el)\\s+)?(?:${months})(?:\\s+(?:de\\s+)?\\d{4})?)`,
+			`\\b((?:(?:para|en|durante|este|el)\\s+)?(?:${months})(?:\\s+(?:de\\s+)?\\d{4})?)\\b`,
 			'i'
 		),
 		/(\d{1,2}[-/]\d{1,2}(?:[-/]\d{2,4})?)/,
 		/((?:el\s+)?(?:lunes|martes|mi[eé]rcoles|jueves|jeuves|viernes|s[aá]bado|domingo)(?:\s+\d{1,2})?)/i,
 		/(hoy|ma[ñn]ana|mañana|pasado ma[ñn]ana|este (?:lunes|martes|mi[eé]rcoles|jueves|jeuves|viernes|s[aá]bado|domingo)|proxima (?:semana|semana)|próxima semana)/i,
+		// Año relativo (sin día concreto): "próximo año", "el año que viene"
+		/\b((?:el\s+)?pr[oó]ximo\s+a[nñ]o|(?:el\s+)?a[nñ]o\s+que\s+viene)\b/i,
 		/(el\s+\d{1,2})/i
 	];
 

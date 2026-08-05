@@ -35,14 +35,14 @@ export const MENU_KEYCAPS = {
 };
 
 /**
- * MENU_WRITE_CTA: Antes de un menú numerado — el cliente debe escribir, no tocar botones.
+ * MENU_WRITE_CTA: Antes de un menú numerado — el cliente debe escribir el dígito, no tocar botones.
  */
-export const MENU_WRITE_CTA = 'Escribe la opción que prefieres:';
+export const MENU_WRITE_CTA = 'Escribe el número de la opción que prefieres:';
 
 /**
  * MENU_WRITE_CONTINUE_CTA: Variante para el router de entrada.
  */
-export const MENU_WRITE_CONTINUE_CTA = 'Escribe la opción para continuar:';
+export const MENU_WRITE_CONTINUE_CTA = 'Escribe el número de la opción para continuar:';
 
 /**
  * MENU_WRITE_REMINDER: Recordatorio en on-miss / fallbacks de pasos con menú numerado.
@@ -167,7 +167,9 @@ export function getOnMissHint(stateId, session, pendingKey = null) {
   const key = pendingKey;
   const hints = {
     intent: 'Para seguir, escribe una opción del menú: 1️⃣ *Eventos*, 2️⃣ *Barriles* o 3️⃣ *Humano*.',
+    celebration: 'Para partir, escribe el tipo de evento: 1️⃣ *Cumpleaños*, 2️⃣ *Matrimonio*, 3️⃣ *Empresa* o 4️⃣ *Otro*.',
     guests: 'Para cotizar necesito el *número de invitados* (ej. _50 personas_).',
+    logistics: 'Si quieres, comparte *fecha* y *comuna* (o escribe *ok* / *después* para seguir).',
     confirm: 'Revisa los datos: escribe *1* *Confirmar* o *2* *Corregir* (o el dato nuevo).',
     delivery: 'Necesito *fecha* y *comuna* de entrega para continuar.',
     products: 'Dime *qué sabor* y *cuántos* barriles (ej. _2 mojitos_), o escribe *lista*.',

@@ -42,7 +42,7 @@ export const EVENTOS_CONFIRMAR_DATOS = defineState({
       return {
         success: true,
         nextState: 'EVENTOS_RECOGIDA_DATOS',
-        customReply: `Para recomendarte el formato, ¿cuántos *invitados* serán aproximadamente?`
+        customReply: `Para recomendarte el mejor formato (Dispensador o Muro), ¿cuántos *invitados* serán aproximadamente?`
       };
     }
 

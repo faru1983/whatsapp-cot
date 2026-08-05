@@ -479,6 +479,285 @@ Ejemplo: {"intent":"${labels[0]}","confidence":"high"}`;
 }
 
 /**
+ * extractCelebrationTypeWithAI: NLU para tipo de evento en texto libre.
+ * - Informa tipo → { celebrationType, skip:false }
+ * - No sabe / ninguno / aún no → { celebrationType:null, skip:true }
+ * - Duda/ruido → null (el flujo re-pregunta el menú)
+ *
+ * @param {string} userMessage - Mensaje del cliente
+ * @param {string} [lastBotMessage] - Último mensaje del bot (contexto)
+ * @returns {Promise<{ celebrationType: string|null, skip: boolean }|null>}
+ */
+export async function extractCelebrationTypeWithAI(userMessage, lastBotMessage = '') {
+  const text = String(userMessage || '').trim();
+  if (!text || text.length < 2) return null;
+
+  const env = getEnv();
+  const { provider, apiKey, model } = env;
+  const config = { temperature: 0.1, maxOutputTokens: 120 };
+
+  const systemInstruction = `Eres un extractor NLU estricto para un bot de cotizaciones de eventos (Chile).
+El bot preguntó el TIPO de evento (cumpleaños, matrimonio, empresa, otro, o texto libre).
+
+Último mensaje del bot:
+"${lastBotMessage || '(no disponible)'}"
+
+Responde SOLO JSON válido:
+{"celebrationType":"Etiqueta corta"|null,"skip":true|false,"confidence":"high"|"medium"|"low"}
+
+REGLAS:
+1. Si INFORMÁ el tipo (ej. "es un bautizo", "fiesta de egresados") → celebrationType breve en español, skip:false, confidence high/medium.
+2. Menú implícito: cumpleaños→"Cumpleaños"; matrimonio/boda→"Matrimonio"; empresa→"Empresa"; otro/otros→"Otro".
+3. Si NO SABE o NO QUIERE decirlo (ninguno, no sé, aún no lo sé, todavía no, sin definir, da igual, prefiero no decir) → celebrationType null, skip:true, confidence high/medium. Así el bot sigue sin ese dato.
+4. Si es duda (precios, cobertura, formato), saludo vacío, solo invitados/fecha/comuna, o no responde al paso → skip:false, celebrationType null, confidence low (o no uses skip).
+5. PROHIBIDO inventar un tipo. PROHIBIDO texto fuera del JSON.
+6. No uses "Otro" solo porque no encaja: usa el nombre real. "Otro" solo si el cliente dijo otro/otros.
+
+Ejemplo tipo: {"celebrationType":"Bautizo","skip":false,"confidence":"high"}
+Ejemplo skip: {"celebrationType":null,"skip":true,"confidence":"high"}
+Ejemplo miss: {"celebrationType":null,"skip":false,"confidence":"low"}`;
+
+  try {
+    let rawText = '';
+
+    if (provider === 'gemini') {
+      const client = new GoogleGenerativeAI(apiKey);
+      const genModel = client.getGenerativeModel({ model, systemInstruction });
+      const result = await genModel.generateContent({
+        contents: [{ role: 'user', parts: [{ text }] }],
+        generationConfig: {
+          temperature: config.temperature,
+          maxOutputTokens: config.maxOutputTokens,
+          responseMimeType: 'application/json'
+        }
+      });
+      rawText = result.response?.text?.().trim() || '';
+    }
+
+    if (provider === 'nvidia') {
+      const openai = new OpenAI({ apiKey, baseURL: 'https://integrate.api.nvidia.com/v1' });
+      const completion = await openai.chat.completions.create({
+        model,
+        messages: [
+          { role: 'system', content: systemInstruction },
+          { role: 'user', content: text }
+        ],
+        temperature: config.temperature,
+        max_tokens: config.maxOutputTokens,
+        response_format: { type: 'json_object' },
+        stream: false
+      });
+      rawText = completion.choices?.[0]?.message?.content?.trim() || '';
+    }
+
+    if (!rawText) return null;
+
+    const cleaned = rawText.replace(/^```(?:json)?\s*/i, '').replace(/\s*```$/i, '').trim();
+    const parsed = JSON.parse(cleaned);
+    const confidence = String(parsed?.confidence || '').trim().toLowerCase();
+    const skip = parsed?.skip === true || parsed?.skip === 'true';
+    const rawType = parsed?.celebrationType;
+
+    testLog(`NLU tipo evento: raw=${JSON.stringify(rawType)} skip=${skip} confidence=${confidence}`);
+
+    if (confidence !== 'high' && confidence !== 'medium') {
+      testLog('NLU tipo evento: descartado (confidence baja)');
+      return null;
+    }
+
+    if (skip) {
+      return { celebrationType: null, skip: true };
+    }
+
+    if (rawType == null || rawType === false) return null;
+    const label = String(rawType).trim();
+    if (!label || /^null$/i.test(label)) return null;
+
+    return { celebrationType: label, skip: false };
+  } catch (err) {
+    console.error(`[bot] Error en extractCelebrationTypeWithAI:`, err.message);
+    return null;
+  }
+}
+
+/**
+ * classifyEventosInfoOnlyWithAI: ¿Cliente sin evento real, solo precios/info a futuro?
+ * Usado en EVENTOS_RECOGIDA_DATOS cuando aún no hay invitados.
+ *
+ * @param {string} userMessage
+ * @param {string} [lastBotMessage]
+ * @returns {Promise<'INFO_ONLY'|'UNKNOWN_GUESTS'|null>}
+ */
+export async function classifyEventosInfoOnlyWithAI(userMessage, lastBotMessage = '') {
+  const text = String(userMessage || '').trim();
+  if (!text || text.length < 4) return null;
+
+  const env = getEnv();
+  const { provider, apiKey, model } = env;
+  const config = { temperature: 0.1, maxOutputTokens: 100 };
+
+  const systemInstruction = `Eres un clasificador NLU para el bot de eventos de Cocktails on Tap (Chile).
+El bot está pidiendo datos del evento (tipo y/o cantidad de invitados).
+
+Último mensaje del bot:
+"${lastBotMessage || '(no disponible)'}"
+
+Responde SOLO JSON:
+{"intent":"INFO_ONLY"|"UNKNOWN_GUESTS"|"UNCLEAR","confidence":"high"|"medium"|"low"}
+
+REGLAS:
+1. INFO_ONLY: NO tiene un evento/celebración concreta (o no la está armando ahora) y solo quiere precios, cotizar por curiosidad, info para el futuro, "solo quiero cotizar" sin datos, mirar opciones en la web. → lo mandaremos a la web.
+2. UNKNOWN_GUESTS: SÍ quiere seguir cotizando por chat pero aún no sabe cuántos invitados ("aún no sé cuántos serán", "no tengo el número"). NO es INFO_ONLY.
+3. UNCLEAR: duda de producto, saludo, responde otra cosa, o no encaja en 1–2.
+4. Si dice un número de invitados o un tipo de evento claro → UNCLEAR (otro extractor lo maneja).
+5. PROHIBIDO texto fuera del JSON.
+
+Ejemplo: {"intent":"INFO_ONLY","confidence":"high"}
+Ejemplo: {"intent":"UNKNOWN_GUESTS","confidence":"high"}`;
+
+  try {
+    let rawText = '';
+
+    if (provider === 'gemini') {
+      const client = new GoogleGenerativeAI(apiKey);
+      const genModel = client.getGenerativeModel({ model, systemInstruction });
+      const result = await genModel.generateContent({
+        contents: [{ role: 'user', parts: [{ text }] }],
+        generationConfig: {
+          temperature: config.temperature,
+          maxOutputTokens: config.maxOutputTokens,
+          responseMimeType: 'application/json'
+        }
+      });
+      rawText = result.response?.text?.().trim() || '';
+    }
+
+    if (provider === 'nvidia') {
+      const openai = new OpenAI({ apiKey, baseURL: 'https://integrate.api.nvidia.com/v1' });
+      const completion = await openai.chat.completions.create({
+        model,
+        messages: [
+          { role: 'system', content: systemInstruction },
+          { role: 'user', content: text }
+        ],
+        temperature: config.temperature,
+        max_tokens: config.maxOutputTokens,
+        response_format: { type: 'json_object' },
+        stream: false
+      });
+      rawText = completion.choices?.[0]?.message?.content?.trim() || '';
+    }
+
+    if (!rawText) return null;
+    const cleaned = rawText.replace(/^```(?:json)?\s*/i, '').replace(/\s*```$/i, '').trim();
+    const parsed = JSON.parse(cleaned);
+    const intent = String(parsed?.intent || '').trim().toUpperCase();
+    const confidence = String(parsed?.confidence || '').trim().toLowerCase();
+
+    testLog(`NLU info-only eventos: intent=${intent} confidence=${confidence}`);
+
+    if (confidence !== 'high' && confidence !== 'medium') return null;
+    if (intent === 'INFO_ONLY' || intent === 'UNKNOWN_GUESTS') return intent;
+    return null;
+  } catch (err) {
+    console.error(`[bot] Error en classifyEventosInfoOnlyWithAI:`, err.message);
+    return null;
+  }
+}
+
+/**
+ * extractEventLogisticsWithAI: Interpreta fecha/comuna o skip en pregunta C de eventos.
+ *
+ * @param {string} userMessage
+ * @param {string} [lastBotMessage]
+ * @returns {Promise<{ skip: boolean, date: string|null, location: string|null }|null>}
+ */
+export async function extractEventLogisticsWithAI(userMessage, lastBotMessage = '') {
+  const text = String(userMessage || '').trim();
+  if (!text || text.length < 2) return null;
+
+  const env = getEnv();
+  const { provider, apiKey, model } = env;
+  const config = { temperature: 0.1, maxOutputTokens: 140 };
+
+  const systemInstruction = `Eres un extractor NLU para fecha y comuna de un evento (Chile, WhatsApp).
+El bot preguntó fecha y comuna (opcionales; el cliente puede omitirlas).
+
+Último mensaje del bot:
+"${lastBotMessage || '(no disponible)'}"
+
+Responde SOLO JSON:
+{"skip":true|false,"date":"texto breve"|null,"location":"comuna o ciudad"|null,"confidence":"high"|"medium"|"low"}
+
+REGLAS:
+1. skip:true si no sabe / no quiere dar fecha NI comuna ahora ("después", "aún no lo sé", "el lugar aún no lo sé" sin fecha útil, "ok sigue").
+2. date: solo si hay señal de cuándo (ej. "15 de mayo", "próximo año", "en diciembre"). NO inventes día concreto.
+3. location: solo comuna/ciudad real (Providencia, Las Condes…). NO uses "lugar", "casa", "aún no".
+4. Si da fecha vaga ("próximo año") y dice que no sabe el lugar → date="próximo año", location=null, skip:false (avanzamos con fecha parcial).
+5. Si el mensaje es basura / off-topic / no responde al paso → skip:false, date:null, location:null, confidence:low.
+6. PROHIBIDO inventar comunas o fechas. PROHIBIDO texto fuera del JSON.
+
+Ejemplo skip: {"skip":true,"date":null,"location":null,"confidence":"high"}
+Ejemplo parcial: {"skip":false,"date":"próximo año","location":null,"confidence":"high"}
+Ejemplo completo: {"skip":false,"date":"15 de mayo","location":"Las Condes","confidence":"high"}`;
+
+  try {
+    let rawText = '';
+
+    if (provider === 'gemini') {
+      const client = new GoogleGenerativeAI(apiKey);
+      const genModel = client.getGenerativeModel({ model, systemInstruction });
+      const result = await genModel.generateContent({
+        contents: [{ role: 'user', parts: [{ text }] }],
+        generationConfig: {
+          temperature: config.temperature,
+          maxOutputTokens: config.maxOutputTokens,
+          responseMimeType: 'application/json'
+        }
+      });
+      rawText = result.response?.text?.().trim() || '';
+    }
+
+    if (provider === 'nvidia') {
+      const openai = new OpenAI({ apiKey, baseURL: 'https://integrate.api.nvidia.com/v1' });
+      const completion = await openai.chat.completions.create({
+        model,
+        messages: [
+          { role: 'system', content: systemInstruction },
+          { role: 'user', content: text }
+        ],
+        temperature: config.temperature,
+        max_tokens: config.maxOutputTokens,
+        response_format: { type: 'json_object' },
+        stream: false
+      });
+      rawText = completion.choices?.[0]?.message?.content?.trim() || '';
+    }
+
+    if (!rawText) return null;
+    const cleaned = rawText.replace(/^```(?:json)?\s*/i, '').replace(/\s*```$/i, '').trim();
+    const parsed = JSON.parse(cleaned);
+    const confidence = String(parsed?.confidence || '').trim().toLowerCase();
+    testLog(`NLU logística eventos: ${cleaned}`);
+
+    if (confidence !== 'high' && confidence !== 'medium') return null;
+
+    const skip = parsed?.skip === true || parsed?.skip === 'true';
+    let date = parsed?.date != null && parsed.date !== false ? String(parsed.date).trim() : null;
+    let location = parsed?.location != null && parsed.location !== false ? String(parsed.location).trim() : null;
+    if (date && /^(null|none|n\/a)$/i.test(date)) date = null;
+    if (location && /^(null|none|n\/a)$/i.test(location)) location = null;
+    if (date && date.length > 60) date = date.slice(0, 60);
+    if (location && location.length > 60) location = location.slice(0, 60);
+
+    return { skip, date, location };
+  } catch (err) {
+    console.error(`[bot] Error en extractEventLogisticsWithAI:`, err.message);
+    return null;
+  }
+}
+
+/**
  * responderFAQ: Evalúa si el mensaje del cliente es una pregunta frecuente y responde
  * usando faq.json + un resumen oficial de datos.json (catálogo y despachos RM).
  * Si no corresponde a ninguna FAQ ni a esos datos, devuelve "NO_FAQ".

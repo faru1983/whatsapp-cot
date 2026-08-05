@@ -49,16 +49,176 @@ export function parseCelebrationType(messageText) {
   const map = [
     [/matrimonio|casamiento|boda|wedding/i, 'Matrimonio'],
     [/cumplea[nñ]os|cumple/i, 'Cumpleaños'],
-    [/empresa|corporativ|oficina|trabajo/i, 'Evento corporativo'],
+    [/empresa|corporativ|oficina|trabajo/i, 'Empresa'],
+    [/otros?\b/i, 'Otro'],
+    [/bautizo|bautismo/i, 'Bautizo'],
+    [/revelaci[oó]n\s+de\s+g[eé]nero|rebelaci[oó]n\s+de\s+g[eé]nero|gender\s*reveal/i, 'Revelación de género'],
+    [/comuni[oó]n/i, 'Primera Comunión'],
     [/graduaci[oó]n|egreso/i, 'Graduación'],
     [/aniversario/i, 'Aniversario'],
     [/baby\s*shower|babyshower/i, 'Baby shower'],
+    [/despedida/i, 'Despedida'],
     [/fiesta|celebraci[oó]n|evento/i, 'Celebración']
   ];
   for (const [re, label] of map) {
     if (re.test(lower)) return label;
   }
   return null;
+}
+
+/**
+ * normalizeCelebrationLabel: Limpia y unifica la etiqueta de celebración
+ * (parser local o NLU). Rechaza textos vacíos o demasiado largos.
+ *
+ * @param {string} raw - Etiqueta cruda
+ * @returns {string|null}
+ */
+export function normalizeCelebrationLabel(raw) {
+  const cleaned = String(raw || '')
+    .trim()
+    .replace(/^["'«»]+|["'«»]+$/g, '')
+    .replace(/\s+/g, ' ');
+  if (!cleaned || cleaned.length < 2 || cleaned.length > 40) return null;
+  if (/^(unclear|null|none|n\/a|unknown|skip)$/i.test(cleaned)) return null;
+
+  // Preferimos etiquetas canónicas del parser (Cumpleaños, Matrimonio, Bautizo…)
+  const fromParser = parseCelebrationType(cleaned);
+  if (fromParser) return fromParser;
+
+  // Capitalizar primera letra; el resto se deja como vino (nombres propios)
+  return cleaned.charAt(0).toUpperCase() + cleaned.slice(1);
+}
+
+/**
+ * wantsSkipCelebrationType: ¿No sabe / no quiere decir el tipo de evento?
+ * Ej.: "ninguno", "aún no lo sé", "au no lo se", "no sé".
+ * En ese caso avanzamos sin guardar celebración (queda "Por confirmar").
+ *
+ * @param {string} messageText
+ * @returns {boolean}
+ */
+export function wantsSkipCelebrationType(messageText) {
+  const t = String(messageText || '').trim();
+  if (!t || t.length > 80) return false;
+
+  const norm = t
+    .toLowerCase()
+    .normalize('NFD')
+    .replace(/[\u0300-\u036f]/g, '')
+    .replace(/[¡!¿?.…,;:]+/g, ' ')
+    .replace(/\s+/g, ' ')
+    .trim();
+
+  if (/^ningun[oa]s?$/.test(norm)) return true;
+  if (/^(no se|no lo se|nse)$/.test(norm)) return true;
+  if (/^(au|aun|todavia) no( lo)?( se)?$/.test(norm)) return true;
+  if (/^(au|aun|todavia) no lo se$/.test(norm)) return true;
+  if (/^(sin|por) definir$/.test(norm)) return true;
+  if (/^(no importa|da igual|prefiero no( decir)?)$/.test(norm)) return true;
+  if (/^(no tengo( (idea|definido|claro))?|no lo tengo( claro)?)$/.test(norm)) return true;
+  if (/^(au|aun|todavia) no lo tengo( claro)?$/.test(norm)) return true;
+  return false;
+}
+
+/**
+ * wantsSkipEventLogistics: ¿Quiere omitir fecha y/o comuna (pregunta C)?
+ * Cubre "después"/"ok" cortos y frases naturales ("el lugar aún no lo sé").
+ *
+ * @param {string} messageText
+ * @returns {boolean}
+ */
+export function wantsSkipEventLogistics(messageText) {
+  const t = String(messageText || '').trim();
+  if (!t) return false;
+
+  // Skip corto (ok / después / no sé)
+  if (/^(despu[eé]s|luego|ok|okay|dale|listo|continuar|seguir|no\s*s[eé]|ns[eé]|omitir|skip|por\s+ahora\s+no)(\s+gracias)?[.!]?$/i.test(t)) {
+    return true;
+  }
+
+  const lower = t.toLowerCase();
+
+  // No sabe lugar / comuna / ubicación / fecha
+  if (/\b(lugar|comuna|ubicaci[oó]n|direcci[oó]n|sitio|local)\b/i.test(lower)
+      && /\b(a[uú]n\s+no|todav[ií]a\s+no|no\s+lo\s+s[eé]|no\s+s[eé]|no\s+tengo|por\s+definir|sin\s+definir)\b/i.test(lower)) {
+    return true;
+  }
+  if (/\b(fecha|d[ií]a|cu[aá]ndo)\b/i.test(lower)
+      && /\b(a[uú]n\s+no|todav[ií]a\s+no|no\s+lo\s+s[eé]|no\s+s[eé]|no\s+tengo|por\s+definir)\b/i.test(lower)
+      && !/\b(pr[oó]ximo\s+a[nñ]o|a[nñ]o\s+que\s+viene|\d{1,2}\s+de\s+\w+)\b/i.test(lower)) {
+    // "aún no sé la fecha" sin otro dato → skip; si dijo "próximo año" no es skip total
+    return true;
+  }
+  if (/\b(no\s+tengo\s+(fecha|comuna|lugar)|sin\s+(fecha|comuna|lugar)\s+a[uú]n|despu[eé]s\s+te\s+(digo|confirmo))\b/i.test(lower)) {
+    return true;
+  }
+  return false;
+}
+
+/**
+ * wantsUnknownLocationOnly: ¿Dice que no sabe el lugar pero puede haber dado fecha?
+ *
+ * @param {string} messageText
+ * @returns {boolean}
+ */
+export function wantsUnknownLocationOnly(messageText) {
+  const lower = String(messageText || '').toLowerCase();
+  if (!/\b(lugar|comuna|ubicaci[oó]n|direcci[oó]n|sitio|local)\b/i.test(lower)) return false;
+  return /\b(a[uú]n\s+no|todav[ií]a\s+no|no\s+lo\s+s[eé]|no\s+s[eé]|no\s+tengo|por\s+definir)\b/i.test(lower);
+}
+
+/**
+ * wantsEventInfoOnly: ¿No tiene evento real y solo busca precios / info a futuro?
+ * Ej.: "solo quiero cotizar", "aún no tengo evento", "para el futuro".
+ * En ese caso lo invitamos a cotizar en la web (simulador).
+ *
+ * @param {string} messageText
+ * @returns {boolean}
+ */
+export function wantsEventInfoOnly(messageText) {
+  const t = String(messageText || '').trim();
+  if (!t) return false;
+  const lower = t.toLowerCase();
+
+  if (/\b(solo\s+(quiero\s+)?(cotizar|ver\s+precios|precios|informaci[oó]n|info)|solo\s+info(rmarme)?)\b/i.test(lower)) {
+    return true;
+  }
+  if (/\b(solo\s+quiero\s+(saber|ver|consultar)\s+(los\s+)?precios?)\b/i.test(lower)) {
+    return true;
+  }
+  if (/\b((a[uú]n\s+)?no\s+tengo\s+(un\s+)?evento|sin\s+evento\s+(todav[ií]a|a[uú]n|definido)|no\s+es\s+para\s+(un\s+)?evento|no\s+tengo\s+celebraci[oó]n)\b/i.test(lower)) {
+    return true;
+  }
+  if (/\b(para\s+el\s+futuro|m[aá]s\s+adelante|por\s+ahora\s+solo(\s+info)?|estoy\s+(averiguando|investigando|viendo\s+opciones|cotizando\s+nomas|cotizando\s+nom[aá]s))\b/i.test(lower)) {
+    return true;
+  }
+  if (/\b(no\s+tengo\s+nada\s+concret[oa]|solo\s+estoy\s+mirando\s+precios)\b/i.test(lower)) {
+    return true;
+  }
+  return false;
+}
+
+/**
+ * wantsUnknownGuestsCount: ¿Dice que aún no sabe cuántos invitados?
+ * No es “sin evento”: re-preguntamos un aproximado.
+ *
+ * @param {string} messageText
+ * @returns {boolean}
+ */
+export function wantsUnknownGuestsCount(messageText) {
+  const t = String(messageText || '').trim();
+  if (!t || t.length > 120) return false;
+  const lower = t.toLowerCase();
+  if (/\b(a[uú]n\s+no\s+s[eé]|todav[ií]a\s+no\s+s[eé]|no\s+s[eé]|no\s+tengo\s+claro)\b/i.test(lower)
+      && /\b(cu[aá]ntos|cantidad|invitad|personas|gente|ser[aá]n|van\s+a\s+ser)\b/i.test(lower)) {
+    return true;
+  }
+  if (/^(no\s+s[eé]|a[uú]n\s+no|todav[ií]a\s+no)(\s+cu[aá]ntos)?[.!]?$/i.test(t)
+      && !wantsEventInfoOnly(t)) {
+    // Solo si el paso ya pidió invitados; el caller decide el contexto
+    return /cu[aá]ntos|invitad|aprox/i.test(lower) || /ser[aá]n/i.test(lower);
+  }
+  return false;
 }
 
 /**

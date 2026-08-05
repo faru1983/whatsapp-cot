@@ -150,6 +150,12 @@ assert(parseDate('el 3 diciembre 2027') === 'el 3 diciembre 2027', `día+mes+añ
 assert(parseDate('quiero cotizar un matrimonio para diciembre') === 'para diciembre', `mes solo con para`);
 assert(parseDate('en marzo 2027') === 'en marzo 2027', `mes + año`);
 assert(parseDate('sin fecha acá') == null, `sin fecha → null`);
+// Meses no pueden matchear como subcadena (género ≠ enero, etc.)
+assert(parseDate('Es una Rebelacion de Genero') == null, `"género" no es fecha enero`);
+assert(parseDate('revelación de género') == null, `género acentuado ≠ enero`);
+assert(parseDate('enero') === 'enero', `mes enero suelto sí vale`);
+assert(/pr[oó]ximo\s+a[nñ]o/i.test(String(parseDate('es para el proximo año') || '')), `próximo año es fecha vaga`);
+assert(parseDate('el año que viene') != null, `año que viene es fecha vaga`);
 assert(toIsoDateFromBotText('15 de mayo') != null, `ISO: 15 de mayo`);
 assert(toIsoDateFromBotText('15 diciembre') != null, `ISO: 15 diciembre (sin "de")`);
 assert(toIsoDateFromBotText('15/12') != null, `ISO: 15/12`);
@@ -186,11 +192,30 @@ assert(isValidFreeformLocationCapture('Talca'), `Talca libre sigue siendo válid
 
 // Familia fecha≠comuna: meses, días y orden mes+comuna
 {
-  const { applyEventDataFromMessage, extractGuestsFromMessage } = await import('../src/logic/eventos-helpers.js');
+  const { applyEventDataFromMessage, extractGuestsFromMessage, parseCelebrationType, normalizeCelebrationLabel, wantsSkipCelebrationType, wantsEventInfoOnly, wantsUnknownGuestsCount, wantsSkipEventLogistics, wantsUnknownLocationOnly } = await import('../src/logic/eventos-helpers.js');
   const { applyContactFromMessage, splitStreetAndComuna } = await import('../src/logic/cot-contact.js');
   assert(extractGuestsFromMessage('15 diciembre') == null, `fecha "15 diciembre" ≠ invitados`);
   assert(extractGuestsFromMessage('15 de diciembre') == null, `fecha "15 de diciembre" ≠ invitados`);
   assert(extractGuestsFromMessage('50 invitados') === 50, `explícito 50 invitados`);
+  assert(parseCelebrationType('Es un bautizo') === 'Bautizo', `parser bautizo`);
+  assert(parseCelebrationType('bautismo') === 'Bautizo', `parser bautismo`);
+  assert(parseCelebrationType('Es una Rebelacion de Genero') === 'Revelación de género', `parser revelación (typo)`);
+  assert(normalizeCelebrationLabel('bautizo') === 'Bautizo', `normalize bautizo`);
+  assert(normalizeCelebrationLabel('Otro') === 'Otro', `normalize Otro`);
+  assert(wantsSkipCelebrationType('ninguno') === true, `skip tipo: ninguno`);
+  assert(wantsSkipCelebrationType('aún no lo sé') === true, `skip tipo: aún no lo sé`);
+  assert(wantsSkipCelebrationType('au no lo se') === true, `skip tipo: typo au no lo se`);
+  assert(wantsSkipCelebrationType('no sé') === true, `skip tipo: no sé`);
+  assert(wantsSkipCelebrationType('es un bautizo') === false, `bautizo no es skip`);
+  assert(wantsEventInfoOnly('solo quiero cotizar') === true, `info-only: solo quiero cotizar`);
+  assert(wantsEventInfoOnly('aún no tengo evento') === true, `info-only: sin evento`);
+  assert(wantsEventInfoOnly('cumpleaños 50 invitados') === false, `datos reales no son info-only`);
+  assert(wantsUnknownGuestsCount('es que aun no se cuantos seran') === true, `unknown guests`);
+  assert(wantsUnknownGuestsCount('solo quiero cotizar') === false, `cotizar no es unknown guests`);
+
+  assert(wantsSkipEventLogistics('ok') === true, `skip logística: ok`);
+  assert(wantsSkipEventLogistics('el lugar aun no lo se') === true, `skip logística: lugar no sé`);
+  assert(wantsUnknownLocationOnly('es para el proximo año, el lugar aun no lo se') === true, `unknown location only`);
 
   // Dirección con comuna pegada (patrón cliente)
   const splitProv = splitStreetAndComuna('Los Alerces 123, Depto 456, Providencia');
@@ -534,8 +559,8 @@ try {
       input: '1',
       expectState: 'EVENTOS_RECOGIDA_DATOS',
       expectMuted: false,
-      expectIncludes: ['Servicio para Eventos', 'invitados'],
-      expectNotIncludes: ['¡Hola!', 'te guiaré', 'Soy el', 'asistente virtual']
+      expectIncludes: ['Cocktails on Tap', 'tipo de evento', 'Cumpleaños', 'Empresa'],
+      expectNotIncludes: ['¡Hola!', 'te guiaré', 'Soy el', 'asistente virtual', 'cocktailsontap.cl/eventos']
     }
   ]);
 
@@ -549,7 +574,7 @@ try {
       input: '1',
       expectState: 'EVENTOS_RECOGIDA_DATOS',
       expectMuted: false,
-      expectIncludes: ['Servicio para Eventos', 'invitados'],
+      expectIncludes: ['Cocktails on Tap', 'Cumpleaños'],
       expectNotIncludes: ['te guiaré', 'Soy el', 'asistente virtual']
     }
   ]);
@@ -614,7 +639,7 @@ try {
       input: '¡Hola! Quiero más información sobre el Servicio para Eventos',
       expectState: 'EVENTOS_RECOGIDA_DATOS',
       expectMuted: false,
-      expectIncludes: ['Eventos', 'invitados'],
+      expectIncludes: ['Cocktails on Tap', 'tipo de evento'],
       expectNotIncludes: ['¡Hola!', 'te guiaré', 'Soy el', 'asistente virtual']
     }
   ]);
@@ -870,8 +895,78 @@ try {
       input: 'evento',
       expectState: 'EVENTOS_RECOGIDA_DATOS',
       expectMuted: false,
-      expectIncludes: ['Eventos'],
+      expectIncludes: ['Cocktails on Tap', 'tipo de evento'],
       expectNotIncludes: ['te guiaré', 'Soy el', 'asistente virtual']
+    }
+  ]);
+
+  await runCase('Eventos logística: próximo año + lugar no sé → confirmar', [
+    { input: 'evento', expectState: 'EVENTOS_RECOGIDA_DATOS' },
+    { input: '2', expectState: 'EVENTOS_RECOGIDA_DATOS' },
+    { input: '50', expectState: 'EVENTOS_RECOGIDA_DATOS', expectIncludes: ['fecha', 'comuna'] },
+    {
+      input: 'es para el proximo año, el lugar aun no lo se',
+      expectState: 'EVENTOS_CONFIRMAR_DATOS',
+      expectIncludes: ['50', 'proximo año', 'Por confirmar']
+    }
+  ]);
+
+    { input: 'evento', expectState: 'EVENTOS_RECOGIDA_DATOS' },
+    {
+      input: 'solo quiero cotizar',
+      expectState: 'CERRADO',
+      expectMuted: true,
+      expectIncludes: ['aún no tienes un evento', 'Cotizar', 'https://www.cocktailsontap.cl/']
+    }
+  ]);
+
+  await runCase('Eventos skip tipo (no sé) → invitados → resumen Por confirmar', [
+    { input: 'evento', expectState: 'EVENTOS_RECOGIDA_DATOS' },
+    {
+      input: 'aún no lo sé',
+      expectState: 'EVENTOS_RECOGIDA_DATOS',
+      expectIncludes: ['por confirmar', 'invitados'],
+      expectNotIncludes: ['Cumpleaños', 'tipo de evento estás']
+    },
+    {
+      input: '60',
+      expectState: 'EVENTOS_RECOGIDA_DATOS',
+      expectIncludes: ['fecha', 'comuna']
+    },
+    {
+      input: 'ok',
+      expectState: 'EVENTOS_CONFIRMAR_DATOS',
+      expectIncludes: ['60', 'Por confirmar']
+    }
+  ]);
+
+  await runCase('Eventos menú dígito ≠ invitados (1=Cumpleaños, 2=Matrimonio)', [
+    { input: 'evento', expectState: 'EVENTOS_RECOGIDA_DATOS' },
+    {
+      input: '1',
+      expectState: 'EVENTOS_RECOGIDA_DATOS',
+      expectIncludes: ['Cumpleaños', 'invitados', 'mejor formato'],
+      expectNotIncludes: ['*1* invitados', 'fecha', 'comuna']
+    }
+  ]);
+
+  await runCase('Eventos progresivo: tipo → invitados → skip logística → confirmar', [
+    { input: 'evento', expectState: 'EVENTOS_RECOGIDA_DATOS' },
+    {
+      input: '2',
+      expectState: 'EVENTOS_RECOGIDA_DATOS',
+      expectIncludes: ['Matrimonio', 'invitados', 'mejor formato'],
+      expectNotIncludes: ['*2* invitados', 'fecha']
+    },
+    {
+      input: '80',
+      expectState: 'EVENTOS_RECOGIDA_DATOS',
+      expectIncludes: ['fecha', 'comuna', 'después']
+    },
+    {
+      input: 'ok',
+      expectState: 'EVENTOS_CONFIRMAR_DATOS',
+      expectIncludes: ['80', 'Matrimonio', 'Por confirmar']
     }
   ]);
 
@@ -903,7 +998,7 @@ try {
         '[IMG:eventos_ambas.webp]',
         'Dispensador Portátil',
         'Muro de Coctelería',
-        'Escribe la opción que prefieres'
+        'Escribe el número de la opción que prefieres'
       ],
       expectNotIncludes: ['Cuál prefieres']
     }
@@ -1422,7 +1517,7 @@ try {
       input: 'Mi gustar',
       expectState: 'EVENTOS_RECOGIDA_DATOS',
       expectMuted: false,
-      expectIncludes: ['no te entendí', 'invitados']
+      expectIncludes: ['no te entendí', 'tipo de evento']
     },
     {
       input: 'se pueden comprar?',
@@ -1899,6 +1994,7 @@ try {
     const eventosSession = {
       currentState: 'EVENTOS_RECOGIDA_DATOS',
       userIntent: 'EVENTOS',
+      celebrationType: 'Matrimonio',
       guests: null,
       isMuted: false,
       lastInboundAt: now - 5 * HOUR,
@@ -2015,6 +2111,29 @@ try {
 } catch (err) {
   failed += 1;
   console.error('  FAIL: excepción en simulación:', err);
+}
+
+console.log('\n-- CRM Interesado: Eventos al confirmar→formato; Barriles al salir filtro --');
+{
+  const { notifyCrmOnBotStateChange } = await import('../src/logic/cot-crm-sync.js');
+
+  const s1 = { userIntent: 'EVENTOS', guests: 50, waLabelClientePotencialApplied: false };
+  assert(
+    notifyCrmOnBotStateChange(s1, 'EVENTOS_RECOGIDA_DATOS', 'EVENTOS_CONFIRMAR_DATOS') === false,
+    'Eventos: salir de recogida NO marca Interesado'
+  );
+
+  const s2 = { userIntent: 'EVENTOS', guests: 50, celebrationType: 'Matrimonio', waLabelClientePotencialApplied: false };
+  assert(
+    notifyCrmOnBotStateChange(s2, 'EVENTOS_CONFIRMAR_DATOS', 'EVENTOS_ELECCION_FORMATO') === true,
+    'Eventos: confirmar→formato SÍ marca Interesado / Cliente potencial'
+  );
+
+  const s3 = { userIntent: 'BARRILES', waLabelClientePotencialApplied: false };
+  assert(
+    notifyCrmOnBotStateChange(s3, 'BARRILES_FILTRO_CANAL', 'BARRILES_RECOGIDA_PRODUCTOS') === true,
+    'Barriles: salir del filtro sigue marcando Interesado'
+  );
 }
 
 // Restaura credenciales COT por si el proceso padre las reutiliza

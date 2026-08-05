@@ -215,7 +215,13 @@ export function buildNudgeMessage(session, nudgeConfig) {
   // Tip concreto por flujo (ejemplos que ya usa el bot)
   if (stateId === 'EVENTOS_RECOGIDA_DATOS') {
     lines.push('');
-    lines.push('Ejemplo: _"Matrimonio, 50 invitados, 15 de mayo, Las Condes"_');
+    if (pendingKey === 'celebration') {
+      lines.push('Ejemplo: escribe *1* Cumpleaños, *2* Matrimonio, *3* Empresa o el tipo.');
+    } else if (pendingKey === 'guests') {
+      lines.push('Ejemplo: _"50 invitados"_ o _"unas 80 personas"_');
+    } else {
+      lines.push('Ejemplo: _"15 de mayo, Las Condes"_ (o *ok* para seguir)');
+    }
   } else if (stateId === 'BARRILES_FILTRO_CANAL') {
     lines.push('');
     lines.push('Ejemplo: _"Providencia, 15 de mayo"_');
