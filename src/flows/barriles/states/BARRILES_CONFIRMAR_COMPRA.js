@@ -17,11 +17,11 @@ import {
 
 const MENU_BLOCK = formatMenuBlock(['Confirmar', 'Corregir']);
 
-const SHORT_Q = withAssistantFooter(`¿Todo bien?
+const SHORT_Q = withAssistantFooter(`*¿Todo bien?*
 
 ${MENU_BLOCK}
 
-Si quieres corregir, escribe el dato directo.`);
+_(ej: escribe el dato directo)_`);
 
 const AI_PROMPT = `[SISTEMA - ESTADO: CONFIRMAR COMPRA DE BARRILES]
 El cliente ya dio todos los datos y recibió un resumen (nombre, email, fecha, comuna, dirección, pedido).
@@ -43,7 +43,10 @@ export const BARRILES_CONFIRMAR_COMPRA = defineState({
       return {
         success: true,
         nextState: 'BARRILES_ROUTER_MODIFICACION',
-        customReply: `Claro, ajustemos el pedido. ¿Qué quieres cambiar de los cócteles o la entrega?`
+        customReply: `Claro, ajustemos el pedido.
+
+*¿Qué quieres cambiar de los cócteles o la entrega?*
+_(ej: agrega 1 mojito o es en Providencia)_`
       };
     }
 
@@ -91,8 +94,10 @@ export const BARRILES_CONFIRMAR_COMPRA = defineState({
         success: true,
         nextState: 'BARRILES_CONFIRMAR_COMPRA',
         customReply:
-          `Claro, ¿qué dato quieres cambiar? Puedes escribirlo directo (ej: "email ana@nuevo.com", "dirección Los Alerces 99" o "Providencia").\n\n` +
-          `Si quieres cambiar los *cócteles*, dime qué agregar o quitar.`,
+          `*¿Qué dato quieres cambiar?*
+_(ej: email ana@nuevo.com, dirección Los Alerces 99 o Providencia)_
+
+_(si quieres cambiar los *cócteles*, dime qué agregar o quitar)_`,
         flowProgress: true
       };
     }

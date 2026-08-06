@@ -104,9 +104,10 @@ function nextStateAfterProducts(session) {
 export const BARRILES_RECOGIDA_PRODUCTOS = defineState({
   id: 'BARRILES_RECOGIDA_PRODUCTOS',
   // Al entrar: solo pedimos sabor/cantidad. *ok* se ofrece cuando ya hay carrito.
-  promptQuestion: () => `Dime *qué sabor* y *cuántos* barriles (ej. *1 mojito y 1 sangría*).`,
-  shortQuestion: withAssistantFooter(`Si está bien, escribe *ok* para el resumen.
-_(O dime qué agregar o quitar)_`),
+  promptQuestion: () => `*¿Qué sabor y cuántos barriles quieres?*
+_(ej: 1 mojito y 1 sangría)_`,
+  shortQuestion: withAssistantFooter(`*¿Todo bien con el pedido?*
+_(ej: escribe *ok* para el resumen, o dime qué agregar o quitar)_`),
   aiPrompt: AI_PROMPT,
 
   async validateAndProcess(messageText, session) {
@@ -129,7 +130,11 @@ _(O dime qué agregar o quitar)_`),
           success: true,
           nextState: 'BARRILES_RECOGIDA_PRODUCTOS',
           customReply: `Aún no tienes cócteles en el pedido 😊
-Dime un sabor y cantidad (ej. *1 mojito*), o escribe *lista* para ver la carta de precios.`
+
+*¿Qué sabor y cuántos barriles quieres?*
+_(ej: 1 mojito)_
+
+_(o escribe *lista* para ver la carta)_`
         };
       }
       return { success: true, nextState: nextStateAfterProducts(session) };
@@ -143,7 +148,8 @@ Dime un sabor y cantidad (ej. *1 mojito*), o escribe *lista* para ver la carta d
         nextState: 'BARRILES_RECOGIDA_PRODUCTOS',
         customReplies: [
           img('barril_desechable_precios.webp'),
-          `¿Qué sabor y cuántos? (ej. *2 mojitos y 1 aperol*)`
+          `*¿Qué sabor y cuántos barriles quieres?*
+_(ej: 2 mojitos y 1 aperol)_`
         ]
       };
     }
@@ -161,8 +167,8 @@ Dime un sabor y cantidad (ej. *1 mojito*), o escribe *lista* para ver la carta d
 
 ${formatCartLines(session.orderBuilder.products)}
 
-Si está bien así, escribe *ok* para ver el resumen de tu cotización.
-_(Si quieres cambiar, dime qué agregar o quitar)_ 🍸`
+*¿Todo bien con el pedido?*
+_(ej: escribe *ok* para el resumen, o dime qué agregar o quitar)_ 🍸`
       };
     }
 
@@ -172,11 +178,12 @@ _(Si quieres cambiar, dime qué agregar o quitar)_ 🍸`
       return {
         success: true,
         nextState: 'BARRILES_RECOGIDA_PRODUCTOS',
-        customReply: `Claro 😊 ¿Qué quieres *quitar* de tu pedido?
+        customReply: `Claro 😊
 
-${formatCartLines(session.orderBuilder.products)}
+*¿Qué quieres quitar de tu pedido?*
+_(ej: quita el mojito)_
 
-Dime el cóctel (ej: *quita el mojito*).`
+${formatCartLines(session.orderBuilder.products)}`
       };
     }
 
@@ -194,7 +201,8 @@ Dime el cóctel (ej: *quita el mojito*).`
 Tu pedido actual:
 ${formatCartLines(session.orderBuilder.products)}
 
-Dime qué quitar (ej: *quita el mojito*) o qué agregar.`
+*¿Qué quieres quitar o agregar?*
+_(ej: quita el mojito)_`
       };
     }
 

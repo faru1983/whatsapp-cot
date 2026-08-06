@@ -34,9 +34,9 @@ import {
 } from '../../../logic/nlu-intent.js';
 import { findLocationByFuzzyMatch, parseDate } from '../../../logic/utils.js';
 
-/** Pregunta A: tipo de evento (abierta, con ejemplo en cursiva). */
+/** Pregunta A: tipo de evento (abierta). Estilo: *pregunta* + _(ej: …)_ en la línea siguiente. */
 const ASK_CELEBRATION = `*¿Qué tipo de evento estás organizando?*
-_(Ej: Matrimonio, Cumpleaños, Empresa, etc.)_`;
+_(ej: matrimonio, cumpleaños, empresa, etc.)_`;
 
 /** Pitch + pregunta A al entrar al flujo (sin web como CTA principal). */
 const WELCOME = `*Cocktails on Tap* es una estación de coctelería autoservicio: convierte tu celebración en una experiencia moderna, entretenida y sin filas, con cócteles listos en segundos directo a la copa. 🍸
@@ -44,10 +44,8 @@ const WELCOME = `*Cocktails on Tap* es una estación de coctelería autoservicio
 ${ASK_CELEBRATION}`;
 
 /** Pregunta C: fecha y comuna opcionales. */
-const ASK_LOGISTICS = `
-
-*¿Me compartes Fecha y Comuna del evento?*
-_(Ej: 15 de mayo, Las Condes)_
+const ASK_LOGISTICS = `*¿Me compartes fecha y comuna del evento?*
+_(ej: 15 de mayo, Las Condes)_
 
 _(si aún no las tienes, escribe *después* para seguir)_`;
 
@@ -58,9 +56,15 @@ const REPLY_INFO_ONLY_WEB = `Entiendo: si aún no tienes un evento o celebració
 
 Cuando tengas más claro el evento (invitados, fecha), escríbeme y te ayudo por aquí. 🥂`;
 
+/** Pregunta B canónica (invitados). */
+const ASK_GUESTS = `*¿Cuántos invitados serán aproximadamente?*
+_(ej: 10, 20 invitados o 50 aprox.)_`;
+
 /** Si no sabe invitados: pedir un aproximado (no cerrar). */
 const ASK_GUESTS_APPROX = `Sin problema: un *aproximado* sirve perfecto.
-¿Cuántos *invitados* calculas más o menos? (Ej: "50" o "unas 80")`;
+
+*¿Cuántos invitados calculas más o menos?*
+_(ej: 50 o unas 80)_`;
 
 const AI_PROMPT = `[SISTEMA - ESTADO: DATOS DEL EVENTO (entrada progresiva)]
 Eres el asistente virtual de Cocktails on Tap. El cliente está en Servicio para Eventos.
@@ -142,9 +146,8 @@ function askGuestsCopy(session) {
     ack = `Sin problema, el tipo lo dejamos por confirmar. 🍸\n`;
   }
   return `${ack}Para recomendarte el mejor formato Dispensador o Muro.
-  
-  *¿Cuántos invitados serán aproximadamente?*
-_(Ej: 50 u 80 aprox.)_`;
+
+${ASK_GUESTS}`;
 }
 
 /**
@@ -175,12 +178,12 @@ function shortQuestionForSession(session) {
     return withAssistantFooter(ASK_CELEBRATION);
   }
   if (!hasGuests(session)) {
-    return withAssistantFooter(`¿Cuántos *invitados* serán aproximadamente?`);
+    return withAssistantFooter(ASK_GUESTS);
   }
   if (!logisticsDone(session)) {
     return withAssistantFooter(ASK_LOGISTICS);
   }
-  return withAssistantFooter(`¿Me confirmas los datos del evento para seguir?`);
+  return withAssistantFooter(`*¿Me confirmas los datos del evento para seguir?*`);
 }
 
 /**
@@ -428,7 +431,9 @@ ${pendingAsk}`,
           success: true,
           nextState: 'EVENTOS_RECOGIDA_DATOS',
           customReply: `No capté una *fecha* o *comuna* concretas 😊
-Puedes escribirlas (ej. _"15 de mayo, Las Condes"_) o *después* para seguir sin eso.`,
+
+*¿Me compartes fecha y comuna del evento?*
+_(ej: 15 de mayo, Las Condes — o escribe *después* para seguir sin eso)_`,
           flowProgress: true
         };
       }
@@ -441,7 +446,9 @@ Puedes escribirlas (ej. _"15 de mayo, Las Condes"_) o *después* para seguir sin
       return {
         success: true,
         nextState: 'EVENTOS_RECOGIDA_DATOS',
-        customReply: `Perfecto, anoté ${ackParts.join(', ')}. ${ASK_LOGISTICS}`,
+        customReply: `Perfecto, anoté ${ackParts.join(', ')}.
+
+${ASK_LOGISTICS}`,
         flowProgress: true
       };
     }

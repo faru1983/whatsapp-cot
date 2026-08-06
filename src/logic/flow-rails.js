@@ -167,19 +167,27 @@ export function getOnMissHint(stateId, session, pendingKey = null) {
   const key = pendingKey;
   const hints = {
     intent: 'Para seguir, escribe una opción del menú: 1️⃣ *Eventos*, 2️⃣ *Barriles* o 3️⃣ *Humano*.',
-    celebration: 'Cuéntame el tipo de evento (ej. _"Matrimonio"_, _"Cumpleaños"_ o _"Empresa"_). Si aún no lo tienes claro, escribe *aún no lo sé*.',
-    guests: 'Para cotizar necesito el *número de invitados* (ej. _50 personas_).',
-    logistics: 'Si quieres, comparte *fecha* y *comuna* (o escribe *después* para seguir).',
+    celebration: `*¿Qué tipo de evento estás organizando?*
+_(ej: matrimonio, cumpleaños o empresa — o escribe *aún no lo sé*)_`,
+    guests: `*¿Cuántos invitados serán aproximadamente?*
+_(ej: 50 personas)_`,
+    logistics: `*¿Me compartes fecha y comuna?*
+_(ej: 15 de mayo, Las Condes — o escribe *después*)_`,
     confirm: 'Revisa los datos: escribe *1* *Confirmar* o *2* *Corregir* (o el dato nuevo).',
-    delivery: 'Necesito *fecha* y *comuna* de entrega para continuar.',
-    products: 'Dime *qué sabor* y *cuántos* barriles (ej. _2 mojitos_), o escribe *lista*.',
+    delivery: `*¿Me pasas la fecha y comuna de entrega?*
+_(ej: Providencia, 5 de agosto)_`,
+    products: `*¿Qué sabor y cuántos barriles quieres?*
+_(ej: 2 mojitos — o escribe *lista*)_`,
     format: 'Escribe *1* *Dispensador* o *2* *Muro* para seguir.',
     continue: 'Escribe *1* cuando quieras ver la carta y precios.',
-    cart: 'Indica los cócteles con litraje (ej. _5L Mojito_) o escribe *lista*.',
+    cart: `*¿Qué cócteles te gustaría incluir?*
+_(ej: 5L Mojito)_`,
     confirm_quote: '¿Te parece bien? Escribe *1* *Confirmar* o *2* *Modificar*.',
-    contact: 'Para enviarte la cotización formal, necesito *nombre*, *apellido* y *email*.',
+    contact: `*¿Me compartes nombre, apellido y email?*
+_(ej: Ana Pérez, ana@email.com)_`,
     mod_choice: 'Escribe *1* para cambiar cócteles o *2* para cambiar fecha/comuna.',
-    client_data: 'Necesito *fecha* y *comuna* de entrega para armar la cotización.'
+    client_data: `*¿Me pasas la fecha y comuna de entrega?*
+_(ej: Providencia, 5 de agosto)_`
   };
 
   if (key && hints[key]) return hints[key];
@@ -187,8 +195,14 @@ export function getOnMissHint(stateId, session, pendingKey = null) {
   // Refinamiento por estado si hace falta
   if (stateId === 'BARRILES_FILTRO_CANAL') {
     const cd = session.orderBuilder?.clientData;
-    if (cd?.location && !cd?.date) return 'Ya tengo la comuna. ¿Cuál es la *fecha* de entrega?';
-    if (cd?.date && !cd?.location) return 'Ya tengo la fecha. ¿Cuál es la *comuna* de entrega?';
+    if (cd?.location && !cd?.date) {
+      return `*¿Cuál es la fecha de entrega?*
+_(ej: 5 de agosto)_`;
+    }
+    if (cd?.date && !cd?.location) {
+      return `*¿Cuál es la comuna de entrega?*
+_(ej: Providencia)_`;
+    }
   }
 
   return null;

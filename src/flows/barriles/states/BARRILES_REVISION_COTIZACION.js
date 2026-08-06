@@ -12,7 +12,7 @@ import { withAssistantFooter, formatMenuBlock } from '../../../logic/flow-rails.
 
 const MENU_BLOCK = formatMenuBlock(['Generar compra', 'Modificar']);
 
-const SHORT_Q = withAssistantFooter(`¿Te parece bien esta cotización?
+const SHORT_Q = withAssistantFooter(`*¿Te parece bien esta cotización?*
 
 ${MENU_BLOCK}`);
 
@@ -40,7 +40,14 @@ export const BARRILES_REVISION_COTIZACION = defineState({
 
   async validateAndProcess(messageText, session) {
     if (!session.orderBuilder?.clientData) {
-      return { success: true, nextState: 'BARRILES_RECOGIDA_PRODUCTOS', customReply: `Revisemos el pedido desde los cócteles. ¿Qué sabor y cuántos?` };
+      return {
+        success: true,
+        nextState: 'BARRILES_RECOGIDA_PRODUCTOS',
+        customReply: `Revisemos el pedido desde los cócteles.
+
+*¿Qué sabor y cuántos barriles quieres?*
+_(ej: 1 mojito y 1 sangría)_`
+      };
     }
     const intent = await resolveDecisionIntent({
       messageText,
@@ -63,8 +70,8 @@ export const BARRILES_REVISION_COTIZACION = defineState({
 
 Para *generar tu compra online* —con el detalle y una *copia en tu correo*— solo necesito unos últimos datos.
 
-¿Me compartes *nombre*, *apellido* y *email*?
-Ejemplo: _Ana Pérez, ana@email.com_
+*¿Me compartes nombre, apellido y email?*
+_(ej: Ana Pérez, ana@email.com)_
 
 Después te pediré la *dirección de despacho* (calle y número).
 

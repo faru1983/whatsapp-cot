@@ -46,8 +46,8 @@ import { withAssistantFooter, formatMenuBlock } from '../../../logic/flow-rails.
 import { matchesMenuOption } from '../../../logic/keyword-intent.js';
 
 const ASK_COCKTAILS = ASK_EVENT_COCKTAILS;
-const ASK_OK_AFTER_CART = `Si está bien así, escribe *ok* para ver el resumen de tu cotización.
-_(Si quieres cambiar, dime el nuevo total en litros —ej. "20L Mojito"— o *quita el aperol*)_`;
+const ASK_OK_AFTER_CART = `*¿Todo bien con el pedido?*
+_(ej: escribe *ok* para el resumen, o "20L Mojito" / *quita el aperol*)_`;
 
 const AI_PROMPT = `[SISTEMA - ESTADO: PREGUNTAS SOBRE EL MENÚ O LOGÍSTICA DE EVENTOS]
 El cliente está revisando la recomendación para su evento pero tiene dudas en lugar de elegir los cócteles.
@@ -66,8 +66,7 @@ function shortQuestionForSession(session) {
   const hasCart = session.orderBuilder?.products
     && Object.keys(session.orderBuilder.products).length > 0;
   if (hasCart) {
-    return withAssistantFooter(`Si está bien, escribe *ok* para el resumen.
-_(Si quieres cambiar, dime litros —ej. "10L Mojito"— o *quita el aperol*.)_`);
+    return withAssistantFooter(ASK_OK_AFTER_CART);
   }
   return withAssistantFooter(ASK_COCKTAILS);
 }
@@ -82,11 +81,13 @@ _(Si quieres cambiar, dime litros —ej. "10L Mojito"— o *quita el aperol*.)_`
  */
 function askWhatToRemoveReply(session, formatKey) {
   const cart = formatEventCartSummary(session.orderBuilder.products, formatKey) || '_Vacío_\n';
-  return `Claro 😊 ¿Qué quieres *quitar* de tu pedido?
+  return `Claro 😊
 
 ${cart}
-Dime el cóctel (ej: *quita el aperol* o *quita el mojito*).
-Si en realidad quieres *cambiar* la cantidad, escribe el nuevo total en litros (ej: *20L Mojito y 10L Aperol*).`;
+*¿Qué quieres quitar de tu pedido?*
+_(ej: quita el aperol o quita el mojito)_
+
+_(si quieres cambiar cantidad: 20L Mojito y 10L Aperol)_`;
 }
 
 /**
@@ -226,7 +227,10 @@ export const EVENTOS_ELECCION_MENU = defineState({
         return {
           success: true,
           nextState: 'EVENTOS_ELECCION_MENU',
-          customReply: `Perfecto. Para *${pendingBarrels.names.join('*, *')}*, ¿qué tamaño de barril quieres?\n\nDisponibles: *${allowedLitrages.join(', ')}* (ej. _${allowedLitrages[0]}_).`
+          customReply: `Perfecto. Para *${pendingBarrels.names.join('*, *')}*:
+
+*¿Qué tamaño de barril quieres?*
+_(ej: ${allowedLitrages[0]} — disponibles: ${allowedLitrages.join(', ')})_`
         };
       }
       // Si contestó otra cosa, seguimos el flujo normal con ese mensaje
@@ -264,7 +268,10 @@ Si en la imagen viste otro valor, suele ser otro tamaño de barril o formato. ¿
         return {
           success: true,
           nextState: 'EVENTOS_ELECCION_MENU',
-          customReply: `Para ${session.eventoFormato} los tamaños válidos son: *${allowedLitrages.join(', ')}*.\n\n¿Me indicas de nuevo con un litraje compatible? (ej: *Mojito 10L*)`
+          customReply: `Para ${session.eventoFormato} los tamaños válidos son: *${allowedLitrages.join(', ')}*.
+
+*¿Me indicas de nuevo con un litraje compatible?*
+_(ej: Mojito ${allowedLitrages[0]})_`
         };
       }
       const pendingItems = pendingNames.map((name) => ({ name, quantity: 1, litrage: litrageOnly }));
@@ -319,8 +326,8 @@ Si en la imagen viste otro valor, suele ser otro tamaño de barril o formato. ¿
 
 Tu pedido actual:
 ${cart}
-Si quieres quitar algo, dime el cóctel (ej: *quita el mojito*).
-Para agregar, escribe el total en litros (ej: *5L Aperol*).`
+*¿Qué quieres quitar o agregar?*
+_(ej: quita el mojito o 5L Aperol)_`
       };
     }
 
@@ -353,9 +360,13 @@ Para agregar, escribe el total en litros (ej: *5L Aperol*).`
       if (Object.keys(session.orderBuilder.products).length === 0) {
         reply += ASK_COCKTAILS;
       } else if (totalLiters >= minLiters) {
-        reply += `¿Quieres eliminar otro o agregar más? Si está listo, escribe *ok*. 🍸`;
+        reply += `*¿Quieres eliminar otro o agregar más?*
+_(ej: escribe *ok* si está listo)_ 🍸`;
       } else {
-        reply += `Aún faltan litros para el mínimo (*${minLiters}L*). ¿Qué más agregamos? 🍸`;
+        reply += `Aún faltan litros para el mínimo (*${minLiters}L*).
+
+*¿Qué más agregamos?*
+_(ej: 5L Mojito)_ 🍸`;
       }
       return { success: true, nextState: 'EVENTOS_ELECCION_MENU', customReply: reply };
     }
@@ -387,7 +398,11 @@ Para agregar, escribe el total en litros (ej: *5L Aperol*).`
           success: true,
           nextState: 'EVENTOS_ELECCION_MENU',
           customReply: `Aún no hay cócteles en el pedido 😊
-Dime sabor y litros (ej. *5L de mojito*), o escribe *lista* para ver precios.`
+
+*¿Qué cócteles te gustaría incluir?*
+_(ej: 5L de mojito)_
+
+_(o escribe *lista* para ver precios)_`
         };
       }
       const earlyBuilder = new OrderBuilder(formatKey, preciosData);
@@ -397,7 +412,11 @@ Dime sabor y litros (ej. *5L de mojito*), o escribe *lista* para ver precios.`
         return {
           success: true,
           nextState: 'EVENTOS_ELECCION_MENU',
-          customReply: `Tu pedido suma *${earlyLiters}L* y el mínimo para ${session.eventoFormato} es *${minLiters}L*.\n\n${formatEventCartSummary(session.orderBuilder.products, formatKey)}\n¿Qué cóctel o litraje agregamos para llegar al mínimo? 🍸`
+          customReply: `Tu pedido suma *${earlyLiters}L* y el mínimo para ${session.eventoFormato} es *${minLiters}L*.
+
+${formatEventCartSummary(session.orderBuilder.products, formatKey)}
+*¿Qué cóctel o litraje agregamos para llegar al mínimo?*
+_(ej: 5L Mojito)_ 🍸`
         };
       }
       return { success: true, nextState: 'EVENTOS_COTIZACION' };
@@ -453,14 +472,22 @@ Dime sabor y litros (ej. *5L de mojito*), o escribe *lista* para ver precios.`
         success: true,
         nextState: 'EVENTOS_ELECCION_MENU',
         customReply: `Aún no hay cócteles en el pedido 😊
-Dime sabor y litros (ej. *5L de mojito*), o escribe *lista* para ver precios.`
+
+*¿Qué cócteles te gustaría incluir?*
+_(ej: 5L de mojito)_
+
+_(o escribe *lista* para ver precios)_`
       };
     }
 
     // Avanzar solo con lo que ya está en el carrito (sin productos nuevos en este mensaje)
     if (wantsAdvance && cartHasItemsAfter && !hasExtracted) {
       if (currentLiters < minLiters) {
-        const reply = `Tu pedido suma *${currentLiters}L* y el mínimo para ${session.eventoFormato} es *${minLiters}L*.\n\n${formatEventCartSummary(session.orderBuilder.products, formatKey)}\n¿Qué cóctel o litraje agregamos para llegar al mínimo? 🍸`;
+        const reply = `Tu pedido suma *${currentLiters}L* y el mínimo para ${session.eventoFormato} es *${minLiters}L*.
+
+${formatEventCartSummary(session.orderBuilder.products, formatKey)}
+*¿Qué cóctel o litraje agregamos para llegar al mínimo?*
+_(ej: 5L Mojito)_ 🍸`;
         return { success: true, nextState: 'EVENTOS_ELECCION_MENU', customReply: reply };
       }
       return { success: true, nextState: 'EVENTOS_COTIZACION' };

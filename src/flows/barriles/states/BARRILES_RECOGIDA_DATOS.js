@@ -9,11 +9,12 @@ import { exampleConcreteDateHint, normalizeBotDateText } from '../../../logic/co
 
 /**
  * deliveryExample: Fecha concreta cercana + comuna (evita "este sábado").
+ * Estilo canónico: _(ej: …)_ bajo la pregunta.
  *
  * @returns {string}
  */
 function deliveryExample() {
-  return `_"${exampleConcreteDateHint()} en Providencia"_`;
+  return `_(ej: ${exampleConcreteDateHint()} en Providencia)_`;
 }
 
 const AI_PROMPT = `[SISTEMA - ESTADO: DATOS DE DESPACHO]
@@ -24,11 +25,13 @@ Faltan fecha y/o comuna para Barriles Desechables (o el cliente quiere corregirl
 export const BARRILES_RECOGIDA_DATOS = defineState({
   id: 'BARRILES_RECOGIDA_DATOS',
   promptQuestion: () => [
-    `Para armar la cotización con despacho, necesito *fecha* y *comuna* de entrega.`,
-    `Ejemplo: ${deliveryExample()}`
+    `Para armar la cotización con despacho:
+
+*¿Me pasas la fecha y comuna de entrega?*
+${deliveryExample()}`
   ],
-  shortQuestion: () => withAssistantFooter(`¿Me pasas la *fecha* y *comuna* de entrega?
-Ejemplo: ${deliveryExample()}`),
+  shortQuestion: () => withAssistantFooter(`*¿Me pasas la fecha y comuna de entrega?*
+${deliveryExample()}`),
   aiPrompt: AI_PROMPT,
 
   async validateAndProcess(messageText, session) {
@@ -43,7 +46,12 @@ Ejemplo: ${deliveryExample()}`),
       return {
         success: true,
         nextState: 'BARRILES_RECOGIDA_PRODUCTOS',
-        customReply: `Primero elijamos los cócteles 🙂\nDime *qué sabor* y *cuántos* (ej. *1 mojito*), o escribe *lista*.`
+        customReply: `Primero elijamos los cócteles 🙂
+
+*¿Qué sabor y cuántos barriles quieres?*
+_(ej: 1 mojito)_
+
+_(o escribe *lista* para ver la carta)_`
       };
     }
     if (!session.orderBuilder.clientData) {
@@ -81,7 +89,8 @@ Ejemplo: ${deliveryExample()}`),
       return {
         success: true,
         nextState: 'BARRILES_RECOGIDA_DATOS',
-        customReply: `Perfecto, recibí parte de tu información. Me falta:\n\n${missing.join('\n')}\n\n¿Puedes compartirlo?`
+        customReply: `Perfecto, recibí parte de tu información. Me falta:\n\n${missing.join('\n')}\n\n*¿Me pasas lo que falta?*
+${deliveryExample()}`
       };
     }
 
@@ -92,7 +101,12 @@ Ejemplo: ${deliveryExample()}`),
     return {
       success: true,
       nextState: 'BARRILES_RECOGIDA_PRODUCTOS',
-      customReply: `Listo 🙂 Ahora dime *qué sabor* y *cuántos* barriles (ej. *1 mojito y 1 sangría*), o escribe *lista*.`
+      customReply: `Listo 🙂
+
+*¿Qué sabor y cuántos barriles quieres?*
+_(ej: 1 mojito y 1 sangría)_
+
+_(o escribe *lista* para ver la carta)_`
     };
   }
 });

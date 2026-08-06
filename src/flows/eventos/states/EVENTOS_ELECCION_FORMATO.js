@@ -24,7 +24,7 @@ const SHORT_Q = withAssistantFooter(`${MENU_WRITE_CTA}
 
 ${MENU_BLOCK}`);
 
-const ASK_INTRO = `¿Quieres ver los *cócteles* disponibles y *precios*?
+const ASK_INTRO = `*¿Quieres ver los cócteles disponibles y precios?*
 
 ${formatMenuBlock(['Ver carta y precios', 'Hablar con Humano'])}`;
 

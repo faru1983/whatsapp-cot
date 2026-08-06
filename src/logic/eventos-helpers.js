@@ -22,9 +22,9 @@ import { getEventLitersSuggestion } from '../views/templates.js';
 /** Ejemplo canónico (litros primero) — intro menú + re-preguntas. */
 export const EVENT_COCKTAIL_ORDER_EXAMPLE = '5L Mojito y 10L Aperol';
 
-/** Pregunta estándar al pedir cócteles del evento. */
+/** Pregunta estándar al pedir cócteles del evento. Estilo: *pregunta* + _(ej: …)_. */
 export const ASK_EVENT_COCKTAILS = `*¿Qué cócteles te gustaría incluir en tu evento?*
-_(Ej: "${EVENT_COCKTAIL_ORDER_EXAMPLE}")_`;
+_(ej: ${EVENT_COCKTAIL_ORDER_EXAMPLE})_`;
 
 /**
  * parseCelebrationType: Detecta qué celebra el cliente (matrimonio, cumpleaños, etc.).

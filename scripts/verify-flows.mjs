@@ -322,6 +322,22 @@ assert(
     && /^5L\s/i.test(EVENT_COCKTAIL_ORDER_EXAMPLE),
   `pregunta de cócteles orienta litros primero`
 );
+// Estilo canónico de preguntas: *pregunta completa?* + _(ej: …)_ en minúscula
+assert(
+  /\*\¿.+\?\*\n_\(ej: /s.test(ASK_EVENT_COCKTAILS),
+  `ASK_EVENT_COCKTAILS usa *pregunta?* + _(ej: …)_`
+);
+{
+  const { askForMissingBarriles } = await import('../src/logic/cot-barriles-contact.js');
+  const { askForMissingEventosContact } = await import('../src/logic/cot-eventos-contact.js');
+  const askNameB = askForMissingBarriles(['nombre']);
+  const askNameE = askForMissingEventosContact(['nombre']);
+  const askGuestsE = askForMissingEventosContact(['invitados']);
+  assert(/\*\¿.+\?\*\n_\(ej: /s.test(askNameB), `barriles ask nombre: *pregunta?* + _(ej:)_`);
+  assert(/\*\¿.+\?\*\n_\(ej: /s.test(askNameE), `eventos ask nombre: *pregunta?* + _(ej:)_`);
+  assert(/\*\¿.+\?\*\n_\(ej: /s.test(askGuestsE), `eventos ask invitados: *pregunta?* + _(ej:)_`);
+  assert(!/\bEjemplo:|\(Ej:/m.test(askNameB + askNameE + askGuestsE), `ejemplos en minúscula ej: (no Ejemplo:/Ej:)`);
+}
 const dispLitrages = getAllowedLitrages('dispensador');
 const multiLitros = parseEventProductsProgrammatic(
   '5L Mojito y 15L Sangria',
@@ -563,7 +579,7 @@ try {
       input: '1',
       expectState: 'EVENTOS_RECOGIDA_DATOS',
       expectMuted: false,
-      expectIncludes: ['Cocktails on Tap', 'tipo de evento', 'Ejemplo', 'Matrimonio'],
+      expectIncludes: ['Cocktails on Tap', 'tipo de evento', 'ej:', 'matrimonio'],
       expectNotIncludes: ['¡Hola!', 'te guiaré', 'Soy el', 'asistente virtual', 'cocktailsontap.cl/eventos', 'Escribe el número']
     }
   ]);
@@ -578,7 +594,7 @@ try {
       input: '1',
       expectState: 'EVENTOS_RECOGIDA_DATOS',
       expectMuted: false,
-      expectIncludes: ['Cocktails on Tap', 'tipo de evento', 'Ejemplo'],
+      expectIncludes: ['Cocktails on Tap', 'tipo de evento', 'ej:'],
       expectNotIncludes: ['te guiaré', 'Soy el', 'asistente virtual', 'Escribe el número']
     }
   ]);
@@ -1245,7 +1261,7 @@ try {
     const r1 = await st.validateAndProcess('Quitar', session);
     const t1 = typeof r1.customReply === 'string' ? r1.customReply : '';
     assert(r1.nextState === 'EVENTOS_ELECCION_MENU', `Quitar solo no avanza a cotización`);
-    assert(/qu[eé] quieres \*quitar\*/i.test(t1), `pregunta qué quitar`);
+    assert(/qu[eé] quieres quitar/i.test(t1), `pregunta qué quitar`);
     assert(/20L Mojito \(2×10L\)/.test(t1), `lista pedido en litros al pedir qué quitar`);
     assert(Object.keys(session.orderBuilder.products).length === 2, `Quitar solo no borra el carrito`);
   }

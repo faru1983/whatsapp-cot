@@ -21,11 +21,11 @@ import {
 
 const MENU_BLOCK = formatMenuBlock(['Confirmar', 'Corregir']);
 
-const SHORT_Q = withAssistantFooter(`¿Todo bien?
+const SHORT_Q = withAssistantFooter(`*¿Todo bien?*
 
 ${MENU_BLOCK}
 
-Si quieres corregir, escribe el dato directo.`);
+_(ej: escribe el dato directo)_`);
 
 const AI_PROMPT = `[SISTEMA - ESTADO: CONFIRMAR ENVÍO DE COTIZACIÓN EVENTOS]
 El cliente ya dio todos los datos y recibió un resumen (contacto, evento, pedido).
@@ -51,7 +51,8 @@ export const EVENTOS_CONFIRMAR_ENVIO = defineState({
         nextState: 'EVENTOS_ELECCION_MENU',
         customReply:
           `Claro, ajustemos el menú. Actualmente tienes:\n\n${cart || '_(vacío)_'}\n\n` +
-          `¿Qué deseas cambiar?\n• Nuevo total en litros (ej: *"20L Mojito y 10L Aperol"*)\n• Quitar (ej: *"quita el aperol"*)\n• Agregar (ej: *"agrega 5L Sangría"*)`
+          `*¿Qué deseas cambiar?*
+_(ej: 20L Mojito y 10L Aperol / quita el aperol / agrega 5L Sangría)_`
       };
     }
 
@@ -97,8 +98,10 @@ export const EVENTOS_CONFIRMAR_ENVIO = defineState({
         success: true,
         nextState: 'EVENTOS_CONFIRMAR_ENVIO',
         customReply:
-          `Claro, ¿qué dato quieres cambiar? Puedes escribirlo directo (ej: "email ana@nuevo.com", "son 80 invitados" o "es en Providencia").\n\n` +
-          `Si quieres cambiar los *cócteles*, dime qué agregar o quitar.`,
+          `*¿Qué dato quieres cambiar?*
+_(ej: email ana@nuevo.com, son 80 invitados o es en Providencia)_
+
+_(si quieres cambiar los *cócteles*, dime qué agregar o quitar)_`,
         flowProgress: true
       };
     }

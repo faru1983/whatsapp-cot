@@ -106,6 +106,7 @@ function monthNumberHint(monthName) {
 
 /**
  * askForMissingBarriles: Pregunta corta según lo que falte para generar la compra.
+ * Estilo canónico: *pregunta completa?* + _(ej: …)_ en la línea siguiente.
  *
  * @param {string[]} missing
  * @param {object} [session]
@@ -127,53 +128,84 @@ export function askForMissingBarriles(missing, session = {}) {
       const exampleDay = exampleConcreteDateHint();
       if (hasPartialDate && monthOnly) {
         const mm = monthNumberHint(monthOnly);
-        return `Me indicaste entrega en *${monthOnly}*. ¿Me confirmas el *día tentativo*?\n\nEjemplo: _15 de ${monthOnly.toLowerCase()}_ o _15/${mm}/2026_\n\nEs necesario para generar la compra.`;
+        return `Me indicaste entrega en *${monthOnly}*.
+
+*¿Me confirmas el día tentativo?*
+_(ej: 15 de ${monthOnly.toLowerCase()} o 15/${mm}/2026)_
+
+_Es necesario para generar la compra._`;
       }
       if (hasPartialDate) {
-        return `Anoté *${dateText}*, pero para generar la compra necesito el *día concreto*.\n\n¿Me confirmas una fecha tentativa? (ej. *${exampleDay}* o *15/05/2026*)`;
+        return `Anoté *${dateText}*, pero necesito el *día concreto* para generar la compra.
+
+*¿Me confirmas una fecha tentativa?*
+_(ej: ${exampleDay} o 15/05/2026)_`;
       }
-      return `Para generar la compra necesito la *fecha de entrega*.\n\n¿Me confirmas un día tentativo? (ej. *${exampleDay}* o *15/05/2026*)`;
+      return `Para generar la compra:
+
+*¿Me confirmas la fecha de entrega?*
+_(ej: ${exampleDay} o 15/05/2026)_`;
     }
 
     if (field === 'comuna') {
-      return `Para generar la compra necesito la *comuna* de entrega.\n\n¿Me confirmas dónde enviamos? (ej. *Providencia* o *Las Condes*)`;
+      return `Para generar la compra:
+
+*¿Me confirmas la comuna de entrega?*
+_(ej: Providencia o Las Condes)_`;
     }
 
     if (field === 'direccion') {
       const comuna = getDeliveryLocationText(session);
       if (comuna) {
-        return (
-          `Para el despacho en *${comuna}*, ¿me confirmas la *dirección completa*?\n\n` +
-          `Ejemplo: _Los Alerces 123, Depto 456_`
-        );
+        return `Para el despacho en *${comuna}*:
+
+*¿Me confirmas la dirección completa?*
+_(ej: Los Alerces 123, Depto 456)_`;
       }
-      return `Para el despacho, ¿me confirmas la *dirección completa*?\n\nEjemplo: _Los Alerces 123, Depto 456_`;
+      return `Para generar la compra:
+
+*¿Me confirmas la dirección completa de despacho?*
+_(ej: Los Alerces 123, Depto 456)_`;
     }
 
     if (field === 'nombre') {
-      return `Para generar tu compra online, ¿me confirmas tu *nombre*?\n\nEjemplo: _Ana_`;
+      return `Para generar tu compra online:
+
+*¿Me confirmas tu nombre?*
+_(ej: Ana)_`;
     }
 
     if (field === 'apellido') {
       if (firstName) {
-        return `Gracias *${firstName}*. Para completar la compra, ¿me confirmas tu *apellido*?\n\nEjemplo: _Pérez_`;
+        return `Gracias *${firstName}*. Para completar la compra:
+
+*¿Me confirmas tu apellido?*
+_(ej: Pérez)_`;
       }
-      return `Para completar la compra, ¿me confirmas tu *apellido*?\n\nEjemplo: _Pérez_`;
+      return `Para completar la compra:
+
+*¿Me confirmas tu apellido?*
+_(ej: Pérez)_`;
     }
 
     if (field === 'email') {
-      return `Listo${firstName ? `, *${firstName}*` : ''}. Para enviarte la *copia del pedido*, ¿me confirmas tu *email*?\n\nEjemplo: _ana@email.com_`;
+      return `Listo${firstName ? `, *${firstName}*` : ''}. Para enviarte la copia del pedido:
+
+*¿Me confirmas tu email?*
+_(ej: ana@email.com)_`;
     }
 
-    return `Para generar la compra necesito este dato: *${field}*. ¿Me lo compartes?`;
+    return `Para generar la compra:
+
+*¿Me compartes este dato: ${field}?*`;
   }
 
   const contactBits = missing.filter((m) => ['nombre', 'apellido', 'email'].includes(m));
   if (contactBits.length) {
-    return (
-      `Para generar tu *compra online* y enviarte la copia al correo, necesito: *${contactBits.join(', ')}*.\n` +
-      `Puedes escribirlos juntos, ej: _Ana Pérez, ana@email.com_`
-    );
+    return `Para generar tu *compra online*:
+
+*¿Me compartes ${contactBits.join(', ')}?*
+_(ej: Ana Pérez, ana@email.com)_`;
   }
 
   const deliveryBits = missing.filter((m) => ['fecha', 'comuna'].includes(m));
@@ -185,7 +217,7 @@ export function askForMissingBarriles(missing, session = {}) {
     return askForMissingBarriles(['direccion'], session);
   }
 
-  return `Para generar la compra me falta: *${missing.join(', ')}*. ¿Me lo compartes?`;
+  return `*¿Me compartes lo que falta: ${missing.join(', ')}?*`;
 }
 
 /**

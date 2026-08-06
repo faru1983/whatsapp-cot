@@ -8,7 +8,7 @@ import { withAssistantFooter, formatMenuBlock } from '../../../logic/flow-rails.
 
 const MENU_BLOCK = formatMenuBlock(['Cambiar cócteles', 'Actualizar datos']);
 
-const SHORT_Q = withAssistantFooter(`¿Qué deseas cambiar?
+const SHORT_Q = withAssistantFooter(`*¿Qué deseas cambiar?*
 
 ${MENU_BLOCK}`);
 
@@ -18,7 +18,7 @@ Indica que escriba *1* (cócteles) o *2* (datos). Máximo 2 frases.`;
 export const BARRILES_ROUTER_MODIFICACION = defineState({
   id: 'BARRILES_ROUTER_MODIFICACION',
   promptQuestion: () => [
-    `Claro, ¿qué deseas cambiar?
+    `*¿Qué deseas cambiar?*
 
 ${MENU_BLOCK}`,
     `Escribe *1* o *2* para saber qué necesitas ajustar 🔧`
@@ -52,7 +52,11 @@ ${MENU_BLOCK}`,
       const lines = Object.entries(session.orderBuilder.products || {})
         .map(([n, q]) => `- ${q}x ${n}`)
         .join('\n') || '_Vacío_';
-      const reply = `Perfecto, volvamos a los cócteles. Actualmente tienes:\n${lines}\n\n¿Qué deseas agregar o eliminar? (ej: "agrega 1 mojito" o "elimina 1 aperol")`;
+      const reply = `Perfecto, volvamos a los cócteles. Actualmente tienes:
+${lines}
+
+*¿Qué deseas agregar o eliminar?*
+_(ej: agrega 1 mojito o elimina 1 aperol)_`;
       return { success: true, nextState: 'BARRILES_RECOGIDA_PRODUCTOS', customReply: reply };
     }
 
@@ -65,7 +69,8 @@ ${MENU_BLOCK}`,
 📅 Fecha: *${session.orderBuilder.clientData?.date || 'Por confirmar'}*
 📍 Comuna: *${session.orderBuilder.clientData?.location || 'Por confirmar'}*
 
-Escribe el dato nuevo (ej: _"es en Ñuñoa"_ o _"para el viernes"_).`
+*¿Qué dato quieres actualizar?*
+_(ej: es en Ñuñoa o para el viernes)_`
       };
     }
 

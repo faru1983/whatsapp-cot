@@ -13,11 +13,11 @@ import { withAssistantFooter, formatMenuBlock } from '../../../logic/flow-rails.
 
 const MENU_BLOCK = formatMenuBlock(['Confirmar', 'Corregir']);
 
-const SHORT_Q = withAssistantFooter(`¿Todo bien?
+const SHORT_Q = withAssistantFooter(`*¿Todo bien?*
 
 ${MENU_BLOCK}
 
-Si quieres corregir, también puedes escribir el dato directo (ej. _son 80 invitados_).`);
+_(ej: son 80 invitados)_`);
 
 const AI_PROMPT = `[SISTEMA - ESTADO: CONFIRMAR DATOS DEL EVENTO]
 El cliente ya tiene al menos la cantidad de invitados y recibió un resumen (celebración/fecha/comuna pueden decir "Por confirmar").
@@ -84,7 +84,10 @@ export const EVENTOS_CONFIRMAR_DATOS = defineState({
       return {
         success: true,
         nextState: 'EVENTOS_CONFIRMAR_DATOS',
-        customReply: `Claro, ¿qué dato quieres cambiar? Puedes escribirlo directo (ej: "son 80 invitados", "es en Providencia" o "15 de mayo").`
+        customReply: `Claro.
+
+*¿Qué dato quieres cambiar?*
+_(ej: son 80 invitados, es en Providencia o 15 de mayo)_`
       };
     }
 

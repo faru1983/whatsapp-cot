@@ -74,6 +74,7 @@ function monthNumberHint(monthName) {
 
 /**
  * askForMissingEventosContact: Pregunta corta según lo que falte para la API.
+ * Estilo canónico: *pregunta completa?* + _(ej: …)_ en la línea siguiente.
  *
  * @param {string[]} missing
  * @param {object} [session]
@@ -93,46 +94,77 @@ export function askForMissingEventosContact(missing, session = {}) {
       const monthOnly = capitalizeMonthHint(session.date);
       if (hasPartialDate && monthOnly) {
         const mm = monthNumberHint(monthOnly);
-        return `Me indicaste que el evento es en *${monthOnly}*. ¿Me confirmas el *día tentativo*?\n\nEjemplo: _15 de ${monthOnly.toLowerCase()}_ o _15/${mm}/2026_\n\nEs necesario para generar la cotización formal.`;
+        return `Me indicaste que el evento es en *${monthOnly}*.
+
+*¿Me confirmas el día tentativo?*
+_(ej: 15 de ${monthOnly.toLowerCase()} o 15/${mm}/2026)_
+
+_Es necesario para generar la cotización formal._`;
       }
       if (hasPartialDate) {
-        return `Anoté *${session.date}*, pero para generar la cotización necesito el *día concreto*.\n\n¿Me confirmas una fecha tentativa? (ej. *15 de mayo* o *15/05/2026*)`;
+        return `Anoté *${session.date}*, pero necesito el *día concreto* para generar la cotización formal.
+
+*¿Me confirmas una fecha tentativa?*
+_(ej: 15 de mayo o 15/05/2026)_`;
       }
-      return `Para generar la cotización formal necesito la *fecha del evento*.\n\n¿Me confirmas un día tentativo? (ej. *15 de mayo* o *15/05/2026*)`;
+      return `Para generar la cotización formal:
+
+*¿Me confirmas la fecha del evento?*
+_(ej: 15 de mayo o 15/05/2026)_`;
     }
 
     if (field === 'comuna') {
-      return `Para generar la cotización formal necesito la *comuna* del evento.\n\n¿Me confirmas dónde será? (ej. *Providencia* o *Las Condes*)`;
+      return `Para generar la cotización formal:
+
+*¿Me confirmas la comuna del evento?*
+_(ej: Providencia o Las Condes)_`;
     }
 
     if (field === 'invitados') {
-      return `Para generar la cotización formal necesito la cantidad de *invitados*.\n\n¿Cuántas personas serán aproximadamente? (ej. *50*)`;
+      return `Para generar la cotización formal:
+
+*¿Cuántos invitados serán aproximadamente?*
+_(ej: 50)_`;
     }
 
     if (field === 'nombre') {
-      return `Para enviarte la cotización formal, ¿me confirmas tu *nombre*?\n\nEjemplo: _Ana_`;
+      return `Para enviarte la cotización formal:
+
+*¿Me confirmas tu nombre?*
+_(ej: Ana)_`;
     }
 
     if (field === 'apellido') {
       if (firstName) {
-        return `Gracias *${firstName}*. Para completar la cotización formal, ¿me confirmas tu *apellido*?\n\nEjemplo: _Pérez_`;
+        return `Gracias *${firstName}*. Para completar la cotización formal:
+
+*¿Me confirmas tu apellido?*
+_(ej: Pérez)_`;
       }
-      return `Para completar la cotización formal, ¿me confirmas tu *apellido*?\n\nEjemplo: _Pérez_`;
+      return `Para completar la cotización formal:
+
+*¿Me confirmas tu apellido?*
+_(ej: Pérez)_`;
     }
 
     if (field === 'email') {
-      return `Listo${firstName ? `, *${firstName}*` : ''}. Para enviarte la *copia de la cotización formal*, ¿me confirmas tu *email*?\n\nEjemplo: _ana@email.com_`;
+      return `Listo${firstName ? `, *${firstName}*` : ''}. Para enviarte la copia de la cotización formal:
+
+*¿Me confirmas tu email?*
+_(ej: ana@email.com)_`;
     }
 
-    return `Para generar la cotización formal necesito este dato: *${field}*. ¿Me lo compartes?`;
+    return `Para generar la cotización formal:
+
+*¿Me compartes este dato: ${field}?*`;
   }
 
   const contactBits = missing.filter((m) => ['nombre', 'apellido', 'email'].includes(m));
   if (contactBits.length) {
-    return (
-      `Para enviarte la cotización formal a tu correo, necesito: *${contactBits.join(', ')}*.\n` +
-      `Puedes escribirlos juntos, ej: _Ana Pérez, ana@email.com_`
-    );
+    return `Para enviarte la cotización formal:
+
+*¿Me compartes ${contactBits.join(', ')}?*
+_(ej: Ana Pérez, ana@email.com)_`;
   }
 
   const eventBits = missing.filter((m) => !['nombre', 'apellido', 'email'].includes(m));
@@ -140,7 +172,7 @@ export function askForMissingEventosContact(missing, session = {}) {
     return askForMissingEventosContact([eventBits[0]], session);
   }
 
-  return `Para generar la cotización formal me falta: *${missing.join(', ')}*. ¿Me lo compartes?`;
+  return `*¿Me compartes lo que falta: ${missing.join(', ')}?*`;
 }
 
 /**

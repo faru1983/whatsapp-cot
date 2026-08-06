@@ -15,7 +15,7 @@ import { withAssistantFooter, formatMenuBlock } from '../../../logic/flow-rails.
 
 const MENU_BLOCK = formatMenuBlock(['Continuar', 'Modificar']);
 
-const SHORT_Q = withAssistantFooter(`¿Te parece bien la cotización?
+const SHORT_Q = withAssistantFooter(`*¿Te parece bien la cotización?*
 
 ${MENU_BLOCK}`);
 
@@ -70,7 +70,8 @@ export const EVENTOS_COTIZACION = defineState({
       session.quotationGenerated = false;
       const formatKey = getEventFormatKey(session.eventoFormato);
       const cart = formatEventCartSummary(session.orderBuilder?.products || {}, formatKey);
-      const reply = `Claro, ajustemos el menú. Actualmente tienes:\n\n${cart || '_(vacío)_'}\n\n¿Qué deseas cambiar?\n• Nuevo total en litros (ej: *"20L Mojito y 10L Aperol"*)\n• Quitar un cóctel (ej: *"quita el aperol"*)\n• Agregar (ej: *"agrega 5L Sangría"*)`;
+      const reply = `Claro, ajustemos el menú. Actualmente tienes:\n\n${cart || '_(vacío)_'}\n\n*¿Qué deseas cambiar?*
+_(ej: 20L Mojito y 10L Aperol / quita el aperol / agrega 5L Sangría)_`;
       return { success: true, nextState: 'EVENTOS_ELECCION_MENU', customReply: reply };
     }
 
@@ -85,8 +86,8 @@ Para dejarte la *cotización formal* —con el detalle completo y una *copia en 
 
 Así te queda guardada, la revisas con calma y la compartes con quien organice contigo el evento.
 
-¿Me compartes *nombre*, *apellido* y *email*?
-Ejemplo: _Ana Pérez, ana@email.com_
+*¿Me compartes nombre, apellido y email?*
+_(ej: Ana Pérez, ana@email.com)_
 
 _Antes de crear la cotización revisaremos juntos que todo esté bien._`
       };

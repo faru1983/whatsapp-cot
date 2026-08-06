@@ -124,7 +124,8 @@ export function getFlavorListReply(family, opciones, opts = {}) {
   }
   if (withLiters) {
     const example = (opciones && opciones[0]) || family;
-    text += `\nDime cuál quieres y los litros (ej: *10L ${example}*). 🍹`;
+    text += `\n*¿Cuál quieres y en qué litros?*
+_(ej: 10L ${example})_ 🍹`;
   } else {
     text += `\n*(Dime el nombre de la que quieres para poder agregarla)* 🍹`;
   }
@@ -453,7 +454,10 @@ export function getEventDataSummary(session) {
 
   return [
     lines.join('\n'),
-    `¿Todo bien con estos datos?\n\nEscribe *OK* para continuar, o corrige lo que necesites _(ej: "son 80 invitados" / "es en Providencia")_`
+    `*¿Todo bien con estos datos?*
+
+Escribe *OK* para continuar, o corrige lo que necesites.
+_(ej: son 80 invitados / es en Providencia)_`
   ];
 }
 
@@ -497,7 +501,11 @@ export function getBarrilesPurchaseSummary(session) {
   const menu = formatMenuBlock(['Confirmar', 'Corregir']);
   return [
     lines.join('\n'),
-    `¿Todo bien?\n\n${menu}\n\nSi quieres corregir, escribe el dato directo _(ej. "dirección Los Alerces 99")_.`
+    `*¿Todo bien?*
+
+${menu}
+
+_(ej: escribe el dato directo — "dirección Los Alerces 99")_`
   ];
 }
 
@@ -554,7 +562,11 @@ export function getEventosEnvioSummary(session) {
   const menu = formatMenuBlock(['Confirmar', 'Corregir']);
   return [
     lines.join('\n'),
-    `¿Todo bien?\n\n${menu}\n\nSi quieres corregir, escribe el dato directo _(ej. "email ana@nuevo.com" / "son 80 invitados")_.`
+    `*¿Todo bien?*
+
+${menu}
+
+_(ej: escribe el dato directo — "email ana@nuevo.com" / "son 80 invitados")_`
   ];
 }
 

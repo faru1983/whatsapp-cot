@@ -24,12 +24,12 @@ import { BARRILES_RECOGIDA_PRODUCTOS } from './BARRILES_RECOGIDA_PRODUCTOS.js';
 
 /**
  * deliveryExampleLine: Ejemplo con fecha concreta (hoy Chile + 3 días).
- * Evita "este sábado" para que el cliente diga día+mes desde el inicio.
+ * Estilo canónico: _(ej: …)_ en la línea bajo la pregunta.
  *
  * @returns {string}
  */
 function deliveryExampleLine() {
-  return `Ejemplo: _"Providencia, ${exampleConcreteDateHint()}"_`;
+  return `_(ej: Providencia, ${exampleConcreteDateHint()})_`;
 }
 
 /**
@@ -38,8 +38,7 @@ function deliveryExampleLine() {
  * @returns {string}
  */
 function shortQuestionForDelivery() {
-  return withAssistantFooter(`¿De *qué comuna* nos escribes y *para cuándo* lo quieres?
-
+  return withAssistantFooter(`*¿De qué comuna nos escribes y para cuándo lo quieres?*
 ${deliveryExampleLine()}`);
 }
 
@@ -49,8 +48,9 @@ ${deliveryExampleLine()}`);
  * @returns {string}
  */
 function askDeliveryCopy() {
-  return `Si prefieres seguir por aquí y ver el catálogo, cuéntame de *qué comuna* nos escribes y *para cuándo* lo quieres.
+  return `Si prefieres seguir por aquí y ver el catálogo:
 
+*¿De qué comuna nos escribes y para cuándo lo quieres?*
 ${deliveryExampleLine()}`;
 }
 
@@ -147,8 +147,8 @@ function applyDeliveryDataFromMessage(messageText, session) {
 function repliesEnterCatalog() {
   return [
     img('barril_desechable_precios.webp', 'Aquí va la lista de sabores y precios 👆'),
-    `Cuando la revises, dime *qué sabor* y *cuántos* barriles quieres.
-Ejemplo: *1 mojito y 1 sangría*`
+    `*¿Qué sabor y cuántos barriles quieres?*
+_(ej: 1 mojito y 1 sangría)_`
   ];
 }
 

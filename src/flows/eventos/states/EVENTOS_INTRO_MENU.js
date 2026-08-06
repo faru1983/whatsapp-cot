@@ -14,7 +14,7 @@ import { buildAdminSosBody } from '../../../views/templates.js';
 
 const MENU_BLOCK = formatMenuBlock(['Ver carta y precios', 'Hablar con Humano']);
 
-const SHORT_Q = withAssistantFooter(`¿Quieres ver los cócteles disponibles y precios?
+const SHORT_Q = withAssistantFooter(`*¿Quieres ver los cócteles disponibles y precios?*
 
 ${MENU_BLOCK}`);
 
