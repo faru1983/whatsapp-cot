@@ -173,11 +173,21 @@ assert(findLocationByFuzzyMatch('no') == null, `"no" sigue sin ser comuna`);
 
 // hasDrinkSelection: fechas con día NO deben parecer pedido de cócteles
 {
-  const { hasDrinkSelection } = await import('../src/logic/utils.js');
+  const { hasDrinkSelection, hasProductOrderSignal } = await import('../src/logic/utils.js');
+  const { isGreetingOrNoise } = await import('../src/logic/interruptions.js');
   assert(!hasDrinkSelection('Providencia, 5 de agosto'), `"Providencia, 5 de agosto" no es pedido de cócteles`);
   assert(!hasDrinkSelection('Las Condes, 15 de mayo'), `fecha+comuna no es pedido de cócteles`);
   assert(hasDrinkSelection('2 mojitos y 1 sangría'), `sí detecta pedido de cócteles`);
   assert(hasDrinkSelection('1 aperol'), `sí detecta aperol`);
+
+  // Cortesía / señal de pedido (anti alucinación NLU en menú de cócteles)
+  assert(isGreetingOrNoise('Gracias por la información'), `gracias por la info = ruido`);
+  assert(isGreetingOrNoise('perfecto gracias'), `perfecto gracias = ruido`);
+  assert(isGreetingOrNoise('muchas gracias'), `muchas gracias = ruido`);
+  assert(!isGreetingOrNoise('gracias, 10L Mojito'), `gracias + cóctel NO es solo ruido`);
+  assert(!hasProductOrderSignal('Gracias por la información'), `cortesía sin señal de pedido`);
+  assert(hasProductOrderSignal('10L Mojito'), `10L Mojito sí es señal`);
+  assert(hasProductOrderSignal('2 barriles'), `2 barriles sí es señal`);
 }
 
 // Fechas: día+mes (con/sin "de"), solo mes, y conversión ISO para la API
@@ -1286,6 +1296,51 @@ try {
       expectSosReason: 'después de recibir el menú'
     }
   ]);
+
+  console.log('\n-- Eventos menú: cortesía no inventa cócteles (ni Barriles) --');
+  resetSession(SESSION_ID);
+  {
+    const session = getSession(SESSION_ID);
+    session.currentState = 'EVENTOS_ELECCION_MENU';
+    session.userIntent = 'EVENTOS';
+    session.eventoFormato = 'Muro de Coctelería';
+    session.guests = 40;
+    session.orderBuilder = { type: 'muro', products: {}, extras: {} };
+    // Contexto típico: el bot acabó de mostrar rendimiento + ej. "5L Mojito…"
+    session.history = {
+      turns: [{
+        role: 'model',
+        text: 'Para orientarte…\n\n¿Qué cócteles te gustaría incluir?\n_(ej: 5L Mojito y 10L Aperol)_'
+      }]
+    };
+
+    const st = statesMap.EVENTOS_ELECCION_MENU;
+    const r = await st.validateAndProcess('Gracias por la información', session);
+    assert(r.success === false, 'cortesía en menú eventos → success false (sin inventar carrito)');
+    assert(Object.keys(session.orderBuilder.products).length === 0, 'carrito eventos sigue vacío');
+
+    const r2 = await st.validateAndProcess('perfecto gracias', session);
+    assert(r2.success === false, 'perfecto gracias → sin productos');
+  }
+  resetSession(SESSION_ID);
+  {
+    const session = getSession(SESSION_ID);
+    session.currentState = 'BARRILES_RECOGIDA_PRODUCTOS';
+    session.userIntent = 'BARRILES';
+    session.orderBuilder = {
+      type: 'desechable',
+      products: {},
+      extras: {},
+      clientData: { date: '08/08/2026', location: 'Providencia' }
+    };
+    session.history = {
+      turns: [{ role: 'model', text: '¿Qué sabor? _(ej: 1 mojito y 1 sangría)_' }]
+    };
+    const st = statesMap.BARRILES_RECOGIDA_PRODUCTOS;
+    const r = await st.validateAndProcess('Gracias por la información', session);
+    assert(r.success === false, 'cortesía en menú barriles → success false');
+    assert(Object.keys(session.orderBuilder.products).length === 0, 'carrito barriles sigue vacío');
+  }
 
   console.log('\n-- Eventos menú muro monito aperol y duda de precio --');
   resetSession(SESSION_ID);

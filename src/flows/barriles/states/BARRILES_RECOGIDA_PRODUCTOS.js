@@ -18,9 +18,14 @@ import {
   detectFlavorListRequest,
   asksCocktailFlavorList,
   getProductFamilyBase,
-  getCatalogFamilyFlavorOptions
+  getCatalogFamilyFlavorOptions,
+  hasProductOrderSignal
 } from '../../../logic/utils.js';
-import { wantsAdvanceProductsOrder, isOnlyAdvanceProductsOrder } from '../../../logic/interruptions.js';
+import {
+  wantsAdvanceProductsOrder,
+  isOnlyAdvanceProductsOrder,
+  isGreetingOrNoise
+} from '../../../logic/interruptions.js';
 import { extractProductsWithAI } from '../../../core/llm.js';
 import { OrderBuilder } from '../../../logic/order-builder.js';
 import { getDoubtClarificationTemplate, getBrowseOnlyGoodbye, getFlavorListReply } from '../../../views/templates.js';
@@ -218,6 +223,11 @@ _(ej: quita el mojito)_`
       };
     }
 
+    // Cortesía / ruido sin pedido → re-pregunta del engine (sin NLU)
+    if (isGreetingOrNoise(messageText) && !hasProductOrderSignal(messageText)) {
+      return { success: false };
+    }
+
     let lastBotMessage = '';
     if (session.history?.turns?.length > 0) {
       const botTurns = session.history.turns.filter((t) => t.role === 'model');
@@ -239,6 +249,9 @@ _(ej: quita el mojito)_`
       extractedList = programmatic;
     } else if (interceptedOption) {
       extractedList.push(interceptedOption);
+    } else if (!hasProductOrderSignal(extractText || messageText)) {
+      // Sin señal de cóctel/barril → no llamar NLU (evita inventar productos)
+      return { success: false };
     } else {
       const result = await extractProductsWithAI(extractText || messageText, catalogNames, lastBotMessage);
       extractedList = result.productos;

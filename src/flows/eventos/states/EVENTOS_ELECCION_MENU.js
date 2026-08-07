@@ -7,6 +7,7 @@ import { defineState } from '../../../logic/compile-state.js';
 import { getDoubtClarificationTemplate, getFlavorListReply } from '../../../views/templates.js';
 import {
   hasDrinkSelection,
+  hasProductOrderSignal,
   preciosData,
   resolveDoubtsProgrammatically,
   interceptBotOptionsAnswer,
@@ -20,7 +21,12 @@ import {
   getProductFamilyBase,
   getCatalogFamilyFlavorOptions
 } from '../../../logic/utils.js';
-import { wantsAdvanceProductsOrder, isOnlyAdvanceProductsOrder, asksPriceOrCatalog } from '../../../logic/interruptions.js';
+import {
+  wantsAdvanceProductsOrder,
+  isOnlyAdvanceProductsOrder,
+  asksPriceOrCatalog,
+  isGreetingOrNoise
+} from '../../../logic/interruptions.js';
 import { extractEventProductsWithAI } from '../../../core/llm.js';
 import { OrderBuilder } from '../../../logic/order-builder.js';
 import {
@@ -422,6 +428,11 @@ _(ej: 5L Mojito)_ 🍸`
       return { success: true, nextState: 'EVENTOS_COTIZACION' };
     }
 
+    // Cortesía / ruido sin pedido → engine re-pregunta (sin NLU que invente cócteles)
+    if (isGreetingOrNoise(messageText) && !hasProductOrderSignal(messageText)) {
+      return { success: false };
+    }
+
     // Último mensaje del bot da contexto a la IA (ej. si el cliente elige una marca)
     let lastBotMessage = '';
     if (session.history?.turns?.length > 0) {
@@ -452,6 +463,10 @@ _(ej: 5L Mojito)_ 🍸`
       extractedList = programmaticNames.map((name) => ({ name, quantity: 1, litrage: defaultLitrage }));
     } else if (interceptedOption) {
       extractedList.push({ ...interceptedOption, litrage: defaultLitrage });
+    } else if (!hasProductOrderSignal(extractText || messageText)) {
+      // Sin señal de pedido (cóctel/litraje/barriles): no llamar NLU — evita alucinaciones
+      // tipo "Gracias por la información" → Mojito desde el ejemplo del bot.
+      return { success: false };
     } else {
       const result = await extractEventProductsWithAI(extractText || messageText, catalogNames, formatKey, lastBotMessage);
       extractedList = result.productos;

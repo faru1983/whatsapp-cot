@@ -25,7 +25,7 @@ import {
 
 /**
  * isGreetingOrNoise: ¿El mensaje es solo cortesía, saludo o entusiasmo?
- * Ej.: "hola", "¡Hola!", "Hola buen dia", "Hoooola q genial", "ok", "gracias".
+ * Ej.: "hola", "gracias", "Gracias por la información", "perfecto gracias".
  * NO es una elección de canal ni de producto: el bot debe re-preguntar el paso.
  *
  * @param {string} messageText - Lo que escribió el cliente
@@ -44,6 +44,25 @@ export function isGreetingOrNoise(messageText) {
 
   // Saludos / ok / gracias / listo (mensaje completo)
   if (/^(hola+|holi|buenas|buen\s*d[ií]a|buenas\s*tardes|buenas\s*noches|hey|hi|hello|ok|okay|dale|gracias|thank(s)?|ya|listo|de\s+nada|genial|super|súper|perfecto|buenísimo|buenisimo|wow|wena|wenas)$/i.test(stripped)) {
+    return true;
+  }
+
+  // "gracias por la información / ayuda / todo" (sin pedido de producto)
+  if (/^(muchas\s+)?gracias(\s+por\s+(la\s+)?(informaci[oó]n|info|ayuda|el\s+dato|tu\s+ayuda|la\s+respuesta|todo|aclarar))?$/i.test(stripped)) {
+    return true;
+  }
+
+  // "perfecto gracias", "ok gracias", "entendí", "de acuerdo"
+  if (/^(ok|okay|dale|listo|ya|perfecto|genial|super|s[uú]per|buen[ií]simo|bac[aá]n|entend[ií]|claro|de\s+acuerdo)([,!.\s]+(gracias|ok|okay|dale|perfecto|genial|super))*[.!]*$/i.test(stripped)) {
+    return true;
+  }
+
+  // "gracias …" corto sin verbo de compra / cóctel / litraje
+  if (
+    /^gracias\b/i.test(stripped)
+    && stripped.length <= 70
+    && !/\b(quiero|quisiera|necesito|agrega|suma|pide|pedir|cotiz|compr|barril|coctel|c[oó]ctel|\d+\s*l\b)/i.test(stripped)
+  ) {
     return true;
   }
 

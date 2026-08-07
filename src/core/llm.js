@@ -143,6 +143,7 @@ Ejemplo 5 (Avance): {"analisis": "Dijo que no quiere agregar más nada.", "produ
 
 IMPORTANTE: Si el usuario solo dice "seguimos", "listo", "solo estos" o similar, productos DEBE ser [] (nunca copies el carrito del mensaje anterior del bot).
 Si no pide nada o pide cosas que no existen, devuelve arrays vacíos.
+REGLA CRÍTICA: Si el mensaje es SOLO cortesía ("gracias", "gracias por la información", "perfecto gracias") SIN nombrar cóctel, productos=[] y quiere_avanzar=false. NUNCA inventes un producto desde el ejemplo del bot.
 REGLA CRÍTICA: En los campos "name" y "opciones", debes usar EXACTAMENTE el nombre que aparece en el catálogo. Copia y pega letra por letra. Prohibido cambiar el orden de las palabras.
 Catálogo válido estricto:
 ${catalogNames.join('\n')}`;
@@ -258,6 +259,7 @@ Ejemplo 4: {"analisis":"Pidió pisco sour clásico 10L y solicitó mojito sabore
 Ejemplo 5: {"analisis":"Dijo que solo esos.","productos":[],"dudas":[],"quiere_avanzar":true}
 
 Si no pide nada o pide cosas que no existen, devuelve arrays vacíos.
+REGLA CRÍTICA: Si el mensaje es SOLO cortesía o acuse de recibo ("gracias", "gracias por la información", "perfecto", "ok gracias", "entendí") SIN nombrar cóctel ni litraje, productos=[] y quiere_avanzar=false. NUNCA inventes un cóctel desde el ejemplo del bot.
 REGLA CRÍTICA: En "name" y "opciones" usa EXACTAMENTE el nombre del catálogo. Copia y pega letra por letra.
 Catálogo válido estricto:
 ${catalogNames.join('\n')}`;

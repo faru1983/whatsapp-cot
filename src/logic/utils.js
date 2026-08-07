@@ -462,6 +462,23 @@ export function hasDrinkSelection(text) {
 	return dynamicDrinkKeywords.test(normalizedText);
 }
 
+/**
+ * hasProductOrderSignal: ¿Hay indicios de pedido de cócteles/barriles?
+ * Si es false, NO conviene llamar al NLU de productos (evita inventar Mojito
+ * desde el ejemplo del bot ante "Gracias por la información").
+ *
+ * @param {string} text - Mensaje del cliente
+ * @returns {boolean}
+ */
+export function hasProductOrderSignal(text) {
+	const raw = String(text || '').trim();
+	if (!raw) return false;
+	if (hasDrinkSelection(raw)) return true;
+	// Cantidad explícita de barriles/unidades sin nombre aún ("2 barriles")
+	if (/\b\d+\s*(barriles?|unidades?|envases?)\b/i.test(raw)) return true;
+	return false;
+}
+
 // ==============================================================================
 // INTENCIÓN: SOLO MIRANDO
 // (usado en filtro de canal de barriles y despedidas similares)
