@@ -36,7 +36,7 @@ import {
 import { clearNudgeFlag } from '../logic/inactivity-nudge.js';
 import { waitBeforeFirstReply, waitBetweenBubbles } from '../logic/reply-timing.js';
 import { jidToE164 } from '../logic/cot-event-quote.js';
-import { syncCrmCuriousAsync, syncCrmNameAsync, notifyCrmOnBotStateChange } from '../logic/cot-crm-sync.js';
+import { syncCrmCuriousAsync, syncCrmNameAsync, syncCrmIntentAsync, notifyCrmOnBotStateChange } from '../logic/cot-crm-sync.js';
 import {
   getCotApiWriteMode,
   setCotApiWriteMode,
@@ -341,8 +341,14 @@ async function processMessageUnlocked(sessionId, messageText, options = {}) {
   const pushName = String(options.pushName || '').trim();
   if (pushName) session.clientPushName = pushName;
 
-  // CRM Curioso: primer mensaje con teléfono (cualquier estado / CTWA Meta)
-  if (phone && !session.crmCuriousSynced) {
+  // CRM Curioso: en ESPERANDO_INTENCION lo dispara el router al final del turno
+  // (así el 1er mensaje "Barriles"/"Eventos" lleva intent en el mismo POST).
+  // En otros estados (mid-flow / CTWA) sync inmediato.
+  const deferCuriousForRouter =
+    !session.crmCuriousSynced &&
+    String(session.currentState || 'ESPERANDO_INTENCION') === 'ESPERANDO_INTENCION';
+
+  if (phone && !session.crmCuriousSynced && !deferCuriousForRouter) {
     // Si ya tenemos clid en sesión, el Lead CAPI saldrá con atribución CTWA
     if (session.metaCtwaClid) session.metaCtwaSyncedToCrm = true;
     syncCrmCuriousAsync(session);
@@ -528,6 +534,8 @@ async function processMessageUnlocked(sessionId, messageText, options = {}) {
 
         cliLog(`SWITCH: cliente cambia intención → ${switchIntent}`);
         session.userIntent = switchIntent;
+        session.crmIntentSynced = false;
+        syncCrmIntentAsync(session);
         session.consecutiveErrors = 0;
 
         // Limpiamos datos del flujo que se abandona para no “saltar” pasos

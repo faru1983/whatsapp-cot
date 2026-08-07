@@ -80,7 +80,7 @@ function buildContactApiPayload(session, {
 }
 
 /**
- * resolveCrmIntentFromSession: Mapea userIntent del bot → intent CRM (event | direct).
+ * resolveCrmIntentFromSession: Mapea userIntent / estado del bot → intent CRM (event | direct).
  *
  * @param {object} session
  * @returns {'event'|'direct'|undefined}
@@ -89,6 +89,9 @@ function resolveCrmIntentFromSession(session) {
   const ui = String(session?.userIntent || '').toUpperCase();
   if (ui === 'EVENTOS') return 'event';
   if (ui === 'BARRILES') return 'direct';
+  const sid = String(session?.currentState || '');
+  if (sid.startsWith('EVENTOS_')) return 'event';
+  if (sid.startsWith('BARRILES_')) return 'direct';
   return undefined;
 }
 
@@ -152,6 +155,7 @@ function buildEngagedCrmNote(intent, snapshot) {
 
 /**
  * syncCrmCurious: Primer contacto WA → stage curious (CRM/touchpoint; CAPI solo en engaged).
+ * Si la sesión ya tiene carril (Eventos/Barriles), envía `intent` en el mismo POST.
  * Idempotente a nivel session (crmCuriousSynced).
  *
  * @param {object} session
@@ -169,14 +173,21 @@ export async function syncCrmCurious(session) {
     return;
   }
 
+  const intent = resolveCrmIntentFromSession(session);
   session.crmCuriousSynced = true;
   try {
     const res = await createContactViaApi(
-      buildContactApiPayload(session, { touchpointType: 'bot_started' })
+      buildContactApiPayload(session, {
+        touchpointType: 'bot_started',
+        engagedContext: intent
+          ? { intent, snapshot: { userIntent: session.userIntent || null } }
+          : null,
+      })
     );
     if (res.success && res.clientId) {
       session.crmClientId = res.clientId;
       if (contactFirstNameFromSession(session)) session.crmNameSynced = true;
+      if (intent) session.crmIntentSynced = true;
     } else if (!res.success) {
       session.crmCuriousSynced = false;
       console.error('CRM curious sync falló:', res.error);
@@ -184,6 +195,61 @@ export async function syncCrmCurious(session) {
   } catch (err) {
     session.crmCuriousSynced = false;
     console.error('CRM curious sync error:', err);
+  }
+}
+
+/**
+ * syncCrmIntent: Parchea clients.intent cuando el carril ya se conoce (sigue Curioso).
+ * Cubre el caso: Curioso se envió en el 1er mensaje sin intent, y luego eligió Barriles/Eventos.
+ * Idempotente (crmIntentSynced). Al cambiar de carril, el caller debe resetear esa bandera.
+ *
+ * @param {object} session
+ * @returns {Promise<void>}
+ */
+export async function syncCrmIntent(session) {
+  if (!session || session.crmIntentSynced) return;
+  const intent = resolveCrmIntentFromSession(session);
+  if (!intent) return;
+  if (!isCotApiConfigured()) return;
+  if (isTestDebug()) return;
+
+  const phone = session.clientPhoneE164;
+  if (!phone) {
+    console.warn('CRM intent sync omitido: sin teléfono E.164 en sesión', session.sessionId || '');
+    return;
+  }
+
+  // Aún no hubo Curioso: un solo POST con intent incluido
+  if (!session.crmCuriousSynced) {
+    await syncCrmCurious(session);
+    return;
+  }
+
+  session.crmIntentSynced = true;
+  try {
+    const res = await createContactViaApi(
+      buildContactApiPayload(session, {
+        touchpointType: 'bot_started',
+        sendCapiLead: false,
+        engagedContext: {
+          intent,
+          snapshot: { userIntent: session.userIntent || null },
+        },
+        extraPayload: {
+          userIntent: session.userIntent || null,
+          intentPatch: true,
+        },
+      })
+    );
+    if (res.success && res.clientId) {
+      session.crmClientId = res.clientId;
+    } else if (!res.success) {
+      session.crmIntentSynced = false;
+      console.error('CRM intent sync falló:', res.error);
+    }
+  } catch (err) {
+    session.crmIntentSynced = false;
+    console.error('CRM intent sync error:', err);
   }
 }
 
@@ -224,6 +290,7 @@ export async function syncCrmEngaged(session, touchpointType = 'intent_selected'
     if (res.success && res.clientId) {
       session.crmClientId = res.clientId;
       if (contactFirstNameFromSession(session)) session.crmNameSynced = true;
+      if (engagedContext.intent) session.crmIntentSynced = true;
     } else if (!res.success) {
       session.crmEngagedSynced = false;
       console.error('CRM engaged sync falló:', res.error);
@@ -320,6 +387,10 @@ export function syncCrmCuriousAsync(session) {
   void syncCrmCurious(session);
 }
 
+export function syncCrmIntentAsync(session) {
+  void syncCrmIntent(session);
+}
+
 export function syncCrmEngagedAsync(session, touchpointType, extraPayload) {
   void syncCrmEngaged(session, touchpointType, extraPayload);
 }
@@ -356,7 +427,8 @@ function shouldEngageCrmOnTransition(from, to) {
  * notifyCrmOnBotStateChange: Dispara Interesado en la transición correcta del flujo.
  *
  * Reglas:
- * - Curioso: primer mensaje (syncCrmCurious), no este helper.
+ * - Curioso: primer mensaje / menú (syncCrmCurious; con intent si ya hay carril).
+ * - Intent CRM: al elegir Barriles/Eventos (mismo stage Curioso, syncCrmIntent).
  * - Interesado Eventos: CONFIRMAR_DATOS → ELECCION_FORMATO (datos ya confirmados).
  * - Interesado Barriles: INTRO_MENU → RECOGIDA_PRODUCTOS (eligió cotizar).
  * - No Interesado: pitch, menú intro sin cotizar, o solo avanzar recogida Eventos.
