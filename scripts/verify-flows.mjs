@@ -733,7 +733,7 @@ try {
       input: '2️⃣',
       expectState: 'BARRILES_FILTRO_CANAL',
       expectMuted: false,
-      expectIncludes: ['barriles desechables', 'listos para servir', '31.990', 'cóctel te gustaría probar'],
+      expectIncludes: ['barriles desechables', 'listos para servir', '31.990', 'cóctel que te interesa'],
       expectNotIncludes: ['¡Hola!', 'te guiaré', 'Soy el', 'asistente virtual']
     }
   ]);
@@ -748,7 +748,7 @@ try {
       input: '2',
       expectState: 'BARRILES_FILTRO_CANAL',
       expectMuted: false,
-      expectIncludes: ['barriles desechables', 'listos para servir', 'cóctel te gustaría probar'],
+      expectIncludes: ['barriles desechables', 'listos para servir', 'cóctel que te interesa'],
       expectNotIncludes: ['te guiaré', 'Soy el', 'asistente virtual']
     }
   ]);
@@ -798,7 +798,7 @@ try {
       input: 'Hola, quiero más info sobre los barriles desechables',
       expectState: 'BARRILES_FILTRO_CANAL',
       expectMuted: false,
-      expectIncludes: ['barriles desechables', 'listos para servir', 'cóctel te gustaría probar'],
+      expectIncludes: ['barriles desechables', 'listos para servir', 'cóctel que te interesa'],
       expectNotIncludes: ['¡Hola!', 'te guiaré', 'Soy el', 'asistente virtual']
     }
   ]);
@@ -836,7 +836,7 @@ try {
       input: 'barriles',
       expectState: 'BARRILES_FILTRO_CANAL',
       expectMuted: false,
-      expectIncludes: ['barriles desechables', 'listos para servir', 'cóctel te gustaría probar'],
+      expectIncludes: ['barriles desechables', 'listos para servir', 'cóctel que te interesa'],
       expectNotIncludes: ['te guiaré', 'Soy el', 'asistente virtual']
     }
   ]);
@@ -2415,7 +2415,7 @@ try {
     assert(okBar.stallKey === buildStallKey('BARRILES_FILTRO_CANAL', 'flavor'), 'stallKey barriles=flavor');
     const msgB = buildNudgeMessage(barrilesSession, baseCfg);
     assert(/Barriles Desechables/i.test(msgB), 'copy retoma barriles');
-    assert(/c[oó]ctel te gustar[ií]a probar/i.test(msgB), 'barriles pide sabor');
+    assert(/c[oó]ctel que te interesa|cat[aá]logo completo/i.test(msgB), 'barriles pide sabor');
     assert(/cocktailsontap\.cl\/barriles/i.test(msgB), 'copy web barriles');
     assert(!/Ejemplo:/i.test(msgB) && !/_\(ej:/i.test(msgB), 'barriles sin ejemplo duplicado');
 

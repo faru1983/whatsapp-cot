@@ -143,7 +143,7 @@ export async function resolveBarrilesFlavorMatch(messageText, lastBotMessage = '
     const { productos } = await extractProductsWithAI(
       messageText,
       catalogNames,
-      lastBotMessage || '*¿Qué cóctel te gustaría probar?* 🍹'
+      lastBotMessage || 'Escribe el nombre del *cóctel que te interesa* y te enviaré el *catálogo completo*.'
     );
     const first = Array.isArray(productos) && productos.length > 0 ? productos[0] : null;
     if (!first?.name) return null;

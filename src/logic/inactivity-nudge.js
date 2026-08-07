@@ -230,7 +230,7 @@ function nudgePendingAsk(stateId, session, pendingKey) {
 
   // Barriles intro: sabor pendiente
   if (stateId === 'BARRILES_FILTRO_CANAL' || pendingKey === 'flavor') {
-    return '*¿Qué cóctel te gustaría probar?* 🍹';
+    return 'Escribe el nombre del *cóctel que te interesa* y te enviaré el *catálogo completo*.';
   }
   if (stateId === 'BARRILES_INTRO_MENU') {
     return 'Escribe *1* para *cotizar* o *2* si tienes una *consulta*.';
