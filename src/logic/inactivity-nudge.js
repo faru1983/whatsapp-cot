@@ -2,10 +2,11 @@
 // OBJETIVO: Elegibilidad y copy del nudge por inactividad (v1).
 // Solo primer paso de Barriles/Eventos; 1 nudge por sesión hasta que el cliente
 // escriba de nuevo. No mutea: el bot sigue disponible si el lead vuelve.
+// Copy: headline motivador + pregunta corta del dato pendiente (sin ejemplos).
 // ==============================================================================
 
 import { getPendingFlowRequirement } from './flow-stall.js';
-import { getOnMissHint, formatMenuBlock, MENU_WRITE_CTA } from './flow-rails.js';
+import { formatMenuBlock, MENU_WRITE_CTA } from './flow-rails.js';
 
 /** URL web por flujo (misma que usan los estados de entrada). */
 const WEB_BY_STATE = {
@@ -176,23 +177,74 @@ export function evaluateNudgeEligibility(session, nudgeConfig, nowMs = Date.now(
 }
 
 /**
- * resumeHeadline: Primera línea del nudge según el flujo.
+ * resumeHeadline: Gancho corto según flujo + dato pendiente (sin re-formulario).
  *
  * @param {string} stateId
+ * @param {string|null} pendingKey
  * @returns {string}
  */
-function resumeHeadline(stateId) {
+function resumeHeadline(stateId, pendingKey) {
   if (stateId === 'BARRILES_FILTRO_CANAL') {
+    if (pendingKey === 'delivery') {
+      return '¿Seguimos con tus *Barriles Desechables*? Con fecha y comuna te armo el pedido altiro 🍸';
+    }
     return '¿Seguimos con tus *Barriles Desechables*? 🍸';
   }
+
   if (stateId === 'EVENTOS_RECOGIDA_DATOS') {
+    if (pendingKey === 'celebration') {
+      return '¿Seguimos con tu cotización de *Servicio para Eventos*? Queda poquito 🥂';
+    }
+    if (pendingKey === 'guests') {
+      return '¿Seguimos con tu cotización de *Servicio para Eventos*? Con los invitados te armo la propuesta 🥂';
+    }
     return '¿Seguimos con tu cotización de *Servicio para Eventos*? 🥂';
   }
+
   return '¿Seguimos con tu cotización? 🍸';
 }
 
 /**
- * buildNudgeMessage: Texto del nudge (retomar + dato pendiente + web + IG).
+ * nudgePendingAsk: Pregunta limpia del dato que falta (sin _(ej:…)_ ni tip extra).
+ * Así el nudge no duplica ejemplos del on-miss del flujo.
+ *
+ * @param {string} stateId
+ * @param {object} session
+ * @param {string|null} pendingKey
+ * @returns {string}
+ */
+function nudgePendingAsk(stateId, session, pendingKey) {
+  if (pendingKey === 'celebration') {
+    return '*¿Qué tipo de evento estás organizando?*';
+  }
+  if (pendingKey === 'guests') {
+    return '*¿Cuántos invitados serán aproximadamente?*';
+  }
+  if (pendingKey === 'logistics') {
+    return '*¿Me compartes fecha y comuna del evento?*';
+  }
+  if (pendingKey === 'intent') {
+    return 'Escribe *1* *Eventos*, *2* *Barriles* o *3* *Humano* para seguir.';
+  }
+
+  // Barriles: fecha/comuna (parcial o ambas)
+  if (stateId === 'BARRILES_FILTRO_CANAL' || pendingKey === 'delivery' || pendingKey === 'client_data') {
+    const cd = session?.orderBuilder?.clientData;
+    if (cd?.location && !cd?.date) {
+      return '*¿Cuál es la fecha de entrega?*';
+    }
+    if (cd?.date && !cd?.location) {
+      return '*¿Cuál es la comuna de entrega?*';
+    }
+    return '*¿Me pasas la fecha y comuna de entrega?*';
+  }
+
+  return '*¿Me ayudas con el dato que faltaba para seguir?*';
+}
+
+/**
+ * buildNudgeMessage: Texto del nudge (gancho + pregunta del paso + web/IG opcionales).
+ * Una sola pregunta, sin ejemplos duplicados.
  *
  * @param {object} session
  * @param {object} nudgeConfig
@@ -203,35 +255,19 @@ export function buildNudgeMessage(session, nudgeConfig) {
   if (!stateId) return null;
 
   const pendingKey = getPendingFlowRequirement(session, stateId);
-  const hint = getOnMissHint(stateId, session, pendingKey)
-    || 'Para avanzar, responde con el dato que te pedí.';
+  const ask = nudgePendingAsk(stateId, session, pendingKey);
 
   const lines = [
-    resumeHeadline(stateId),
+    resumeHeadline(stateId, pendingKey),
     '',
-    hint
+    ask
   ];
-
-  // Tip concreto por flujo (ejemplos que ya usa el bot)
-  if (stateId === 'EVENTOS_RECOGIDA_DATOS') {
-    lines.push('');
-    if (pendingKey === 'celebration') {
-      lines.push('Ejemplo: _"Matrimonio"_, _"Cumpleaños"_ o _"Empresa"_ (si aún no lo sabes: *aún no lo sé*).');
-    } else if (pendingKey === 'guests') {
-      lines.push('Ejemplo: _"50 invitados"_ o _"unas 80 personas"_');
-    } else {
-      lines.push('Ejemplo: _"15 de mayo, Las Condes"_ (o *después* para seguir)');
-    }
-  } else if (stateId === 'BARRILES_FILTRO_CANAL') {
-    lines.push('');
-    lines.push('Ejemplo: _"Providencia, 15 de mayo"_');
-  }
 
   if (nudgeConfig?.includeWeb) {
     const web = WEB_BY_STATE[stateId];
     if (web) {
       lines.push('');
-      lines.push('¿Prefieres ver todo con calma?');
+      lines.push('Si ahora no puedes, también lo puedes ver con calma:');
       lines.push(`👉 ${web}`);
     }
   }
@@ -240,7 +276,7 @@ export function buildNudgeMessage(session, nudgeConfig) {
     lines.push(`📸 ${INSTAGRAM_URL}`);
   }
 
-  // Si quedó en menú raro, recordamos escribir opción (no aplica en v1, pero no molesta)
+  // Menú de intención (por si amplían NUDGE_STATES a ESPERANDO_INTENCION)
   if (pendingKey === 'intent') {
     lines.push('');
     lines.push(MENU_WRITE_CTA);

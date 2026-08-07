@@ -2151,6 +2151,19 @@ try {
     assert(/invitados/i.test(msgE), 'copy pide invitados');
     assert(/cocktailsontap\.cl\/eventos/i.test(msgE), 'copy incluye web eventos');
     assert(/instagram\.com\/cocktailsontap\.chile/i.test(msgE), 'copy incluye Instagram');
+    assert(!/Ejemplo:/i.test(msgE), 'nudge sin tip "Ejemplo:" duplicado');
+    assert(!/_\(ej:/i.test(msgE), 'nudge sin línea _(ej:…)_');
+    assert(!/Prefieres ver todo con calma/i.test(msgE), 'CTA web suave (sin copy viejo)');
+
+    // celebration: pregunta limpia del tipo de evento
+    const msgCel = buildNudgeMessage({
+      ...eventosSession,
+      celebrationType: null,
+      guests: null
+    }, baseCfg);
+    assert(/tipo de evento/i.test(msgCel), 'nudge celebration pide tipo de evento');
+    assert(!/Ejemplo:/i.test(msgCel) && !/_\(ej:/i.test(msgCel), 'celebration sin ejemplo doble');
+    assert(/Queda poquito|Seguimos/i.test(msgCel), 'celebration con gancho');
 
     markNudgeSent(eventosSession, okEventos.stallKey, now);
     const blocked = evaluateNudgeEligibility(eventosSession, baseCfg, now);
@@ -2176,7 +2189,17 @@ try {
     assert(okBar.stallKey === buildStallKey('BARRILES_FILTRO_CANAL', 'delivery'), 'stallKey barriles=delivery');
     const msgB = buildNudgeMessage(barrilesSession, baseCfg);
     assert(/Barriles Desechables/i.test(msgB), 'copy retoma barriles');
+    assert(/fecha y comuna/i.test(msgB), 'barriles pide fecha/comuna');
     assert(/cocktailsontap\.cl\/barriles/i.test(msgB), 'copy web barriles');
+    assert(!/Ejemplo:/i.test(msgB) && !/_\(ej:/i.test(msgB), 'barriles sin ejemplo duplicado');
+
+    // Barriles parcial: solo falta fecha
+    const msgBDate = buildNudgeMessage({
+      ...barrilesSession,
+      orderBuilder: { clientData: { date: null, location: 'Providencia' } }
+    }, baseCfg);
+    assert(/fecha de entrega/i.test(msgBDate), 'barriles parcial → solo fecha');
+    assert(!/comuna de entrega/i.test(msgBDate), 'barriles parcial no pide comuna otra vez');
 
     // Off master switch
     assert(
