@@ -36,9 +36,9 @@ _Solo los refrigeras, sirves y disfrutas._ Si sobra, simplemente vuelves a guard
 ✅ Se conservan refrigerados por *más de 3 semanas*.
 ✅ Desde *$31.990*, según el sabor.
 
-📍 Despachamos en toda la *Región Metropolitana* y enviamos a *Regiones* por encomienda.
+📍 Despachamos en toda la *Región Metropolitana* y enviamos a otras *Regiones* por Blue Express.
 
-*¿Qué tipo de cóctel buscas hoy?*`;
+*¿Qué cóctel te gustaría probar?* 🍹`;
 }
 
 /**
@@ -47,7 +47,7 @@ _Solo los refrigeras, sirves y disfrutas._ Si sobra, simplemente vuelves a guard
  * @returns {string}
  */
 function shortQuestionForFlavor() {
-  return withAssistantFooter(`*¿Qué tipo de cóctel buscas hoy?*
+  return withAssistantFooter(`*¿Qué cóctel te gustaría probar?* 🍹
 _(ej: Mojito, Pisco Sour, algo refrescante)_`);
 }
 
@@ -59,12 +59,12 @@ En la *web* encuentras sabores, fotos y precios, y puedes comprar cuando quieras
 ¡Gracias por tu interés!`;
 
 const AI_PROMPT = `[SISTEMA - ESTADO: ENTRADA BARRILES (pitch + sabor)]
-Eres el asistente virtual de Cocktails on Tap. El cliente vio el pitch de Barriles Desechables y debe decir *qué tipo de cóctel busca* (ej. "sangría", "tienes mojito?").
+Eres el asistente virtual de Cocktails on Tap. El cliente vio el pitch de Barriles Desechables y debe decir *qué cóctel le gustaría probar* (ej. "sangría", "tienes mojito?").
 0. NO digas "hola" ni te presentes como asistente virtual (el copy de entrada ya es directo).
 1. Si pregunta por un sabor concreto, confirma disponibilidad con datos reales; no inventes cócteles.
 2. Dudas breves OK (precios desde *$31.990*, 5L ≈ 25 cócteles, despacho). NUNCA inventes tarifas.
 3. NUNCA pegues el catálogo completo como tabla de texto.
-4. Al final, vuelve a preguntar qué tipo de cóctel busca.`;
+4. Al final, vuelve a preguntar qué cóctel le gustaría probar.`;
 
 export const BARRILES_FILTRO_CANAL = defineState({
   id: 'BARRILES_FILTRO_CANAL',
