@@ -425,6 +425,63 @@ export function getCartaCocteles(format = 'desechable', options = {}) {
 	return text;
 }
 
+/**
+ * buildCategoryNameBulletLines: Lista nombres de una categoría con viñetas.
+ * Agrupa variantes de familia (Mojito Maracuyá, …) en una sola línea.
+ *
+ * @param {object[]} items - Cócteles de una categoría (salen de getCoctelesByCategoria)
+ * @returns {string} Líneas "- Nombre" o "- Familia (sabor1, sabor2)"
+ */
+function buildCategoryNameBulletLines(items) {
+	const names = items.map((item) => item.name).sort((a, b) => a.localeCompare(b, 'es'));
+	/** @type {Map<string, string[]>} */
+	const byFamily = new Map();
+	const singles = [];
+
+	for (const name of names) {
+		const base = getProductFamilyBase(name);
+		if (base) {
+			if (!byFamily.has(base)) byFamily.set(base, []);
+			byFamily.get(base).push(name);
+		} else {
+			singles.push(name);
+		}
+	}
+
+	const lines = [];
+	for (const [base, familyNames] of [...byFamily.entries()].sort((a, b) => a[0].localeCompare(b[0], 'es'))) {
+		if (familyNames.length === 1) {
+			lines.push(`- ${familyNames[0]}`);
+			continue;
+		}
+		const variants = familyNames.map((name) => formatVariantLabel(name, base));
+		lines.push(`- ${base} (${variants.join(', ')})`);
+	}
+	for (const name of singles) {
+		lines.push(`- ${name}`);
+	}
+	return lines.join('\n');
+}
+
+/**
+ * getCoctelesNamesCatalog: Carta solo con nombres (sin precios), agrupada por categoría.
+ * Sirve para "¿cuáles tienes?" sin depender del FAQ/LLM ni cortar el mensaje.
+ *
+ * @returns {string}
+ */
+export function getCoctelesNamesCatalog() {
+	const cats = getCoctelesByCategoria();
+	const clasicos = buildCategoryNameBulletLines(cats['CLÁSICOS']);
+	const combinados = buildCategoryNameBulletLines(cats.COMBINADOS);
+	const mocktails = buildCategoryNameBulletLines(cats.MOCKTAILS);
+
+	let text = '*Estos son los cócteles que manejamos:*\n\n';
+	text += `🍸 *CLÁSICOS*\n${clasicos}`;
+	text += `\n\n🥃 *COMBINADOS*\n${combinados}`;
+	text += `\n\n🍹 *MOCKTAILS (Sin Alcohol)*\n${mocktails}`;
+	return text;
+}
+
 let dynamicDrinkKeywords = null;
 
 export function hasDrinkSelection(text) {
@@ -1587,6 +1644,47 @@ export function asksCocktailFlavorList(messageText) {
 	if (hasFlavorWord && hasAskCue) return true;
 	if (/\b(mojito|piscola|sangria)\s+sabores?\b/.test(norm)) return true;
 	if (/\bsabores?\s+(de\s+)?(mojito|piscola|sangria)\b/.test(norm)) return true;
+	return false;
+}
+
+/**
+ * asksAvailableCocktailsList: ¿Pregunta qué cócteles hay en general?
+ * Ej.: "¿cuáles tienes?", "¿qué cócteles hay?", "¿qué sabores tienen?"
+ * No aplica si ya nombra un cóctel concreto en el pedido (hasDrinkSelection).
+ *
+ * @param {string} messageText
+ * @returns {boolean}
+ */
+export function asksAvailableCocktailsList(messageText) {
+	const raw = String(messageText || '').trim();
+	if (!raw) return false;
+	const norm = normalizeString(raw);
+
+	// Pregunta por sabores de una familia concreta → la maneja detectFlavorListRequest
+	if (asksCocktailFlavorList(messageText)) {
+		const catalogNames = Object.keys(preciosData.cocteles || {});
+		for (const name of catalogNames) {
+			const base = getProductFamilyBase(name);
+			if (!base) continue;
+			if (norm.includes(normalizeString(base)) && /\b(sabor|sabores|variedad|variedades)\b/.test(norm)) {
+				return false;
+			}
+		}
+	}
+
+	const hasCatalogCue = /\b(coctel|cocteles|bebida|bebidas|tragos?|opciones|sabores?|variedades?)\b/.test(norm);
+	const hasAskCue = /\b(que|cual|cuales|cuantos|cuantas|tienen|tienes|hay|ofrecen|sirven|venden|disponible|manejan|tienen)\b/.test(norm)
+		|| /\?/.test(raw);
+
+	if (hasCatalogCue && hasAskCue) return true;
+
+	// Corto y directo: "cuales tienes", "que hay", "cuales son"
+	if (/^(cu[aá]les?|qu[eé])\s+(tienen|tienes|hay|ofrecen|sirven|venden)\b/.test(norm)) return true;
+	if (/^(cu[aá]les?|qu[eé])\s+(son\s+)?(los|las)\b/.test(norm)
+		&& !/\b(personas|invitados|formatos?|servicios?|precios?|fechas?|horas?|dias?|d[ií]as)\b/.test(norm)) {
+		return true;
+	}
+
 	return false;
 }
 

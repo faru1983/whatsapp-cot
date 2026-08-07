@@ -27,6 +27,7 @@ import {
   logLabelReadyStatus
 } from './core/whatsapp-send.js';
 import { startNudgeRunner, stopNudgeRunner } from './core/nudge-runner.js';
+import { waitBeforeFirstReply, waitBetweenBubbles } from './logic/reply-timing.js';
 import process from 'node:process';
 import fs from 'node:fs';
 
@@ -682,10 +683,16 @@ async function startBot() {
           console.warn(`assertSessions falló para ${targetJid}:`, e.message);
         }
 
-        // Envío inmediato de cada bloque (sin delay entre customReplies:
-        // un delay aquí hacía que el cliente escribiera "entre medio" de dos mensajes).
-        for (const part of replies) {
+        // Ritmo natural: pausa tras el usuario + pausa entre burbujas (REPLY_DELAY_*).
+        // Mientras espera mostramos "escribiendo…" para que no se sienta cortado.
+        const timing = botConfig.replyTiming || {};
+        await waitBeforeFirstReply(sock, targetJid, timing);
+
+        for (let i = 0; i < replies.length; i++) {
+          const part = replies[i];
           if (!part) continue;
+
+          await waitBetweenBubbles(sock, targetJid, timing, i);
 
           if (typeof part === 'string') {
             await sendTracked(sock, targetJid, { text: part });

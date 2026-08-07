@@ -176,6 +176,8 @@ _(ej: 15 de mayo, Las Condes — o escribe *después*)_`,
     confirm: 'Revisa los datos: escribe *1* *Confirmar* o *2* *Corregir* (o el dato nuevo).',
     delivery: `*¿Me pasas la fecha y comuna de entrega?*
 _(ej: Providencia, 5 de agosto)_`,
+    flavor: `*¿Qué tipo de cóctel buscas hoy?*
+_(ej: Mojito, Pisco Sour)_`,
     products: `*¿Qué sabor y cuántos barriles quieres?*
 _(ej: 2 mojitos — o escribe *lista*)_`,
     format: 'Escribe *1* *Dispensador* o *2* *Muro* para seguir.',
@@ -190,10 +192,15 @@ _(ej: Ana Pérez, ana@email.com)_`,
 _(ej: Providencia, 5 de agosto)_`
   };
 
+  // Barriles intro menú: continue = cotizar/consulta (no “ver carta” de Eventos)
+  if (stateId === 'BARRILES_INTRO_MENU') {
+    return 'Escribe *1* para *cotizar* o *2* si tienes una *consulta*.';
+  }
+
   if (key && hints[key]) return hints[key];
 
-  // Refinamiento por estado si hace falta
-  if (stateId === 'BARRILES_FILTRO_CANAL') {
+  // Refinamiento parcial fecha/comuna en recogida de datos barriles
+  if (stateId === 'BARRILES_RECOGIDA_DATOS') {
     const cd = session.orderBuilder?.clientData;
     if (cd?.location && !cd?.date) {
       return `*¿Cuál es la fecha de entrega?*

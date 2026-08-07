@@ -2,6 +2,7 @@
 // OBJETIVO: Barrel del flujo Barriles — junta los estados en barrilesStates.
 // ==============================================================================
 import { BARRILES_FILTRO_CANAL } from './states/BARRILES_FILTRO_CANAL.js';
+import { BARRILES_INTRO_MENU } from './states/BARRILES_INTRO_MENU.js';
 import { BARRILES_RECOGIDA_PRODUCTOS } from './states/BARRILES_RECOGIDA_PRODUCTOS.js';
 import { BARRILES_RECOGIDA_DATOS } from './states/BARRILES_RECOGIDA_DATOS.js';
 import { BARRILES_REVISION_COTIZACION } from './states/BARRILES_REVISION_COTIZACION.js';
@@ -14,6 +15,7 @@ import { BARRILES_CONFIRMAR_COMPRA } from './states/BARRILES_CONFIRMAR_COMPRA.js
  */
 export const barrilesStates = {
   BARRILES_FILTRO_CANAL,
+  BARRILES_INTRO_MENU,
   BARRILES_RECOGIDA_PRODUCTOS,
   BARRILES_RECOGIDA_DATOS,
   BARRILES_REVISION_COTIZACION,

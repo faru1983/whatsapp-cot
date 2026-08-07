@@ -315,6 +315,26 @@ export function wantsBrowseOnlyClose(messageText) {
 }
 
 /**
+ * wantsPricesOnlyBrowseClose: Solo quiere ver precios/carta y deja claro que NO sigue cotizando.
+ * Ej: "solo quiero ver precios", "no cotizo, mándame la lista".
+ * NO aplica a "cuánto vale el mojito?" ni "qué precios tienen?" mientras sigue en el flujo.
+ *
+ * @param {string} messageText
+ * @returns {boolean}
+ */
+export function wantsPricesOnlyBrowseClose(messageText) {
+  const trimmed = String(messageText || '').trim();
+  if (!trimmed) return false;
+  if (!asksPriceOrCatalog(trimmed) && !/\b(ver\s+precios|ver\s+la\s+carta|ver\s+cat[aá]logo)\b/i.test(trimmed)) {
+    return false;
+  }
+  // Debe haber señal explícita de no continuar / solo mirar
+  const noContinue = /\b(solo\s+(quiero\s+|necesito\s+)?(ver|mirar|consultar)|solo\s+(precios|la\s+carta|el\s+cat[aá]logo)|no\s+(quiero|deseo|voy\s+a)\s+(cotiz|pedir|comprar|seguir|continuar)|sin\s+cotiz|nada\s+m[aá]s|solo\s+eso|no\s+sigo|despu[eé]s\s+cotiz)\b/i.test(trimmed)
+    || isOnlyBrowsing(trimmed);
+  return noContinue;
+}
+
+/**
  * wantsExplicitHandoff: Detecta de forma segura si el cliente solicita asistencia humana,
  * evitando falsos positivos con palabras como "personas" o "contacto" a menos que estén
  * en frases estructuradas.

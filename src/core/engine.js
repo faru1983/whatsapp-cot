@@ -34,6 +34,7 @@ import {
   MENU_WRITE_REMINDER
 } from '../logic/flow-rails.js';
 import { clearNudgeFlag } from '../logic/inactivity-nudge.js';
+import { waitBeforeFirstReply, waitBetweenBubbles } from '../logic/reply-timing.js';
 import { jidToE164 } from '../logic/cot-event-quote.js';
 import { syncCrmCuriousAsync, syncCrmNameAsync, notifyCrmOnBotStateChange } from '../logic/cot-crm-sync.js';
 import {
@@ -484,6 +485,7 @@ async function processMessageUnlocked(sessionId, messageText, options = {}) {
   if (currentStateId !== 'ESPERANDO_INTENCION' && currentStateId !== 'CERRADO') {
     const earlyStates = [
       'BARRILES_FILTRO_CANAL',
+      'BARRILES_INTRO_MENU',
       'BARRILES_RECOGIDA_PRODUCTOS',
       'EVENTOS_RECOGIDA_DATOS',
       'EVENTOS_CONFIRMAR_DATOS'
@@ -580,8 +582,12 @@ async function processMessageUnlocked(sessionId, messageText, options = {}) {
   const skipFaqForContextualPrice = asksCocktailPriceOrCatalog(messageText)
     && resolveFlowLane(session, currentStateId) !== 'UNKNOWN';
 
+  // Intro Barriles: el estado hace match de sabor ("tienes sangría?") antes que el FAQ genérico.
+  const skipFaqForBarrilesFlavorIntro = currentStateId === 'BARRILES_FILTRO_CANAL';
+
   // Si ya hubo un strike y el paso sigue pendiente, no usamos FAQ: dejamos que el fallback cuente el strike
-  if (isQuestion && canPrecheckFaq && !flowAlreadyStalling && faqSidequestAllowed && !skipFaqForContextualPrice) {
+  if (isQuestion && canPrecheckFaq && !flowAlreadyStalling && faqSidequestAllowed
+      && !skipFaqForContextualPrice && !skipFaqForBarrilesFlavorIntro) {
     cliLog(`FAQ PRE-CHECK: Detectada posible pregunta en '${messageText}'`);
     const faqData = JSON.parse(fs.readFileSync(FAQ_JSON_PATH, 'utf8'));
     const faqResponse = await responderFAQ(messageText, faqData, {
@@ -1179,7 +1185,11 @@ function cliChat() {
     // --- Respuesta del bot (si hubo) ---
     if (response) {
       const replies = Array.isArray(response) ? response : [response];
+      const timing = botConfig.replyTiming || {};
+      // Mismo ritmo que WhatsApp real (REPLY_DELAY_*), para probar el feeling en local
+      await waitBeforeFirstReply(null, null, timing);
       for (let i = 0; i < replies.length; i++) {
+        await waitBetweenBubbles(null, null, timing, i);
         const label = replies.length > 1 ? `Bot (${i + 1}/${replies.length})` : 'Bot';
         const part = replies[i];
         if (typeof part === 'string') {

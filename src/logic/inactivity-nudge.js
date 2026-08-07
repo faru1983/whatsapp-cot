@@ -11,6 +11,7 @@ import { formatMenuBlock, MENU_WRITE_CTA } from './flow-rails.js';
 /** URL web por flujo (misma que usan los estados de entrada). */
 const WEB_BY_STATE = {
   BARRILES_FILTRO_CANAL: 'https://cocktailsontap.cl/barriles',
+  BARRILES_INTRO_MENU: 'https://cocktailsontap.cl/barriles',
   EVENTOS_RECOGIDA_DATOS: 'https://cocktailsontap.cl/eventos'
 };
 
@@ -185,10 +186,10 @@ export function evaluateNudgeEligibility(session, nudgeConfig, nowMs = Date.now(
  */
 function resumeHeadline(stateId, pendingKey) {
   if (stateId === 'BARRILES_FILTRO_CANAL') {
-    if (pendingKey === 'delivery') {
-      return '¿Seguimos con tus *Barriles Desechables*? Con fecha y comuna te armo el pedido altiro 🍸';
-    }
-    return '¿Seguimos con tus *Barriles Desechables*? 🍸';
+    return '¿Seguimos con tus *Barriles Desechables*? Dime qué cóctel te tienta 🍸';
+  }
+  if (stateId === 'BARRILES_INTRO_MENU') {
+    return '¿Seguimos con tus *Barriles Desechables*? Puedes *cotizar* o dejarnos una *consulta* 🍸';
   }
 
   if (stateId === 'EVENTOS_RECOGIDA_DATOS') {
@@ -227,8 +228,19 @@ function nudgePendingAsk(stateId, session, pendingKey) {
     return 'Escribe *1* *Eventos*, *2* *Barriles* o *3* *Humano* para seguir.';
   }
 
-  // Barriles: fecha/comuna (parcial o ambas)
-  if (stateId === 'BARRILES_FILTRO_CANAL' || pendingKey === 'delivery' || pendingKey === 'client_data') {
+  // Barriles intro: sabor pendiente
+  if (stateId === 'BARRILES_FILTRO_CANAL' || pendingKey === 'flavor') {
+    return '*¿Qué tipo de cóctel buscas hoy?*';
+  }
+  if (stateId === 'BARRILES_INTRO_MENU') {
+    return 'Escribe *1* para *cotizar* o *2* si tienes una *consulta*.';
+  }
+  if (stateId === 'EVENTOS_INTRO_MENU' || pendingKey === 'continue') {
+    return 'Escribe *1* cuando quieras ver la carta y precios.';
+  }
+
+  // Barriles: fecha/comuna (parcial o ambas) en recogida de datos
+  if (stateId === 'BARRILES_RECOGIDA_DATOS' || pendingKey === 'delivery' || pendingKey === 'client_data') {
     const cd = session?.orderBuilder?.clientData;
     if (cd?.location && !cd?.date) {
       return '*¿Cuál es la fecha de entrega?*';

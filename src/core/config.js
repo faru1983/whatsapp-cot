@@ -41,6 +41,25 @@ export function getEnv() {
 }
 
 /**
+ * parseNonNegativeFloat: Lee un número ≥ 0 desde .env (permite decimales y 0).
+ * Útil para delays en segundos (ej. 1.5). Si es inválido → default.
+ *
+ * @param {string|undefined} value
+ * @param {number} defaultValue
+ * @returns {number}
+ */
+function parseNonNegativeFloat(value, defaultValue) {
+  if (value === undefined || value === null || String(value).trim() === '') {
+    return defaultValue;
+  }
+  const parsed = Number.parseFloat(String(value).trim().replace(',', '.'));
+  if (!Number.isFinite(parsed) || parsed < 0) {
+    return defaultValue;
+  }
+  return parsed;
+}
+
+/**
  * parsePositiveInt: Lee un número entero positivo desde .env con valor por defecto.
  * Si el valor es inválido o menor a 1, usa el default (evita romper el bot con typos).
  *
@@ -210,6 +229,14 @@ export function loadBotConfig() {
       maxConsecutiveErrors: parsePositiveInt(process.env.SECURITY_MAX_CONSECUTIVE_ERRORS, 2),
       // Cambio de intención: cuántas veces puede alternar barriles ↔ eventos antes de silenciar
       maxIntentSwitches: parsePositiveInt(process.env.SECURITY_MAX_INTENT_SWITCHES, 3),
+    },
+
+    // Pausas al enviar respuestas (WhatsApp + simulador). Ver REPLY_DELAY_* en .env
+    // afterUserSec: espera antes de la 1ª burbuja tras procesar el mensaje del cliente
+    // betweenBubblesSec: espera entre burbujas del mismo turno (texto / imagen / menú)
+    replyTiming: {
+      afterUserMs: Math.round(parseNonNegativeFloat(process.env.REPLY_DELAY_AFTER_USER_SEC, 1) * 1000),
+      betweenBubblesMs: Math.round(parseNonNegativeFloat(process.env.REPLY_DELAY_BETWEEN_BUBBLES_SEC, 1.5) * 1000),
     },
 
     // API web cocktailsontap (crear quotes desde WhatsApp). Ver COT_API_* en .env

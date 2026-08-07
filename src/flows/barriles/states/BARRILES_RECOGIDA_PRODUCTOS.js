@@ -41,10 +41,10 @@ const AI_PROMPT = `[SISTEMA - ESTADO: CATÁLOGO (FALLBACK)]
 El cliente debe indicar sabor y cantidad de Barriles Desechables (5L).
 1. Duda breve (ingredientes, despacho RM / encomienda regiones). NUNCA inventes costos.
 2. Solo formato 5L. Si solo mira / no quiere ahora: despídete y NO preguntes más.
-3. Si no: cierra pidiendo sabor/cantidad (ej. "1 mojito y 1 sangría"). Si ya tiene pedido, sugiere escribir *ok* para el resumen.`;
+3. Si no: cierra pidiendo sabor/cantidad (ej. "1 mojito y 1 sangría"). Si ya tiene pedido, sugiere escribir *OK* para continuar con la cotización.`;
 
 /**
- * formatCartLines: Lista de ítems + subtotal (sin saludo).
+ * formatCartLines: Lista de ítems + subtotal + explicación de litros/tragos.
  *
  * @param {object} products - Mapa nombre → cantidad
  * @returns {string}
@@ -60,14 +60,20 @@ function formatCartLines(products) {
     lines += `- ${qty}x ${name} 5L: ${formatPrice(price * qty)}\n`;
   }
   lines += `\n*Subtotal de cócteles:* ${formatPrice(quote.subtotal)}`;
+  // Línea aparte: litros totales y qué significa en copas (≈200ml con hielo)
   if (quote.totalLiters > 0) {
-    lines += ` (${quote.totalLiters}L ≈ ${quote.totalDrinks} tragos)`;
+    lines += `\n\nSerían *${quote.totalLiters}L totales*, que equivalen a *${quote.totalDrinks} tragos* de 200ml en una copa/vaso con hielo.`;
   }
   return lines;
 }
 
+/** CTA tras confirmar carrito: *OK* o pedir cambio con ejemplo concreto. */
+const CART_OK_CTA = `Si está bien así, escribe *OK* para continuar o dime qué agregar o quitar.
+_(ej: elimina el aperol, agrega 1 sangría)_`;
+
 /**
- * buildCartConfirmReply: Resumen de cócteles + CTA (*ok* para el resumen; también vale *seguimos*).
+ * buildCartConfirmReply: Resumen de cócteles + CTA (*OK* para seguir; también vale *seguimos*).
+ * El siguiente paso puede ser fecha/comuna o el resumen final, según lo que ya tengamos.
  *
  * @param {object} products - Mapa nombre → cantidad
  * @param {string} [extraNote] - Nota extra (ej. duda de despacho en el mismo mensaje)
@@ -79,12 +85,11 @@ function buildCartConfirmReply(products, extraNote = '') {
 
 ${formatCartLines(products)}
 
-Si está bien así, escribe *ok* para ver el resumen de tu cotización.
-_(Si quieres cambiar, dime qué agregar o quitar)_ 🍸${note}`;
+${CART_OK_CTA}${note}`;
 }
 
 /**
- * hasDeliveryData: ¿Ya tenemos fecha y comuna? (se piden en la entrada del flujo).
+ * hasDeliveryData: ¿Ya tenemos fecha y comuna? (se piden en RECOGIDA_DATOS si faltan).
  *
  * @param {object} session
  * @returns {boolean}
@@ -108,11 +113,11 @@ function nextStateAfterProducts(session) {
 
 export const BARRILES_RECOGIDA_PRODUCTOS = defineState({
   id: 'BARRILES_RECOGIDA_PRODUCTOS',
-  // Al entrar: solo pedimos sabor/cantidad. *ok* se ofrece cuando ya hay carrito.
+  // Al entrar: solo pedimos sabor/cantidad. *OK* se ofrece cuando ya hay carrito.
   promptQuestion: () => `*¿Qué sabor y cuántos barriles quieres?*
 _(ej: 1 mojito y 1 sangría)_`,
   shortQuestion: withAssistantFooter(`*¿Todo bien con el pedido?*
-_(ej: escribe *ok* para el resumen, o dime qué agregar o quitar)_`),
+_(ej: escribe *OK* para continuar, o "elimina el aperol, agrega 1 sangría")_`),
   aiPrompt: AI_PROMPT,
 
   async validateAndProcess(messageText, session) {
@@ -172,8 +177,7 @@ _(ej: 2 mojitos y 1 aperol)_`
 
 ${formatCartLines(session.orderBuilder.products)}
 
-*¿Todo bien con el pedido?*
-_(ej: escribe *ok* para el resumen, o dime qué agregar o quitar)_ 🍸`
+${CART_OK_CTA}`
       };
     }
 

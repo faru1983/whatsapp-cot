@@ -18,6 +18,8 @@ import {
   hasExplicitEventAddIntent,
   detectFlavorListRequest,
   asksCocktailFlavorList,
+  asksAvailableCocktailsList,
+  getCoctelesNamesCatalog,
   getProductFamilyBase,
   getCatalogFamilyFlavorOptions
 } from '../../../logic/utils.js';
@@ -302,7 +304,7 @@ _(ej: Mojito ${allowedLitrages[0]})_`
     }
 
     // Pide lista/precios sin nombrar cócteles → imagen de la carta del formato actual
-    if (wantsPriceList && !hasDrinkSelection(messageText) && cartEmpty) {
+    if (wantsPriceList && !hasDrinkSelection(messageText)) {
       return {
         success: true,
         nextState: 'EVENTOS_ELECCION_MENU',
@@ -393,6 +395,18 @@ _(ej: 5L Mojito)_ 🍸`;
         success: true,
         nextState: 'EVENTOS_ELECCION_MENU',
         customReply: getFlavorListReply(flavorAsk.family, flavorAsk.opciones, { withLitersHint: true })
+      };
+    }
+
+    // "¿cuáles tienes?" / "¿qué cócteles hay?" → nombres por categoría (sin FAQ/LLM)
+    if (asksAvailableCocktailsList(messageText) && !hasDrinkSelection(messageText)) {
+      return {
+        success: true,
+        nextState: 'EVENTOS_ELECCION_MENU',
+        customReplies: [
+          getCoctelesNamesCatalog(),
+          ASK_COCKTAILS
+        ]
       };
     }
 

@@ -21,10 +21,14 @@ const _savedCotApiKey = process.env.COT_API_KEY;
 const _savedCotApiBase = process.env.COT_API_BASE_URL;
 delete process.env.COT_API_KEY;
 delete process.env.COT_API_BASE_URL;
+// verify no debe esperar delays de burbujas (el smoke llama processMessage directo)
+process.env.REPLY_DELAY_AFTER_USER_SEC = '0';
+process.env.REPLY_DELAY_BETWEEN_BUBBLES_SEC = '0';
 
 const EXPECTED_STATES = [
   'ESPERANDO_INTENCION',
   'BARRILES_FILTRO_CANAL',
+  'BARRILES_INTRO_MENU',
   'BARRILES_RECOGIDA_PRODUCTOS',
   'BARRILES_RECOGIDA_DATOS',
   'BARRILES_REVISION_COTIZACION',
@@ -126,6 +130,18 @@ assert(!isOnlyAdvanceProductsOrder('aka'), `"aka" no es advance`);
 assert(asksCocktailPriceOrCatalog('Valor de los cocteles'), `detecta valor de cócteles`);
 assert(!asksCocktailPriceOrCatalog('cuánto cuesta el despacho a Providencia'), `despacho ≠ tip de cócteles`);
 assert(resolveFlowLane({ userIntent: 'EVENTOS' }, 'EVENTOS_ELECCION_FORMATO') === 'EVENTOS', `carril eventos`);
+
+console.log('\n-- replyTiming (.env REPLY_DELAY_*) --');
+{
+  const { loadBotConfig } = await import('../src/core/config.js');
+  const { sleepMs } = await import('../src/logic/reply-timing.js');
+  const cfg = loadBotConfig();
+  assert(cfg.replyTiming?.afterUserMs === 0, 'verify fuerza afterUserMs=0');
+  assert(cfg.replyTiming?.betweenBubblesMs === 0, 'verify fuerza betweenBubblesMs=0');
+  const t0 = Date.now();
+  await sleepMs(0);
+  assert(Date.now() - t0 < 50, 'sleepMs(0) no espera');
+}
 {
   const tipFmt = buildContextualPriceOrCatalogTip(
     { userIntent: 'EVENTOS' },
@@ -354,9 +370,21 @@ const {
   preciosData: datosPrecios,
   interceptBotOptionsAnswer,
   partitionLitersIntoBarrels,
-  fixEventLitrageShorthand
+  fixEventLitrageShorthand,
+  asksAvailableCocktailsList,
+  getCoctelesNamesCatalog
 } = await import('../src/logic/utils.js');
 const catalogNames = Object.keys(datosPrecios.cocteles || {});
+
+assert(asksAvailableCocktailsList('Cuales tienes?'), `"cuales tienes" pide catálogo general`);
+assert(asksAvailableCocktailsList('que cocteles hay'), `"que cocteles hay" pide catálogo general`);
+assert(!asksAvailableCocktailsList('que mojito sabor tienes?'), `sabores de familia no es catálogo general`);
+{
+  const namesCatalog = getCoctelesNamesCatalog();
+  assert(/🍸 \*CLÁSICOS\*/.test(namesCatalog), `catálogo nombres: sección clásicos`);
+  assert(/\n\n🥃 \*COMBINADOS\*/.test(namesCatalog), `catálogo nombres: salto entre categorías`);
+  assert(/- Pisco Sour/.test(namesCatalog), `catálogo nombres: viñetas`);
+}
 
 // El resumen del carrito no es un menú: si lo fuera, cualquier respuesta sumaría ese mismo cóctel
 const cartBubble = '🍹 Te confirmo los cócteles seleccionados:\n\n- 5L Mojito: $69.990\n';
@@ -705,7 +733,7 @@ try {
       input: '2️⃣',
       expectState: 'BARRILES_FILTRO_CANAL',
       expectMuted: false,
-      expectIncludes: ['Barriles Desechables'],
+      expectIncludes: ['barriles desechables', 'listos para servir', '31.990', 'tipo de cóctel'],
       expectNotIncludes: ['¡Hola!', 'te guiaré', 'Soy el', 'asistente virtual']
     }
   ]);
@@ -720,7 +748,7 @@ try {
       input: '2',
       expectState: 'BARRILES_FILTRO_CANAL',
       expectMuted: false,
-      expectIncludes: ['Barriles Desechables', 'comuna'],
+      expectIncludes: ['barriles desechables', 'listos para servir', 'tipo de cóctel'],
       expectNotIncludes: ['te guiaré', 'Soy el', 'asistente virtual']
     }
   ]);
@@ -770,7 +798,7 @@ try {
       input: 'Hola, quiero más info sobre los barriles desechables',
       expectState: 'BARRILES_FILTRO_CANAL',
       expectMuted: false,
-      expectIncludes: ['Barriles Desechables'],
+      expectIncludes: ['barriles desechables', 'listos para servir', 'tipo de cóctel'],
       expectNotIncludes: ['¡Hola!', 'te guiaré', 'Soy el', 'asistente virtual']
     }
   ]);
@@ -808,7 +836,7 @@ try {
       input: 'barriles',
       expectState: 'BARRILES_FILTRO_CANAL',
       expectMuted: false,
-      expectIncludes: ['Barriles Desechables'],
+      expectIncludes: ['barriles desechables', 'listos para servir', 'tipo de cóctel'],
       expectNotIncludes: ['te guiaré', 'Soy el', 'asistente virtual']
     }
   ]);
@@ -838,34 +866,80 @@ try {
       input: 'después te confirmo la comuna',
       expectState: 'BARRILES_FILTRO_CANAL',
       expectMuted: false,
-      expectIncludes: ['comuna', 'cuándo']
+      expectIncludes: ['cóctel']
     }
   ]);
 
-  await runCase('Barriles + datos entrega', [
+  await runCase('Barriles match sabor → pitch + menú', [
     { input: 'desechables', expectState: 'BARRILES_FILTRO_CANAL', expectMuted: false },
     {
-      input: 'Providencia, 5 de agosto',
-      expectState: 'BARRILES_RECOGIDA_PRODUCTOS',
+      input: 'mojito',
+      expectState: 'BARRILES_INTRO_MENU',
       expectMuted: false,
-      expectIncludes: ['sabor'],
+      expectIncludes: ['Genial', 'Mojito', 'barril_desechable_precios', 'Cotizar mi pedido', 'consulta'],
       expectNotIncludes: ['no estoy seguro', 'número de la opción']
     }
   ]);
 
-  await runCase('Barriles + datos entrega relativo (legacy)', [
+  await runCase('Barriles "tienes sangría?" → match (no FAQ genérico)', [
+    { input: 'desechables', expectState: 'BARRILES_FILTRO_CANAL' },
+    {
+      input: 'tienes sangria?',
+      expectState: 'BARRILES_INTRO_MENU',
+      expectMuted: false,
+      expectIncludes: ['Genial', 'Sangría', 'Cotizar'],
+      expectNotIncludes: ['asistente virtual', 'Sabores disponibles y precios']
+    }
+  ]);
+
+  await runCase('Barriles sin match → catálogo + menú', [
     { input: 'desechables', expectState: 'BARRILES_FILTRO_CANAL', expectMuted: false },
     {
-      input: 'Providencia, para este sábado',
+      input: 'algo bien dulce y raro que no tienen',
+      expectState: 'BARRILES_INTRO_MENU',
+      expectMuted: false,
+      expectIncludes: ['Excelente elección', 'catálogo', 'Cotizar', 'barril_desechable_precios']
+    }
+  ]);
+
+  await runCase('Barriles solo precios sin cotizar → web + mute', [
+    { input: 'desechables', expectState: 'BARRILES_FILTRO_CANAL' },
+    {
+      input: 'solo quiero ver precios, no cotizo',
+      expectState: 'CERRADO',
+      expectMuted: true,
+      expectIncludes: ['cocktailsontap.cl/barriles']
+    }
+  ]);
+
+  await runCase('Barriles menú 1️⃣ cotizar → productos', [
+    { input: 'desechables', expectState: 'BARRILES_FILTRO_CANAL' },
+    { input: 'mojito', expectState: 'BARRILES_INTRO_MENU' },
+    {
+      input: '1',
       expectState: 'BARRILES_RECOGIDA_PRODUCTOS',
       expectMuted: false,
-      expectIncludes: ['sabor']
+      expectIncludes: ['cócteles', 'barriles']
+    }
+  ]);
+
+  await runCase('Barriles menú 2️⃣ consulta → SOS + mute', [
+    { input: 'desechables', expectState: 'BARRILES_FILTRO_CANAL' },
+    { input: 'pisco sour', expectState: 'BARRILES_INTRO_MENU' },
+    {
+      input: '2',
+      expectState: 'CERRADO',
+      expectMuted: true,
+      expectIncludes: ['consulta'],
+      expectAdminAlert: true,
+      expectSosTitle: 'CONSULTA BARRILES'
     }
   ]);
 
   await runCase('Seguimos con carrito vacío', [
     { input: 'desechables', expectState: 'BARRILES_FILTRO_CANAL' },
-    { input: 'Providencia, para el viernes', expectState: 'BARRILES_RECOGIDA_PRODUCTOS' },
+    { input: 'mojito', expectState: 'BARRILES_INTRO_MENU' },
+    { input: '1', expectState: 'BARRILES_RECOGIDA_PRODUCTOS' },
     {
       input: 'seguimos',
       expectState: 'BARRILES_RECOGIDA_PRODUCTOS',
@@ -883,15 +957,43 @@ try {
     }
   ]);
 
-  await runCase('Barriles parcial pide fecha', [
+  await runCase('Barriles adelanta comuna sin sabor → reencauza (guarda comuna)', [
     { input: 'desechables', expectState: 'BARRILES_FILTRO_CANAL' },
     {
       input: 'Las Condes',
       expectState: 'BARRILES_FILTRO_CANAL',
       expectMuted: false,
-      expectIncludes: ['fecha']
+      expectIncludes: ['cóctel']
     }
   ]);
+  {
+    const s = getSession(SESSION_ID);
+    assert(s.orderBuilder?.clientData?.location === 'Las Condes', 'soft-save comuna en intro barriles');
+  }
+
+  console.log('\n-- Barriles intro helpers: match pitch + prices-only --');
+  {
+    const { buildBarrilesMatchPitch, buildBarrilesIntroGateReplies, looksLikeBarrilesFlavorInterest } = await import('../src/logic/barriles-intro.js');
+    const { wantsPricesOnlyBrowseClose } = await import('../src/logic/interruptions.js');
+    const pitch = buildBarrilesMatchPitch('Mojito');
+    assert(/Genial/i.test(pitch), 'pitch match abre con Genial');
+    assert(/\*Mojito\*/.test(pitch), 'pitch nombra el cóctel');
+    assert(/Ron Blanco|Menta/i.test(pitch), 'pitch usa ingredientes de datos.json');
+    assert(/25 tragos/i.test(pitch), 'pitch menciona rendimiento');
+    assert(/\$/.test(pitch), 'pitch muestra precio');
+    const matchReplies = buildBarrilesIntroGateReplies('Mojito');
+    assert(matchReplies.length === 3, 'con match: pitch + imagen + menú');
+    assert(/barril_desechable_precios/.test(String(matchReplies[1]?.file || '')), 'con match: incluye catálogo');
+    const replies = buildBarrilesIntroGateReplies(null);
+    assert(replies.length === 2, 'sin match: imagen+caption + menú');
+    assert(replies[0]?.type === 'image' || replies[0]?.file, 'sin match: primer bubble es imagen');
+    assert(/Excelente elección/i.test(String(replies[0]?.caption || '')), 'sin match: copy va en caption');
+    assert(/👆/.test(String(replies[0]?.caption || '')), 'sin match: caption con 👆');
+    assert(looksLikeBarrilesFlavorInterest('tienes sangria?'), 'tienes sangria = interés sabor');
+    assert(!looksLikeBarrilesFlavorInterest('hacen despacho a Maipú?'), 'despacho ≠ interés sabor');
+    assert(wantsPricesOnlyBrowseClose('solo quiero ver precios, no cotizo'), 'prices-only + no cotizo');
+    assert(!wantsPricesOnlyBrowseClose('cuánto vale el mojito?'), 'precio de un cóctel ≠ cierre');
+  }
 
   console.log('\n-- Barriles: generar compra → contacto → cierre legacy --');
   resetSession(SESSION_ID);
@@ -1488,6 +1590,28 @@ try {
     };
     const r3 = await st.validateAndProcess('no me gusta la sangria', session);
     assert(!session.orderBuilder.products['Sangría::10L'], `"no me gusta la sangria" elimina`);
+  }
+
+  console.log('\n-- Eventos: "cuales tienes?" lista categorías sin FAQ --');
+  resetSession(SESSION_ID);
+  {
+    const session = getSession(SESSION_ID);
+    session.currentState = 'EVENTOS_ELECCION_MENU';
+    session.userIntent = 'EVENTOS';
+    session.eventoFormato = 'Dispensador Portátil';
+    session.guests = 60;
+    session.orderBuilder = { type: 'dispensador', products: {}, extras: {} };
+
+    const st = statesMap.EVENTOS_ELECCION_MENU;
+    const r1 = await st.validateAndProcess('Cuales tienes?', session);
+    assert(Array.isArray(r1.customReplies) && r1.customReplies.length === 2, `"cuales tienes" → 2 burbujas`);
+    const catalog = String(r1.customReplies[0] || '');
+    const followUp = String(r1.customReplies[1] || '');
+    assert(/CLÁSICOS/.test(catalog) && /COMBINADOS/.test(catalog), `categorías en burbuja 1`);
+    assert(/\n\n🥃/.test(catalog), `categorías separadas con línea en blanco`);
+    assert(/- Pisco Sour/.test(catalog) && /- Mojito/.test(catalog), `nombres con viñeta`);
+    assert(!/amplia y variada/i.test(catalog), `no copy FAQ/LLM`);
+    assert(/qu[eé] c[oó]cteles te gustar[ií]a/i.test(followUp), `burbuja 2 re-pregunta pedido`);
   }
 
   console.log('\n-- Eventos: pregunta sabores lista sin mutar carrito --');
@@ -2229,7 +2353,7 @@ try {
     const again = evaluateNudgeEligibility(eventosSession, baseCfg, now);
     assert(again.ok === true, 'tras clearNudgeFlag vuelve a ser elegible');
 
-    // Barriles: delivery pendiente
+    // Barriles: sabor pendiente en pitch
     const barrilesSession = {
       currentState: 'BARRILES_FILTRO_CANAL',
       userIntent: 'BARRILES',
@@ -2240,17 +2364,18 @@ try {
       nudge: null
     };
     const okBar = evaluateNudgeEligibility(barrilesSession, baseCfg, now);
-    assert(okBar.ok === true, 'barriles sin fecha/comuna → elegible');
-    assert(okBar.stallKey === buildStallKey('BARRILES_FILTRO_CANAL', 'delivery'), 'stallKey barriles=delivery');
+    assert(okBar.ok === true, 'barriles sin sabor → elegible');
+    assert(okBar.stallKey === buildStallKey('BARRILES_FILTRO_CANAL', 'flavor'), 'stallKey barriles=flavor');
     const msgB = buildNudgeMessage(barrilesSession, baseCfg);
     assert(/Barriles Desechables/i.test(msgB), 'copy retoma barriles');
-    assert(/fecha y comuna/i.test(msgB), 'barriles pide fecha/comuna');
+    assert(/tipo de cóctel|cóctel buscas/i.test(msgB), 'barriles pide sabor');
     assert(/cocktailsontap\.cl\/barriles/i.test(msgB), 'copy web barriles');
     assert(!/Ejemplo:/i.test(msgB) && !/_\(ej:/i.test(msgB), 'barriles sin ejemplo duplicado');
 
-    // Barriles parcial: solo falta fecha
+    // Barriles recogida datos: solo falta fecha
     const msgBDate = buildNudgeMessage({
       ...barrilesSession,
+      currentState: 'BARRILES_RECOGIDA_DATOS',
       orderBuilder: { clientData: { date: null, location: 'Providencia' } }
     }, baseCfg);
     assert(/fecha de entrega/i.test(msgBDate), 'barriles parcial → solo fecha');
@@ -2331,7 +2456,7 @@ try {
   console.error('  FAIL: excepción en simulación:', err);
 }
 
-console.log('\n-- CRM Interesado: Eventos al confirmar→formato; Barriles al salir filtro --');
+console.log('\n-- CRM Interesado: Eventos al confirmar→formato; Barriles al cotizar --');
 {
   const { notifyCrmOnBotStateChange } = await import('../src/logic/cot-crm-sync.js');
 
@@ -2347,10 +2472,22 @@ console.log('\n-- CRM Interesado: Eventos al confirmar→formato; Barriles al sa
     'Eventos: confirmar→formato SÍ marca Interesado / Cliente potencial'
   );
 
+  const sPitch = { userIntent: 'BARRILES', waLabelClientePotencialApplied: false };
+  assert(
+    notifyCrmOnBotStateChange(sPitch, 'BARRILES_FILTRO_CANAL', 'BARRILES_INTRO_MENU') === false,
+    'Barriles: pitch→menú (solo miró sabor) NO marca Interesado'
+  );
+
+  const sConsulta = { userIntent: 'BARRILES', waLabelClientePotencialApplied: false };
+  assert(
+    notifyCrmOnBotStateChange(sConsulta, 'BARRILES_INTRO_MENU', 'CERRADO') === false,
+    'Barriles: consulta/mute NO marca Interesado'
+  );
+
   const s3 = { userIntent: 'BARRILES', waLabelClientePotencialApplied: false };
   assert(
-    notifyCrmOnBotStateChange(s3, 'BARRILES_FILTRO_CANAL', 'BARRILES_RECOGIDA_PRODUCTOS') === true,
-    'Barriles: salir del filtro sigue marcando Interesado'
+    notifyCrmOnBotStateChange(s3, 'BARRILES_INTRO_MENU', 'BARRILES_RECOGIDA_PRODUCTOS') === true,
+    'Barriles: elige cotizar SÍ marca Interesado / Cliente potencial'
   );
 }
 

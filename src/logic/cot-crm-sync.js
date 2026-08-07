@@ -336,8 +336,8 @@ export function syncCrmCtwaAttributionAsync(session) {
  * ¿Esta transición debe marcar Interesado (engaged) en el CRM?
  *
  * Eventos: recién al confirmar datos → elegir formato (ya hay invitados + resumen OK).
- * Barriles: al salir del filtro de canal (comuna+fecha mínimas).
- * Seguir en recogida / menú welcome = solo Curioso.
+ * Barriles: al elegir 1️⃣ Cotizar en el intro (BARRILES_INTRO_MENU → RECOGIDA_PRODUCTOS).
+ * Mirar el pitch o solo nombrar un sabor = sigue Curioso (aún no cotiza).
  *
  * @param {string} from
  * @param {string} to
@@ -347,8 +347,8 @@ function shouldEngageCrmOnTransition(from, to) {
   if (!from || !to || from === to) return false;
   // Eventos: Interesado con el snapshot completo al pasar a formato
   if (from === 'EVENTOS_CONFIRMAR_DATOS' && to === 'EVENTOS_ELECCION_FORMATO') return true;
-  // Barriles: sin cambio — sale del intro con fecha/comuna
-  if (from === 'BARRILES_FILTRO_CANAL') return true;
+  // Barriles: Interesado solo cuando elige cotizar (no al salir del pitch ni en consulta)
+  if (from === 'BARRILES_INTRO_MENU' && to === 'BARRILES_RECOGIDA_PRODUCTOS') return true;
   return false;
 }
 
@@ -358,8 +358,8 @@ function shouldEngageCrmOnTransition(from, to) {
  * Reglas:
  * - Curioso: primer mensaje (syncCrmCurious), no este helper.
  * - Interesado Eventos: CONFIRMAR_DATOS → ELECCION_FORMATO (datos ya confirmados).
- * - Interesado Barriles: sale de BARRILES_FILTRO_CANAL.
- * - No Interesado: menú welcome o solo avanzar recogida Eventos.
+ * - Interesado Barriles: INTRO_MENU → RECOGIDA_PRODUCTOS (eligió cotizar).
+ * - No Interesado: pitch, menú intro sin cotizar, o solo avanzar recogida Eventos.
  *
  * @param {object} session
  * @param {string} fromState
@@ -378,7 +378,11 @@ export function notifyCrmOnBotStateChange(session, fromState, toState) {
     choice: session.userIntent || to,
     fromState: from,
     toState: to,
-    trigger: from === 'EVENTOS_CONFIRMAR_DATOS' ? 'eventos_datos_confirmados' : 'flow_entry_exit',
+    trigger: from === 'EVENTOS_CONFIRMAR_DATOS'
+      ? 'eventos_datos_confirmados'
+      : from === 'BARRILES_INTRO_MENU'
+        ? 'barriles_elige_cotizar'
+        : 'flow_entry_exit',
   };
 
   if (!session.crmEngagedSynced) {

@@ -26,11 +26,12 @@ export function getPendingFlowRequirement(session, stateId) {
     case 'EVENTOS_CONFIRMAR_DATOS':
       return session.guests ? 'confirm' : 'guests';
 
-    case 'BARRILES_FILTRO_CANAL': {
-      const cd = session.orderBuilder?.clientData;
-      if (cd?.date && cd?.location) return null;
-      return 'delivery';
-    }
+    case 'BARRILES_FILTRO_CANAL':
+      // Espera un sabor / preferencia abierta (comuna/fecha van después)
+      return 'flavor';
+
+    case 'BARRILES_INTRO_MENU':
+      return 'continue';
 
     case 'BARRILES_RECOGIDA_PRODUCTOS': {
       const products = session.orderBuilder?.products;
