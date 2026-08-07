@@ -20,14 +20,19 @@ import {
   buildBarrilesIntroGateReplies
 } from '../../../logic/barriles-intro.js';
 
+/** Pregunta de sabor (burbuja 2 del pitch / re-pregunta). */
+const ASK_BARRILES_FLAVOR = `👉 *Escribe el nombre del cóctel que te interesa y te enviaré el catálogo completo.*
+_(ej: Mojito, Sangría, Ramazzotti, etc.)_`;
+
 /**
- * welcomeForSession: Copy de entrada Barriles (pitch + pregunta de sabor).
+ * welcomeForSession: Copy de entrada Barriles — pitch + pregunta en 2 burbujas.
  *
  * @param {object} [_session]
- * @returns {string}
+ * @returns {string[]}
  */
 function welcomeForSession(_session) {
-  return `Nuestros *barriles desechables* de *5 litros* contienen cócteles *listos para servir*.
+  return [
+    `Nuestros *barriles desechables* de *5 litros* contienen cócteles *listos para servir*.
 _Solo los refrigeras, sirves y disfrutas._ Si sobra, simplemente vuelves a guardarlo en el refrigerador para otra ocasión.
 
 🍸 *Calidad de bar*, sin preparar nada.
@@ -36,10 +41,9 @@ _Solo los refrigeras, sirves y disfrutas._ Si sobra, simplemente vuelves a guard
 ✅ Se conservan refrigerados por *más de 3 semanas*.
 ✅ Desde *$31.990*, según el sabor.
 
-📍 Despachamos en toda la *Región Metropolitana* y enviamos a otras *Regiones* por Blue Express.
-
-Escribe el nombre del *cóctel que te interesa* y te enviaré el *catálogo completo*.
-_(ej: Mojito, Sangría, Ramazzotti, etc.)_`;
+📍 Despachamos en toda la *Región Metropolitana* y enviamos a otras *Regiones* por Blue Express.`,
+    ASK_BARRILES_FLAVOR
+  ];
 }
 
 /**
@@ -48,8 +52,7 @@ _(ej: Mojito, Sangría, Ramazzotti, etc.)_`;
  * @returns {string}
  */
 function shortQuestionForFlavor() {
-  return withAssistantFooter(`Escribe el nombre del *cóctel que te interesa* y te enviaré el *catálogo completo*.
-_(ej: Mojito, Sangría, Ramazzotti, etc.)_`);
+  return withAssistantFooter(ASK_BARRILES_FLAVOR);
 }
 
 /** Cierre a la web cuando solo quiere mirar precios sin cotizar. */

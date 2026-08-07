@@ -176,7 +176,7 @@ _(ej: 15 de mayo, Las Condes — o escribe *después*)_`,
     confirm: 'Revisa los datos: escribe *1* *Confirmar* o *2* *Corregir* (o el dato nuevo).',
     delivery: `*¿Me pasas la fecha y comuna de entrega?*
 _(ej: Providencia, 5 de agosto)_`,
-    flavor: `Escribe el nombre del *cóctel que te interesa* y te enviaré el *catálogo completo*.
+    flavor: `👉 *Escribe el nombre del cóctel que te interesa y te enviaré el catálogo completo.*
 _(ej: Mojito, Sangría, Ramazzotti, etc.)_`,
     products: `*¿Qué sabor y cuántos barriles quieres?*
 _(ej: 2 mojitos — o escribe *lista*)_`,

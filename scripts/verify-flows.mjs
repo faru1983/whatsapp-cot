@@ -733,10 +733,21 @@ try {
       input: '2️⃣',
       expectState: 'BARRILES_FILTRO_CANAL',
       expectMuted: false,
-      expectIncludes: ['barriles desechables', 'listos para servir', '31.990', 'cóctel que te interesa'],
+      expectIncludes: ['barriles desechables', 'listos para servir', '31.990', '👉', 'cóctel que te interesa', 'catálogo completo'],
       expectNotIncludes: ['¡Hola!', 'te guiaré', 'Soy el', 'asistente virtual']
     }
   ]);
+
+  // Pitch Barriles: 2 burbujas (info + CTA), pregunta no pegada al pitch
+  {
+    const stBar = statesMap.BARRILES_FILTRO_CANAL;
+    const welcome = typeof stBar.promptQuestion === 'function'
+      ? stBar.promptQuestion({})
+      : stBar.promptQuestion;
+    assert(Array.isArray(welcome) && welcome.length === 2, 'barriles entrada = 2 burbujas');
+    assert(/listos para servir/i.test(welcome[0]) && !/cat[aá]logo completo/i.test(welcome[0]), 'burbuja 1 = pitch sin CTA');
+    assert(/^👉/.test(String(welcome[1]).trim()) && /cat[aá]logo completo/i.test(welcome[1]), 'burbuja 2 = CTA catálogo');
+  }
 
   await runCase('Tras menú, opción 2 Barriles sin re-presentar asistente', [
     {
