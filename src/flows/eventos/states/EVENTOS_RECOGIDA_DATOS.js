@@ -16,6 +16,7 @@ import {
   extractGuestsFromMessage,
   asksEventServiceFormatQuestion,
   asksCoverageAreaQuestion,
+  buildEventosCoverageReply,
   normalizeCelebrationLabel,
   wantsSkipCelebrationType,
   wantsEventInfoOnly,
@@ -74,7 +75,7 @@ Orden: (A) tipo de evento (pregunta abierta + parser/NLU; o skip → Por confirm
 Si el cliente NO tiene evento y solo quiere precios/info a futuro → invitar a la web (Cotizar), no insistir con datos.
 0. NO digas "hola" ni te presentes como asistente virtual (el copy de entrada ya es directo).
 1. Responde dudas breves y amigables.
-2. REGLA DE COBERTURA: Si pregunta si vamos a su comuna/ciudad, responde: "Sí, trabajamos en toda la Región Metropolitana y La Serena/Coquimbo."
+2. REGLA DE COBERTURA: RM = todas las comunas. Fuera de RM = evaluar según tamaño del evento y fecha (experiencia de referencia Valparaíso/Coquimbo); seguir cotizando para que el equipo confirme viaje. NUNCA digas que hay cobertura fija en La Serena/Coquimbo ni des la bienvenida a la ciudad.
 3. REGLA DE LOGÍSTICA: Instalación Dispensador gratis, Muro $50.000. NUNCA inventes tarifas de envío.
 4. NUNCA cotices ni calcules precios finales todavía.
 5. Puedes mencionar www.cocktailsontap.cl/eventos si pregunta precios; no lo presentes como menú obligatorio.
@@ -316,9 +317,26 @@ export const EVENTOS_RECOGIDA_DATOS = defineState({
       return goInfoOnlyWeb();
     }
 
-    // Cobertura (¿van a X?) → FAQ, sin extraer comuna
-    if (asksCoverageAreaQuestion(messageText) && !hasGuests(session) && !messageLooksLikeGuests(messageText)) {
-      return { success: false };
+    // Cobertura (¿llegan a X?): respuesta programática con datos.json (no LLM/FAQ)
+    // No extraemos comuna como dato del evento: preguntar ≠ confirmar el lugar.
+    if (asksCoverageAreaQuestion(messageText) && !messageLooksLikeGuests(messageText)) {
+      const coverage = buildEventosCoverageReply(messageText);
+      let pendingAsk = ASK_CELEBRATION;
+      if (!needsCelebrationType(session) && !hasGuests(session)) {
+        pendingAsk = ASK_GUESTS;
+      } else if (hasGuests(session) && !logisticsDone(session)) {
+        pendingAsk = ASK_LOGISTICS;
+      } else if (hasGuests(session) && logisticsDone(session)) {
+        pendingAsk = '*¿Seguimos con tu cotización?*';
+      } else if (needsCelebrationType(session)) {
+        pendingAsk = ASK_CELEBRATION;
+      }
+      return {
+        success: true,
+        nextState: 'EVENTOS_RECOGIDA_DATOS',
+        customReply: `${coverage}\n\n${pendingAsk}`,
+        flowProgress: true
+      };
     }
 
     // Mensaje de otro bot: re-preguntar el dato pendiente

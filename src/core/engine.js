@@ -18,6 +18,7 @@ import { statesMap } from '../flows/index.js';
 import { readPrompt } from '../views/prompts.js';
 import { buildFaqCatalogContext, sanitizeCustomerFacingReply } from '../logic/utils.js';
 import { isGreetingOrNoise, wantsExplicitHandoff, asksCocktailPriceOrCatalog, buildContextualPriceOrCatalogTip, resolveFlowLane } from '../logic/interruptions.js';
+import { asksCoverageAreaQuestion } from '../logic/eventos-helpers.js';
 import { getPendingFlowRequirement } from '../logic/flow-stall.js';
 import { isImagePart, isVideoPart, isMediaPart, assertImageExists } from '../logic/media.js';
 import { buildAdminSosBody, HANDOFF_CLIENT_REPLY } from '../views/templates.js';
@@ -593,9 +594,15 @@ async function processMessageUnlocked(sessionId, messageText, options = {}) {
   // Intro Barriles: el estado hace match de sabor ("tienes sangría?") antes que el FAQ genérico.
   const skipFaqForBarrilesFlavorIntro = currentStateId === 'BARRILES_FILTRO_CANAL';
 
+  // Eventos entrada: cobertura (¿llegan a Viña?) → respuesta programática del estado (datos.json),
+  // no FAQ/LLM que a veces afirma zonas fuera de RM o da la bienvenida a la ciudad.
+  const skipFaqForEventosCoverage = currentStateId === 'EVENTOS_RECOGIDA_DATOS'
+    && asksCoverageAreaQuestion(messageText);
+
   // Si ya hubo un strike y el paso sigue pendiente, no usamos FAQ: dejamos que el fallback cuente el strike
   if (isQuestion && canPrecheckFaq && !flowAlreadyStalling && faqSidequestAllowed
-      && !skipFaqForContextualPrice && !skipFaqForBarrilesFlavorIntro) {
+      && !skipFaqForContextualPrice && !skipFaqForBarrilesFlavorIntro
+      && !skipFaqForEventosCoverage) {
     cliLog(`FAQ PRE-CHECK: Detectada posible pregunta en '${messageText}'`);
     const faqData = JSON.parse(fs.readFileSync(FAQ_JSON_PATH, 'utf8'));
     const faqResponse = await responderFAQ(messageText, faqData, {

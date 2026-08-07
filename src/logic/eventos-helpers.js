@@ -360,8 +360,81 @@ export function asksEventServiceFormatQuestion(messageText) {
 }
 
 /**
+ * hasCoverageIntentVerb: ¿El texto suena a pregunta de cobertura/llegada?
+ * Ej.: "llegan", "van a", "atienden en", "hacen despacho".
+ *
+ * @param {string} lower - Mensaje en minúsculas
+ * @returns {boolean}
+ */
+function hasCoverageIntentVerb(lower) {
+  return /\b(van|llegan|llegamos|atienden|despachan|realizan|trabajan|pueden|cubren|cubre)\b/i.test(lower)
+    || /\b(hacen\s+(env[ií]o|despacho)|hay\s+cobertura|cobertura)\b/i.test(lower);
+}
+
+/**
+ * resolvePlaceForCoverage: Ubica comuna o región de Chile con datos.json.
+ * Sirve para responder cobertura sin hardcodear ciudades sueltas.
+ *
+ * @param {string} messageText
+ * @returns {{ name: string, region: string, isRM: boolean, kind: 'rm'|'outside' }|null}
+ */
+export function resolvePlaceForCoverage(messageText) {
+  const trimmed = String(messageText || '').trim();
+  if (!trimmed) return null;
+
+  // 1) Comuna conocida (RM o regiones_chile)
+  const comuna = findLocationByFuzzyMatch(trimmed);
+  if (comuna) {
+    return {
+      name: comuna.name,
+      region: comuna.region,
+      isRM: Boolean(comuna.isRM),
+      kind: comuna.isRM ? 'rm' : 'outside'
+    };
+  }
+
+  // 2) Nombre de región (ej. "región de Valparaíso", "Coquimbo")
+  const normMsg = normalizeString(trimmed);
+  const regionesChile = preciosData.regiones_chile || {};
+  let bestRegion = null;
+  let bestLen = 0;
+  for (const regionName of Object.keys(regionesChile)) {
+    const normRegion = normalizeString(regionName);
+    if (!normRegion || normRegion.length < 4) continue;
+    // Frase completa: evita que "rio" mate regiones largas al azar
+    const escaped = normRegion.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+    if (new RegExp(`(?:^|\\s)${escaped}(?:\\s|$)`).test(normMsg) && normRegion.length > bestLen) {
+      bestRegion = regionName;
+      bestLen = normRegion.length;
+    }
+  }
+  if (bestRegion) {
+    const isRM = /metropolitana/i.test(bestRegion);
+    return {
+      name: bestRegion,
+      region: bestRegion,
+      isRM,
+      kind: isRM ? 'rm' : 'outside'
+    };
+  }
+
+  // 3) Pistas de RM / Santiago sin comuna concreta
+  if (/\b(regi[oó]n\s+metropolitana|\brm\b|santiago)\b/i.test(trimmed)) {
+    return {
+      name: 'Región Metropolitana',
+      region: 'Región Metropolitana',
+      isRM: true,
+      kind: 'rm'
+    };
+  }
+
+  return null;
+}
+
+/**
  * asksCoverageAreaQuestion: ¿Pregunta si atendemos una ciudad/comuna (no está dando su dato)?
- * Ej.: "¿van a la serena?", "¿llegan a concepción?". Debe ir a FAQ, no extraer comuna.
+ * Ej.: "¿van a la serena?", "¡Hola! Llegan. Viña Del Mar?".
+ * Detecta verbo de cobertura + lugar de datos.json (no solo lista fija de ciudades).
  *
  * @param {string} messageText
  * @returns {boolean}
@@ -371,12 +444,55 @@ export function asksCoverageAreaQuestion(messageText) {
   if (!trimmed) return false;
   const lower = trimmed.toLowerCase();
 
-  const looksLikeQuestion = /\?/.test(trimmed)
-    || /\b(van|llegan|atienden|despachan|hacen|realizan|trabajan|pueden)\b/i.test(lower);
+  const looksLikeQuestion = /\?/.test(trimmed) || hasCoverageIntentVerb(lower);
   if (!looksLikeQuestion) return false;
 
-  return /\b(van\s+a|llegan\s+a|atienden\s+en|despachan\s+a|hacen\s+en|trabajan\s+en)\b/i.test(lower)
-    || /\b(serena|concepci[oó]n|valpara[ií]so|vi[nñ]a|temuco|antofagasta|iquique|fuera\s+de\s+santiago|region|regi[oó]n)\b/i.test(lower);
+  // Frases explícitas de cobertura/llegada
+  if (/\b(van\s+a|llegan\s+a|llegamos\s+a|atienden\s+en|despachan\s+a|hacen\s+en|trabajan\s+en|cubren)\b/i.test(lower)) {
+    return true;
+  }
+  if (/\b(fuera\s+de\s+santiago|fuera\s+de\s+(la\s+)?rm|regiones?|regi[oó]n)\b/i.test(lower)
+      && hasCoverageIntentVerb(lower)) {
+    return true;
+  }
+
+  // Verbo/pregunta + comuna/región conocida en datos.json (Viña, Temuco, etc.)
+  if (hasCoverageIntentVerb(lower) && resolvePlaceForCoverage(trimmed)) {
+    return true;
+  }
+
+  // Pregunta con "?" y lugar conocido ("¿Viña del Mar?" raro, pero "Llegan. Viña?")
+  if (/\?/.test(trimmed) && resolvePlaceForCoverage(trimmed) && hasCoverageIntentVerb(lower)) {
+    return true;
+  }
+
+  return false;
+}
+
+/**
+ * buildEventosCoverageReply: Copy fijo de cobertura Eventos (sin LLM).
+ * RM = todas las comunas; fuera de RM = evaluar por tamaño/fecha; referencia Valparaíso/Coquimbo.
+ * No afirma cobertura fija fuera de la RM ni da la bienvenida a la ciudad.
+ *
+ * @param {string} messageText
+ * @returns {string}
+ */
+export function buildEventosCoverageReply(messageText) {
+  const place = resolvePlaceForCoverage(messageText);
+
+  if (place?.kind === 'rm') {
+    if (place.name && place.name !== 'Región Metropolitana') {
+      return `Sí: *${place.name}* está en la *Región Metropolitana*. En *Servicio para Eventos* llegamos a *todas las comunas* de la RM. 🍸`;
+    }
+    return `Sí: en *Servicio para Eventos* llegamos a *todas las comunas* de la *Región Metropolitana*. 🍸`;
+  }
+
+  if (place?.kind === 'outside') {
+    // Corto: sin preámbulo “Sobre X queda fuera…” (suena a razonamiento interno)
+    return `Fuera de la RM lo evaluamos caso a caso según el *tamaño del evento* y la *disponibilidad de la fecha*. Tenemos experiencia en *Valparaíso* y *Coquimbo*; lo ideal es *seguir cotizando* y el equipo confirma si podemos viajar. 🥂`;
+  }
+
+  return `Fuera de la RM lo evaluamos según el *tamaño del evento* y la *fecha*. Tenemos experiencia en *Valparaíso* y *Coquimbo*; lo ideal es *seguir cotizando* y el equipo confirma si podemos viajar. 🥂`;
 }
 
 /**
@@ -395,12 +511,23 @@ export function asksDeliveryOrDispatchQuestion(messageText) {
 }
 
 /**
- * REPLY_DISPATCH_SIDEBAR: Respuesta corta de cobertura cuando el cliente mezcla
- * pedido + duda de despacho en el mismo mensaje (pasos de carrito).
+ * REPLY_DISPATCH_SIDEBAR_EVENTOS: Cobertura corta en carrito Eventos (multi-intent).
+ * RM cubierta; fuera = evaluación (no cobertura fija Serena/Coquimbo).
  */
-export const REPLY_DISPATCH_SIDEBAR =
-  '📦 Sobre *despacho*: trabajamos en toda la *Región Metropolitana* y también *La Serena/Coquimbo*. El costo se calcula según la comuna al armar la cotización.';
+export const REPLY_DISPATCH_SIDEBAR_EVENTOS =
+  '📦 Sobre *cobertura*: en eventos llegamos a toda la *Región Metropolitana*. Fuera de la RM lo evaluamos según tamaño y fecha (experiencia de referencia en *Valparaíso* y *Coquimbo*); seguimos cotizando y el equipo confirma.';
 
+/**
+ * REPLY_DISPATCH_SIDEBAR_BARRILES: Despacho corto en carrito Barriles (multi-intent).
+ */
+export const REPLY_DISPATCH_SIDEBAR_BARRILES =
+  '📦 Sobre *despacho*: los *Barriles Desechables* van a todo Chile (RM según comuna; regiones por encomienda). El costo se confirma al armar la compra.';
+
+/**
+ * REPLY_DISPATCH_SIDEBAR: Alias legacy → Barriles (imports antiguos).
+ * @deprecated Preferir REPLY_DISPATCH_SIDEBAR_BARRILES / _EVENTOS
+ */
+export const REPLY_DISPATCH_SIDEBAR = REPLY_DISPATCH_SIDEBAR_BARRILES;
 /**
  * stripDeliveryQuestionForCart: Quita la duda de despacho/envío del mensaje
  * para que el extractor de cócteles no se confunda (multi-intent pedido + pregunta).

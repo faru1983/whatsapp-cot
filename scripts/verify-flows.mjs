@@ -1361,8 +1361,36 @@ try {
       input: 'van a la serena?',
       expectState: 'EVENTOS_RECOGIDA_DATOS',
       expectMuted: false,
-      // FAQ puede variar el copy; basta con cubrir Serena (y no inventar comuna)
-      expectIncludes: ['Serena']
+      expectIncludes: ['evalu', 'Valparaíso', 'Coquimbo', 'cotiz'],
+      expectNotIncludes: ['Bienvenidos', 'no hay problema', 'Sobre *', 'queda *fuera']
+    }
+  ]);
+
+  await runCase('Cobertura Viña al inicio: evaluar, no afirmar zona fija', [
+    {
+      input: 'evento',
+      expectState: 'EVENTOS_RECOGIDA_DATOS'
+    },
+    {
+      input: '¡Hola! Llegan. Viña Del Mar?',
+      expectState: 'EVENTOS_RECOGIDA_DATOS',
+      expectMuted: false,
+      expectIncludes: ['Fuera de la RM', 'evalu', 'Valparaíso', 'Coquimbo', 'tipo de evento'],
+      expectNotIncludes: ['Bienvenidos', 'Soy asistente virtual', 'Sobre *Viña', 'queda *fuera']
+    }
+  ]);
+
+  await runCase('Cobertura RM: confirma todas las comunas', [
+    {
+      input: 'evento',
+      expectState: 'EVENTOS_RECOGIDA_DATOS'
+    },
+    {
+      input: 'llegan a Providencia?',
+      expectState: 'EVENTOS_RECOGIDA_DATOS',
+      expectMuted: false,
+      expectIncludes: ['Providencia', 'Metropolitana', 'tipo de evento'],
+      expectNotIncludes: ['fuera de la Región', 'Bienvenidos']
     }
   ]);
 
@@ -2218,7 +2246,7 @@ try {
     const r = await st.validateAndProcess('2 mojitos y 1 sangría, ¿hacen despacho a Maipú?', session);
     const t = String(r.customReply || '');
     assert(session.orderBuilder.products.Mojito >= 1, 'suma Mojito con multi-intent');
-    assert(/despacho|Metropolitana|Serena/i.test(t), 'responde duda de despacho junto al carrito');
+    assert(/despacho|Metropolitana|encomienda|Chile/i.test(t), 'responde duda de despacho junto al carrito');
   }
 
   console.log('\n-- P1: multi-intent carrito + despacho (eventos) --');
@@ -2234,7 +2262,7 @@ try {
     const r = await st.validateAndProcess('5L Mojito, ¿hacen despacho a Maipú?', session);
     const t = String(r.customReply || '');
     assert(/Mojito/i.test(t), 'suma Mojito en eventos multi-intent');
-    assert(/despacho|Metropolitana|Serena/i.test(t), 'responde despacho en eventos multi-intent');
+    assert(/cobertura|Metropolitana|Valpara[ií]so|evalu/i.test(t), 'responde despacho en eventos multi-intent');
   }
 
   console.log('\n-- P2: SOS indecisión fija CERRADO --');
@@ -2265,16 +2293,35 @@ try {
     assert(/asistente virtual|HUMANO/i.test(String(stE.shortQuestion || '')), 'footer en EVENTOS_CONFIRMAR_ENVIO');
   }
 
-  console.log('\n-- helpers: asksDeliveryOrDispatchQuestion --');
+  console.log('\n-- helpers: asksDeliveryOrDispatchQuestion + cobertura Eventos --');
   {
     const {
       asksDeliveryOrDispatchQuestion,
+      asksCoverageAreaQuestion,
+      buildEventosCoverageReply,
+      resolvePlaceForCoverage,
       stripDeliveryQuestionForCart,
       parseBarrilesProductsProgrammatic
     } = await import('../src/logic/eventos-helpers.js');
     assert(asksDeliveryOrDispatchQuestion('2 mojitos, ¿hacen despacho a Maipú?'), 'detecta despacho+pedido');
     assert(asksDeliveryOrDispatchQuestion('van a la serena?'), 'detecta cobertura');
+    assert(asksCoverageAreaQuestion('¡Hola! Llegan. Viña Del Mar?'), 'detecta llegan + Viña');
+    assert(asksCoverageAreaQuestion('llegan a Temuco?'), 'detecta Temuco vía datos.json');
+    assert(!asksCoverageAreaQuestion('matrimonio'), 'tipo de evento ≠ cobertura');
     assert(!asksDeliveryOrDispatchQuestion('2 mojitos'), 'pedido solo no es despacho');
+
+    const placeVina = resolvePlaceForCoverage('¡Hola! Llegan. Viña Del Mar?');
+    assert(placeVina?.name === 'Viña del Mar' && placeVina?.isRM === false, 'Viña fuera de RM vía datos.json');
+    const placeProv = resolvePlaceForCoverage('llegan a Providencia?');
+    assert(placeProv?.isRM === true, 'Providencia es RM');
+
+    const msgVina = buildEventosCoverageReply('¡Hola! Llegan. Viña Del Mar?');
+    assert(/^Fuera de la RM/i.test(msgVina) && /evalu/i.test(msgVina), 'copy fuera RM arranca corto');
+    assert(!/Sobre \*/i.test(msgVina) && !/queda \*fuera/i.test(msgVina), 'sin preámbulo tipo pensamiento');
+    assert(/Valpara[ií]so/i.test(msgVina) && /Coquimbo/i.test(msgVina), 'menciona experiencia Valpo/Coquimbo');
+    const msgRm = buildEventosCoverageReply('van a Las Condes?');
+    assert(/Metropolitana/i.test(msgRm) && !/Fuera de la RM/i.test(msgRm), 'RM confirma cobertura');
+
     assert(/2 mojitos/i.test(stripDeliveryQuestionForCart('2 mojitos, ¿hacen despacho a Maipú?')), 'strip deja el pedido');
     const catalog = Object.keys(datosPrecios.cocteles || {});
     const parsed = parseBarrilesProductsProgrammatic('2 mojitos y 1 sangría, ¿hacen despacho a Maipú?', catalog);

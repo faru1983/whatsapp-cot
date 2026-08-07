@@ -807,7 +807,8 @@ REGLAS DE CONTEXTO:
 - Si el paso es EVENTOS_ELECCION_FORMATO (u otro EVENTOS_* sin formato): el cliente YA eligió Eventos; solo falta Dispensador vs Muro. NUNCA ofrezcas Barriles Desechables como opción.
 
 REGLAS DE COBERTURA:
-- Preguntar si llegamos/vamos/despachamos a una comuna, región o ciudad que NO tiene cobertura (ej. La Serena para eventos) SÍ se considera un match de FAQ. Debes responder indicando que no hay cobertura para ese servicio, usando la información de la regla 7. NUNCA respondas NO_FAQ en estos casos de consulta de cobertura.
+- Preguntar si llegamos/vamos/despachamos a una comuna, región o ciudad SÍ se considera match de FAQ. Usa la regla 7. NUNCA respondas NO_FAQ en consultas de cobertura.
+- En EVENTOS: NUNCA afirmes cobertura fija fuera de la RM (ni La Serena/Coquimbo como zona cubierta). NUNCA des la bienvenida a la ciudad ("¡Bienvenidos a…!").
 
 REGLAS:
 1. Responde SOLO si el mensaje es claramente una pregunta sobre:
@@ -829,12 +830,12 @@ REGLAS:
    - Si CONTEXTO = BARRILES: responde solo barril desechable 5L; no pivotees a Dispensador/Muro salvo que lo pidan.
    - Si CONTEXTO no definido: entonces sí puedes aclarar que hay Barriles Desechables y Eventos (Dispensador/Muro) y preguntar cuál cotiza — sin pegar tablas.
    - Solo da precio numérico cuando la categoría ya está clara. PROHIBIDO pegar la tabla completa desechable+dispensador+muro.
-7. Origen / cobertura / envíos (La Serena, Coquimbo, Concepción, etc. son comunas/regiones de Chile fuera de RM; usa el CONTEXTO DEL CLIENTE para guiar la respuesta):
+7. Origen / cobertura / envíos (usa el CONTEXTO DEL CLIENTE):
     - "¿De dónde son?": Somos de Santiago (FAQ de origen).
-    - Si el cliente está cotizando EVENTOS: responde que atendemos habitualmente en la Región Metropolitana (RM), pero para otras regiones (como La Serena o Concepción) podemos evaluar servicios de forma personalizada según la escala y requerimientos del evento. Sugiérele pedir asistencia de un humano (escribiendo HUMANO) para que el equipo lo evalúe.
+    - Si el cliente está cotizando EVENTOS: llegamos a *todas las comunas* de la Región Metropolitana. Fuera de la RM evaluamos según tamaño del evento y disponibilidad de fecha; experiencia de referencia en Valparaíso y Coquimbo. Invita a *seguir cotizando* para que el equipo confirme si pueden viajar. PROHIBIDO decir que hay cobertura fija en Serena/Coquimbo o dar la bienvenida a la ciudad.
     - Si el cliente está cotizando BARRILES: responde que despachamos barriles desechables de 5L a todo Chile (otras regiones como La Serena) por Blue Express o encomiendas similares.
-    - Si el producto que cotiza no está definido: responde detalladamente que atendemos eventos de forma personalizada fuera de la Región Metropolitana (RM) según la escala (puedes escribir HUMANO para evaluar), y los barriles desechables de 5L los enviamos a todo Chile (otras regiones como La Serena) por Blue Express.
-    - Si preguntan costo a una comuna de RM: usa la tabla DESPACHOS. Fuera de RM: no inventes monto; di encomienda y que el costo se confirma al comprar. En RM: si no dicen si es barril desechable o evento, pregunta antes de cotizar el envío.
+    - Si el producto que cotiza no está definido: aclara ambos (eventos RM + evaluación fuera; barriles a todo Chile por encomienda).
+    - Si preguntan costo a una comuna de RM: usa la tabla DESPACHOS. Fuera de RM: no inventes monto; di que se confirma al comprar / al evaluar. En RM: si no dicen si es barril desechable o evento, pregunta antes de cotizar el envío.
 8. RENDIMIENTO DE BARRILES (según CONTEXTO DEL CLIENTE; vaso/copa con hielo ≈ 200ml):
    - Si el cliente está cotizando BARRILES: responde SOLO que el barril desechable de 5L rinde aprox. 25 cócteles. NO menciones 10L, 20L, 30L ni formatos de evento.
    - Si el cliente está cotizando EVENTOS y formato = Dispensador Portátil: solo 5L≈25 y 10L≈50 tragos.

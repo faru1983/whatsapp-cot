@@ -47,7 +47,7 @@ import {
   validateEventProductLines,
   ASK_EVENT_COCKTAILS,
   asksDeliveryOrDispatchQuestion,
-  REPLY_DISPATCH_SIDEBAR,
+  REPLY_DISPATCH_SIDEBAR_EVENTOS,
   stripDeliveryQuestionForCart
 } from '../../../logic/eventos-helpers.js';
 import { withAssistantFooter, formatMenuBlock } from '../../../logic/flow-rails.js';
@@ -602,7 +602,7 @@ _(ej: 5L Mojito)_ 🍸`;
       });
       // Multi-intent: cócteles + duda de despacho → carrito + cobertura
       const withDispatch = hasDispatchQ
-        ? `${reply}\n\n${REPLY_DISPATCH_SIDEBAR}`
+        ? `${reply}\n\n${REPLY_DISPATCH_SIDEBAR_EVENTOS}`
         : reply;
       return {
         success: true,

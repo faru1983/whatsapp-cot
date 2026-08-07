@@ -32,7 +32,7 @@ import { getDoubtClarificationTemplate, getBrowseOnlyGoodbye, getFlavorListReply
 import { withAssistantFooter } from '../../../logic/flow-rails.js';
 import {
   asksDeliveryOrDispatchQuestion,
-  REPLY_DISPATCH_SIDEBAR,
+  REPLY_DISPATCH_SIDEBAR_BARRILES,
   stripDeliveryQuestionForCart,
   parseBarrilesProductsProgrammatic
 } from '../../../logic/eventos-helpers.js';
@@ -343,7 +343,7 @@ _(ej: quita el mojito)_`
       }
 
       // Multi-intent: pedido + duda de despacho → carrito + respuesta corta de cobertura
-      const dispatchNote = hasDispatchQ ? REPLY_DISPATCH_SIDEBAR : '';
+      const dispatchNote = hasDispatchQ ? REPLY_DISPATCH_SIDEBAR_BARRILES : '';
 
       return {
         success: true,
