@@ -32,9 +32,9 @@ _Solo los refrigeras, sirves y disfrutas._ Si sobra, simplemente vuelves a guard
 
 🍸 *Calidad de bar*, sin preparar nada.
 
-✔ Rinden hasta *25 cócteles*.
-✔ Se conservan refrigerados por *más de 3 semanas*.
-✔ Desde *$31.990*, según el sabor.
+✅ Rinden hasta *25 cócteles*.
+✅ Se conservan refrigerados por *más de 3 semanas*.
+✅ Desde *$31.990*, según el sabor.
 
 📍 Despachamos en toda la *Región Metropolitana* y enviamos a *Regiones* por encomienda.
 
