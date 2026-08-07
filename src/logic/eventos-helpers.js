@@ -18,6 +18,7 @@ import { isLikelyThirdPartyBotReply } from './interruptions.js';
 import { OrderBuilder } from './order-builder.js';
 import { img } from './media.js';
 import { getEventLitersSuggestion } from '../views/templates.js';
+import { normalizeBotDateText } from './cot-event-quote.js';
 
 /** Ejemplo canónico (litros primero) — intro menú + re-preguntas. */
 export const EVENT_COCKTAIL_ORDER_EXAMPLE = '5L Mojito y 10L Aperol';
@@ -923,10 +924,11 @@ export function applyEventDataFromMessage(messageText, session) {
     hasNewInfo = true;
   }
 
-  // Fecha antes que comuna: "en diciembre" es mes, no ubicación
+  // Fecha antes que comuna: "en diciembre" es mes, no ubicación.
+  // Si hay día concreto → DD/MM/YYYY (año Chile / próximo si ya pasó).
   const dateSearch = parseDate(messageText);
   if (dateSearch) {
-    session.date = dateSearch;
+    session.date = normalizeBotDateText(dateSearch) || dateSearch;
     hasNewInfo = true;
   }
 

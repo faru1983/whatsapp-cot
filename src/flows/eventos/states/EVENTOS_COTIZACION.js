@@ -3,7 +3,7 @@
 // OrderBuilder arma los números; el cliente confirma o vuelve a elegir menú.
 // ==============================================================================
 import { defineState } from '../../../logic/compile-state.js';
-import { getEventQuotationTemplate } from '../../../views/templates.js';
+import { getEventQuotationTemplate, getEventosContactIntroAsk } from '../../../views/templates.js';
 import { resolveDecisionIntent } from '../../../logic/decision-intent.js';
 import { rulesConfirmarOModificar } from '../../../logic/keyword-intent.js';
 import {
@@ -80,16 +80,7 @@ _(ej: 20L Mojito y 10L Aperol / quita el aperol / agrega 5L Sangría)_`;
       return {
         success: true,
         nextState: 'EVENTOS_DATOS_CONTACTO',
-        customReply: `¡Genial! 🥂 Ya casi queda lista tu propuesta.
-
-Para dejarte la *cotización formal* —con el detalle completo y una *copia en tu correo*— solo necesito unos últimos datos de contacto.
-
-Así te queda guardada, la revisas con calma y la compartes con quien organice contigo el evento.
-
-*¿Me compartes nombre, apellido y email?*
-_(ej: Ana Pérez, ana@email.com)_
-
-_Antes de crear la cotización revisaremos juntos que todo esté bien._`
+        customReply: getEventosContactIntroAsk()
       };
     }
 

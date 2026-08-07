@@ -7,7 +7,7 @@ import { preciosData } from '../../../logic/utils.js';
 import { OrderBuilder } from '../../../logic/order-builder.js';
 import { resolveDecisionIntent } from '../../../logic/decision-intent.js';
 import { rulesConfirmarOModificar } from '../../../logic/keyword-intent.js';
-import { getQuotationTemplate } from '../../../views/templates.js';
+import { getQuotationTemplate, getBarrilesContactIntroAsk } from '../../../views/templates.js';
 import { withAssistantFooter, formatMenuBlock } from '../../../logic/flow-rails.js';
 
 const MENU_BLOCK = formatMenuBlock(['Generar compra', 'Modificar']);
@@ -66,16 +66,7 @@ _(ej: 1 mojito y 1 sangría)_`
       return {
         success: true,
         nextState: 'BARRILES_DATOS_CONTACTO',
-        customReply: `¡Genial! 🍹 Ya casi queda tu pedido.
-
-Para *generar tu compra online* —con el detalle y una *copia en tu correo*— solo necesito unos últimos datos.
-
-*¿Me compartes nombre, apellido y email?*
-_(ej: Ana Pérez, ana@email.com)_
-
-Después te pediré la *dirección de despacho* (calle y número).
-
-_Antes de crear la compra revisaremos juntos que todo esté bien._`
+        customReply: getBarrilesContactIntroAsk()
       };
     }
 

@@ -6,7 +6,7 @@ import { defineState } from '../../../logic/compile-state.js';
 import { getEventosEnvioSummary } from '../../../views/templates.js';
 import { resolveDecisionIntent } from '../../../logic/decision-intent.js';
 import { rulesConfirmarOCorregirDatos } from '../../../logic/keyword-intent.js';
-import { formatMenuBlock, withAssistantFooter } from '../../../logic/flow-rails.js';
+import { withAssistantFooter } from '../../../logic/flow-rails.js';
 import {
   applyEventosContactDataFromMessage,
   getMissingEventosContactFields,
@@ -18,22 +18,27 @@ import {
   formatEventCartSummary,
   getEventFormatKey
 } from '../../../logic/eventos-helpers.js';
-
-const MENU_BLOCK = formatMenuBlock(['Confirmar', 'Corregir']);
+import {
+  applyCliApiModeChoice,
+  beginCliApiModeAsk,
+  getCliApiSubmitAskReply,
+  isAwaitingCliApiMode,
+  parseCliApiModeChoice,
+  shouldAskCliApiModeOnConfirm
+} from '../../../logic/cot-api.js';
 
 const SHORT_Q = withAssistantFooter(`*¿Todo bien?*
 
-${MENU_BLOCK}
-
-_(ej: escribe el dato directo)_`);
+Escribe *OK* para crear tu cotización formal, o corrige el dato que falte.
+_(ej: email ana@nuevo.com)_`);
 
 const AI_PROMPT = `[SISTEMA - ESTADO: CONFIRMAR ENVÍO DE COTIZACIÓN EVENTOS]
-El cliente ya dio todos los datos y recibió un resumen (contacto, evento, pedido).
-Debe escribir *1* Confirmar, *2* Corregir, o el dato nuevo (ej. "email ana@nuevo.com").
+El cliente ya dio nombre/correo (y datos faltantes del evento si aplicaba).
+Debe escribir *OK* / *1* Confirmar, o corregir el dato (ej. "email ana@nuevo.com").
 1. Responde dudas breves sin inventar precios.
 2. Si corrige un dato, confirma el cambio y vuelve a pedir confirmación.
-3. NUNCA crees la cotización web hasta que confirme (opción 1 / ok).
-4. Si quiere cambiar cócteles, indícale que puede escribirlo o escribir *2* Corregir.`;
+3. NUNCA crees la cotización web hasta que confirme (ok / opción 1).
+4. Si quiere cambiar cócteles, indícale que puede escribirlo o escribir *corregir*.`;
 
 export const EVENTOS_CONFIRMAR_ENVIO = defineState({
   id: 'EVENTOS_CONFIRMAR_ENVIO',
@@ -42,6 +47,21 @@ export const EVENTOS_CONFIRMAR_ENVIO = defineState({
   aiPrompt: AI_PROMPT,
 
   async validateAndProcess(messageText, session) {
+    // Simulador: tras OK preguntamos 1️⃣ real / 2️⃣ simulada (antes de tocar el menú OK/corregir)
+    if (isAwaitingCliApiMode(session)) {
+      const choice = parseCliApiModeChoice(messageText);
+      if (!choice) {
+        return {
+          success: true,
+          nextState: 'EVENTOS_CONFIRMAR_ENVIO',
+          customReply: getCliApiSubmitAskReply(),
+          flowProgress: true
+        };
+      }
+      applyCliApiModeChoice(session, choice);
+      return submitEventosQuoteConfirmed(session);
+    }
+
     // Cambiar menú/cócteles → elección de menú con carrito actual
     if (wantsToChangeEventosOrder(messageText)) {
       const formatKey = getEventFormatKey(session.eventoFormato);
@@ -90,6 +110,16 @@ _(ej: 20L Mojito y 10L Aperol / quita el aperol / agrega 5L Sangría)_`
     });
 
     if (intent === 'CONFIRMAR') {
+      // test:local en modo ask → menú real vs simulada (no choca con el OK del cliente)
+      if (shouldAskCliApiModeOnConfirm()) {
+        beginCliApiModeAsk(session);
+        return {
+          success: true,
+          nextState: 'EVENTOS_CONFIRMAR_ENVIO',
+          customReply: getCliApiSubmitAskReply(),
+          flowProgress: true
+        };
+      }
       return submitEventosQuoteConfirmed(session);
     }
 

@@ -7,6 +7,7 @@ import { defineState } from '../../../logic/compile-state.js';
 import { getEventDataSummary, getBrowseOnlyGoodbye } from '../../../views/templates.js';
 import {
   asksPriceOrCatalog,
+  buildContextualPriceOrCatalogTip,
   wantsBrowseOnlyClose
 } from '../../../logic/interruptions.js';
 import { matchKeywordIntent, rulesWebVsChat } from '../../../logic/keyword-intent.js';
@@ -33,6 +34,7 @@ import {
   lastBotText
 } from '../../../logic/nlu-intent.js';
 import { findLocationByFuzzyMatch, parseDate } from '../../../logic/utils.js';
+import { normalizeBotDateText } from '../../../logic/cot-event-quote.js';
 
 /** Pregunta A: tipo de evento (abierta). Estilo: *pregunta* + _(ej: …)_ en la línea siguiente. */
 const ASK_CELEBRATION = `*¿Qué tipo de evento estás organizando?*
@@ -216,7 +218,8 @@ function isLogisticsSkip(messageText) {
 function applyLogisticsFromAi(session, ai) {
   let changed = false;
   if (ai?.date && !session.date) {
-    session.date = ai.date;
+    // Misma canonización que parseDate programático (DD/MM/YYYY si es concreta)
+    session.date = normalizeBotDateText(ai.date) || ai.date;
     changed = true;
   }
   if (ai?.location) {
@@ -350,13 +353,14 @@ export const EVENTOS_RECOGIDA_DATOS = defineState({
       if (wantsEventInfoOnly(messageText)) {
         return goInfoOnlyWeb();
       }
+      const tip = buildContextualPriceOrCatalogTip(session, 'EVENTOS_RECOGIDA_DATOS', messageText);
       const pending = needsCelebrationType(session)
         ? ASK_CELEBRATION
-        : `Para recomendarte el mejor formato, ¿cuántos *invitados* serán aproximadamente?`;
+        : ASK_GUESTS;
       return {
         success: true,
         nextState: 'EVENTOS_RECOGIDA_DATOS',
-        customReply: `Depende de invitados y formato (Dispensador o Muro). También puedes ver rangos en https://cocktailsontap.cl/eventos 🍸\n\n${pending}`,
+        customReply: `${tip}\n\n${pending}`,
         flowProgress: true
       };
     }

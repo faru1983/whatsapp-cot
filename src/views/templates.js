@@ -349,44 +349,27 @@ export function composeAdminAlertMessage({ type, title, clientLabel, body }) {
 // ==============================================================================
 
 /**
- * getEventFormatPitch: Texto de venta del formato elegido (lo incluido).
- * Se envía al elegir Dispensador/Muro; después el cliente confirma para ver la carta.
+ * getEventFormatPitch: Caption corto al elegir Dispensador/Muro (va con foto/video).
+ * Mantiene la promesa “todo incluido, sin costo adicional” en forma compacta.
  *
  * @param {'dispensador'|'muro'} formatKey - Formato elegido
  * @returns {string} Pitch de lo incluido en el servicio
  */
 export function getEventFormatPitch(formatKey) {
   const isMuro = formatKey === 'muro';
-
-  if (isMuro) {
-    return `¡Excelente elección! 🍸
-
-Nuestro *Muro de Coctelería* es una opción premium que convierte la barra en un verdadero punto de atracción para tus invitados. Su diseño elegante, iluminación LED y sistema de dispensación permiten servir cócteles de forma rápida, práctica y con una presentación espectacular.
-
-💫 Ideal si buscas sorprender a tus invitados y convertir la barra en parte de la decoración de tu evento.
-
-✨ Todo esto está incluido, sin costo adicional:
-
-🧊 Hielo abundante para todo el evento.
-🍊 Garnish (frutas deshidratadas) para decorar tus cócteles.
-🥂 Vasos/Copas (plásticas premium) en prestamo para todos los invitados.
-🧰 Accesorios de bar como hieleras, palas, pinzas y todo lo necesario para servir.
-
-⏰ Sin límite de tiempo: instalamos el muro antes de tu evento y lo retiramos al día siguiente, sin costos ocultos.`;
-  }
+  const nombre = isMuro ? 'Muro de Coctelería' : 'Dispensador Portátil';
+  const gancho = isMuro
+    ? 'Barra premium con LED: punto de atracción, cócteles rápidos y gran presentación.'
+    : 'Ideal para todo tipo de eventos: sin electricidad, mantiene el frío y se adapta a tu espacio.';
 
   return `¡Excelente elección! 🍸
 
-Nuestro *Dispensador Portátil* es ideal para todo tipo de eventos. Funciona sin electricidad, mantiene los cócteles fríos con hielo gracias a su tecnología térmica y se adapta fácilmente a espacios pequeños o grandes.
+*${nombre}*: ${gancho}
 
-✨ Todo esto está incluido, sin costo adicional:
+✨ *Todo esto está incluido, sin costo adicional:*
+🧊 Hielo · 🍊 Garnish · 🥂 Vasos/copas · 🧰 Accesorios de bar
 
-🧊 Hielo abundante para todo el evento.
-🍊 Garnish (frutas deshidratadas) para decorar tus cócteles.
-🥂 Vasos/Copas (plásticas premium) en prestamo para todos los invitados.
-🧰 Accesorios de bar como hieleras, palas, pinzas y todo lo necesario para servir.
-
-⏰ Sin límite de tiempo: instalamos el dispensador antes de tu evento y lo retiramos al día siguiente, sin costos ocultos.`;
+⏰ Instalamos antes del evento y retiramos al día siguiente (sin límite de tiempo ni costos ocultos).`;
 }
 
 /**
@@ -462,8 +445,73 @@ _(ej: son 80 invitados / es en Providencia)_`
 }
 
 /**
- * getBarrilesPurchaseSummary: Resumen final antes de crear la compra web.
- * Contacto + entrega + pedido/total + menú Confirmar/Corregir.
+ * getEventosContactIntroAsk: Pedido corto de nombre + correo tras aprobar la cotización.
+ * Explica por qué (copia formal) sin párrafos largos.
+ *
+ * @returns {string}
+ */
+export function getEventosContactIntroAsk() {
+  return `Perfecto 🥂
+
+Para enviarte la *copia formal* de tu cotización, necesito tu *nombre* y *correo*.
+
+*¿Me los compartes?*
+_(ej: Ana Pérez, ana@email.com)_`;
+}
+
+/**
+ * getBarrilesContactIntroAsk: Pedido corto de nombre + correo tras aprobar la cotización barriles.
+ *
+ * @returns {string}
+ */
+export function getBarrilesContactIntroAsk() {
+  return `Perfecto 🍹
+
+Para enviarte la *copia del pedido* a tu correo, necesito tu *nombre* y *email*.
+
+*¿Me los compartes?*
+_(ej: Ana Pérez, ana@email.com)_
+
+_(después te pido la dirección de despacho)_`;
+}
+
+/**
+ * getEventosEnvioSummary: Confirmación liviana antes de crear la cotización web.
+ * Solo muestra contacto (lo recién indicado); el pedido ya se aprobó en COTIZACIÓN.
+ *
+ * @param {object} session
+ * @returns {string[]}
+ */
+export function getEventosEnvioSummary(session) {
+  const c = session.contact || {};
+  const fullName = `${c.firstName || ''} ${c.lastName || ''}`.trim() || '—';
+  const phone = c.phone || session.clientPhoneE164 || '';
+
+  const lines = [
+    `📋 *Datos para enviarte la cotización:*`,
+    ``,
+    `👤 *${fullName}*`,
+    `✉️ ${c.email || '—'}`
+  ];
+
+  if (phone) lines.push(`📱 ${phone}`);
+
+  // Si completó fecha/comuna en este tramo, las mostramos (no el pedido completo otra vez)
+  if (session.date) lines.push(`📅 ${session.date}`);
+  if (session.location) lines.push(`📍 ${session.location}`);
+
+  return [
+    lines.join('\n'),
+    `*¿Todo bien?*
+
+Escribe *OK* para crear tu cotización formal, o corrige el dato que falte.
+_(ej: email ana@nuevo.com)_`
+  ];
+}
+
+/**
+ * getBarrilesPurchaseSummary: Confirmación liviana antes de crear la compra web.
+ * Contacto + entrega (sin re-listar todo el pedido ya aprobado).
  *
  * @param {object} session
  * @returns {string[]}
@@ -471,12 +519,11 @@ _(ej: son 80 invitados / es en Providencia)_`
 export function getBarrilesPurchaseSummary(session) {
   const c = session.contact || {};
   const cd = session.orderBuilder?.clientData || {};
-  const quote = session.orderBuilder?.quote;
   const fullName = `${c.firstName || ''} ${c.lastName || ''}`.trim() || '—';
   const phone = c.phone || session.clientPhoneE164 || '';
 
   const lines = [
-    `📋 *Resumen para crear tu compra:*`,
+    `📋 *Datos para tu compra:*`,
     ``,
     `👤 *${fullName}*`,
     `✉️ ${c.email || '—'}`
@@ -489,84 +536,12 @@ export function getBarrilesPurchaseSummary(session) {
     `🏠 ${c.address || '—'}`
   );
 
-  const products = session.orderBuilder?.products || {};
-  const productParts = Object.entries(products).map(([name, qty]) => `${qty}x ${name} 5L`);
-  if (productParts.length) {
-    lines.push('', `🍹 ${productParts.join(', ')}`);
-  }
-  if (quote?.total != null) {
-    lines.push(`💰 *Total:* ${formatPrice(quote.total)}`);
-  }
-
-  const menu = formatMenuBlock(['Confirmar', 'Corregir']);
   return [
     lines.join('\n'),
     `*¿Todo bien?*
 
-${menu}
-
-_(ej: escribe el dato directo — "dirección Los Alerces 99")_`
-  ];
-}
-
-/**
- * getEventosEnvioSummary: Resumen final antes de crear la cotización web.
- * Contacto + meta del evento + pedido/total + menú Confirmar/Corregir.
- *
- * @param {object} session
- * @returns {string[]}
- */
-export function getEventosEnvioSummary(session) {
-  const c = session.contact || {};
-  const quote = session.orderBuilder?.quote;
-  const fullName = `${c.firstName || ''} ${c.lastName || ''}`.trim() || '—';
-  const phone = c.phone || session.clientPhoneE164 || '';
-
-  const lines = [
-    `📋 *Resumen para tu cotización formal:*`,
-    ``,
-    `👤 *${fullName}*`,
-    `✉️ ${c.email || '—'}`
-  ];
-
-  if (phone) lines.push(`📱 ${phone}`);
-  lines.push(
-    `🥂 ${session.celebrationType || 'Evento'}`,
-    `👥 ${session.guests || '—'} invitados`,
-    `📅 ${session.date || '—'}`,
-    `📍 ${session.location || '—'}`,
-    `🎪 ${session.eventoFormato || '—'}`
-  );
-
-  const products = session.orderBuilder?.products || {};
-  const productParts = groupCocktailLinesByName(
-    Object.values(products).map((entry) => ({
-      name: entry.name,
-      quantity: entry.quantity,
-      litrage: entry.litrage,
-      lineTotal: 0
-    }))
-  ).map((g) => {
-    const onlyOne = g.parts.length === 1 && g.parts[0].count === 1;
-    return onlyOne
-      ? `${g.totalLiters}L ${g.name}`
-      : `${g.totalLiters}L ${g.name} (${formatBarrelPartsLabel(g.parts)})`;
-  });
-  if (productParts.length) {
-    lines.push('', `🍹 ${productParts.join(', ')}`);
-  }
-  if (quote?.total != null) {
-    lines.push(`💰 *Total:* ${formatPrice(quote.total)}`);
-  }
-
-  const menu = formatMenuBlock(['Confirmar', 'Corregir']);
-  return [
-    lines.join('\n'),
-    `*¿Todo bien?*
-
-${menu}
-
-_(ej: escribe el dato directo — "email ana@nuevo.com" / "son 80 invitados")_`
+Escribe *OK* para crear tu compra, o corrige el dato que falte.
+_(ej: dirección Los Alerces 99)_`
   ];
 }
 
@@ -589,4 +564,82 @@ Por supuesto, puedes elegir el que prefieras:
 2️⃣ *Muro de Coctelería* — instalación ${instalacionMuroStr}, pedido mín. 30L
 
 ${MENU_WRITE_CTA}`;
+}
+
+// ==============================================================================
+// 3. CIERRE TRAS CREAR COTIZACIÓN / COMPRA EN LA WEB
+// ==============================================================================
+
+/**
+ * joinClosingLines: Une líneas del cierre preservando saltos en blanco.
+ * Ojo: NO usar .filter(Boolean) — borra '' y deja el mensaje pegado.
+ *
+ * @param {Array<string|null|undefined>} lines
+ * @returns {string}
+ */
+function joinClosingLines(lines) {
+  return lines.filter((line) => line != null).join('\n');
+}
+
+/**
+ * getEventQuoteCreatedReply: Mensaje al cliente cuando la cotización web ya existe.
+ * Corto, con emojis y aire entre bloques (fácil de escanear en WhatsApp).
+ *
+ * @param {{ url: string, totalStr?: string|null, email?: string|null }} opts
+ * @returns {string}
+ */
+export function getEventQuoteCreatedReply({ url, totalStr = null, email = null } = {}) {
+  const mailLine = email
+    ? `📧 Copia enviada a *${email}*`
+    : '📧 También te enviamos una copia a tu correo';
+
+  return joinClosingLines([
+    '✅ *¡Cotización lista!*',
+    '',
+    totalStr ? `💰 Total referencial: *${totalStr}*` : null,
+    totalStr ? '' : null,
+    '🔗 Tu link:',
+    String(url || '').trim(),
+    '',
+    mailLine,
+    '',
+    '👉 En ese link puedes:',
+    '• Revisar y modificar',
+    '• Confirmar la reserva',
+    '• Ver cómo pagar',
+    '',
+    '¿Dudas? Escríbenos por aquí 🥂'
+  ]);
+}
+
+/**
+ * getBarrilesSaleCreatedReply: Mensaje al cliente cuando la compra web ya existe.
+ * Misma estructura aireada que la cotización de eventos.
+ *
+ * @param {{ url: string, totalStr?: string|null, email?: string|null }} opts
+ * @returns {string}
+ */
+export function getBarrilesSaleCreatedReply({ url, totalStr = null, email = null } = {}) {
+  const mailLine = email
+    ? `📧 Copia enviada a *${email}*`
+    : '📧 También te enviamos una copia a tu correo';
+
+  return joinClosingLines([
+    '✅ *¡Compra lista!*',
+    '',
+    totalStr ? `💰 Total: *${totalStr}*` : null,
+    totalStr ? '' : null,
+    '🔗 Tu link:',
+    String(url || '').trim(),
+    '',
+    mailLine,
+    '',
+    '👉 En esa página puedes:',
+    '• Revisar el detalle',
+    '• Ver cómo pagar',
+    '',
+    'Con el pago confirmado, tu pedido queda agendado 🍹',
+    '',
+    '¿Dudas? Escríbenos por aquí'
+  ]);
 }

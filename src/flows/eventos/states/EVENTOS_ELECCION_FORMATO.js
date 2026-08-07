@@ -39,11 +39,13 @@ ${MENU_BLOCK}`;
 
 const AI_PROMPT = `[SISTEMA - ESTADO: PREGUNTAS SOBRE FORMATO DE EVENTO]
 El cliente ya recibió la recomendación de formato (Dispensador Portátil o Muro de Coctelería) pero tiene dudas en lugar de elegir.
+Ya está en Servicio para Eventos: NUNCA ofrezcas Barriles Desechables ni digas que hay "3 formatos" incluyendo desechable.
 1. Responde su duda de forma breve y amigable.
 2. REGLA DE LOGÍSTICA: Instalación Dispensador = gratis; Muro = $50.000. NUNCA inventes tarifas de envío.
-3. NUNCA cotices ni calcules precios finales todavía.
-4. Si pide AMBOS formatos: explica que el bot cotiza uno a la vez; para ambos puede escribir HUMANO o elegir Dispensador/Muro.
-5. Al finalizar, recuérdale que escriba *1* *Dispensador* o *2* *Muro*.`;
+3. Precios/carta: di que dependen del formato (Dispensador o Muro; barriles desde 5L/10L), menciona https://www.cocktailsontap.cl/eventos y pide elegir *1* o *2*. No cotices totales aún.
+4. NUNCA cotices ni calcules precios finales todavía.
+5. Si pide AMBOS formatos: explica que el bot cotiza uno a la vez; para ambos puede escribir HUMANO o elegir Dispensador/Muro.
+6. Al finalizar, recuérdale que escriba *1* *Dispensador* o *2* *Muro*.`;
 
 export const EVENTOS_ELECCION_FORMATO = defineState({
   id: 'EVENTOS_ELECCION_FORMATO',

@@ -767,6 +767,7 @@ Ejemplo completo: {"skip":false,"date":"15 de mayo","location":"Las Condes","con
  * @param {object} [sessionContext] - Contexto del chat para adaptar respuestas (ej. rendimiento)
  * @param {string} [sessionContext.userIntent] - 'BARRILES' | 'EVENTOS' | undefined
  * @param {string} [sessionContext.eventoFormato] - 'Dispensador Portátil' | 'Muro de Coctelería' | undefined
+ * @param {string} [sessionContext.currentStateId] - Id del paso actual (ej. EVENTOS_ELECCION_FORMATO)
  * @returns {Promise<string>} Devuelve la respuesta redactada o "NO_FAQ".
  */
 export async function responderFAQ(userMessage, faqData, sessionContext = {}) {
@@ -781,9 +782,11 @@ export async function responderFAQ(userMessage, faqData, sessionContext = {}) {
   // Contexto del flujo: sirve para no listar litrajes de evento si está en desechables
   const intent = sessionContext.userIntent || 'No definido';
   const eventoFormato = sessionContext.eventoFormato || 'No elegido';
+  const currentStateId = sessionContext.currentStateId || 'No informado';
   const sessionBlock = `CONTEXTO DEL CLIENTE:
 - El cliente está cotizando: ${intent}
-- Formato elegido: ${eventoFormato}`;
+- Formato elegido: ${eventoFormato}
+- Paso actual del bot: ${currentStateId}`;
 
   const systemInstruction = `Eres un clasificador + redactor de FAQ estricto.
 El usuario escribió: "${userMessage}"
@@ -799,6 +802,7 @@ REGLAS DE CONTEXTO:
 - Asume siempre que el producto indicado en "CONTEXTO DEL CLIENTE" define el producto sobre el cual el usuario está preguntando.
 - Si el cliente está cotizando EVENTOS, asume que las preguntas se refieren al servicio de eventos.
 - Si el cliente está cotizando BARRILES, asume que las preguntas se refieren a barriles desechables.
+- Si el paso es EVENTOS_ELECCION_FORMATO (u otro EVENTOS_* sin formato): el cliente YA eligió Eventos; solo falta Dispensador vs Muro. NUNCA ofrezcas Barriles Desechables como opción.
 
 REGLAS DE COBERTURA:
 - Preguntar si llegamos/vamos/despachamos a una comuna, región o ciudad que NO tiene cobertura (ej. La Serena para eventos) SÍ se considera un match de FAQ. Debes responder indicando que no hay cobertura para ese servicio, usando la información de la regla 7. NUNCA respondas NO_FAQ en estos casos de consulta de cobertura.
@@ -817,10 +821,12 @@ REGLAS:
    - PROHIBIDO agregar frutas, licores u otros ingredientes que no aparezcan en esa ficha (nada de "frutas frescas" genéricas si no están escritas ahí).
    - Si el cóctel no está en el catálogo → NO_FAQ
 6. PRECIOS DE CÓCTELES (muy importante):
-   - Todos los productos son BARRILES, en 3 categorías: (1) barril desechable 5L, (2) barril para eventos con Dispensador Portátil, (3) barril para eventos con Muro de Coctelería.
-   - Si preguntan el precio de un cóctel SIN indicar categoría (ej. "¿cuánto vale el Pisco Sour?"): NO listes los 3 precios. Aclara brevemente que hay 3 formatos de barril y PREGUNTA cuál quiere cotizar (desechable 5L / Dispensador / Muro).
-   - Solo da el precio numérico cuando el cliente ya eligió la categoría (o la dejó inequívoca). Entonces responde SOLO ese canal, con litraje si aplica.
-   - PROHIBIDO pegar la tabla completa desechable+dispensador+muro en una sola respuesta.
+   - Si CONTEXTO = EVENTOS (formato elegido o no): responde SOLO en clave Eventos. PROHIBIDO mencionar "barril desechable 5L" o pedir cotizar desechable, salvo que el cliente lo pida explícitamente ("desechable", "para llevar", "a domicilio sin instalación").
+   - Si EVENTOS y formato aún No elegido: di en 1–2 frases que los precios dependen de *Dispensador* vs *Muro* (barriles desde 5L/10L según formato), menciona https://www.cocktailsontap.cl/eventos y pide elegir 1 Dispensador o 2 Muro. NO listes tres categorías ni ofrezcas desechable.
+   - Si EVENTOS y formato ya elegido: habla solo de ese formato (litrajes válidos) y la web /eventos; no pivotees a otro servicio.
+   - Si CONTEXTO = BARRILES: responde solo barril desechable 5L; no pivotees a Dispensador/Muro salvo que lo pidan.
+   - Si CONTEXTO no definido: entonces sí puedes aclarar que hay Barriles Desechables y Eventos (Dispensador/Muro) y preguntar cuál cotiza — sin pegar tablas.
+   - Solo da precio numérico cuando la categoría ya está clara. PROHIBIDO pegar la tabla completa desechable+dispensador+muro.
 7. Origen / cobertura / envíos (La Serena, Coquimbo, Concepción, etc. son comunas/regiones de Chile fuera de RM; usa el CONTEXTO DEL CLIENTE para guiar la respuesta):
     - "¿De dónde son?": Somos de Santiago (FAQ de origen).
     - Si el cliente está cotizando EVENTOS: responde que atendemos habitualmente en la Región Metropolitana (RM), pero para otras regiones (como La Serena o Concepción) podemos evaluar servicios de forma personalizada según la escala y requerimientos del evento. Sugiérele pedir asistencia de un humano (escribiendo HUMANO) para que el equipo lo evalúe.
@@ -837,7 +843,10 @@ REGLAS:
    - Si preguntan cuánto DURAN, se conservan, caducidad o si se pueden guardar/volver a refrigerar: usa la FAQ de duración.
    - Responde SOLO sobre Barriles Desechables 5L: ≈ 3 semanas refrigerados; se pueden servir y, si sobra, volver a guardar en el refri.
    - NO inventes duración para Dispensador/Muro. Redacta en español natural de vendedor; NUNCA copies instrucciones internas ("Habla SOLO", "Responde SOLO según…").
-10. Si preguntan "precios" o "carta" de forma general: explica las 3 categorías de barril en 1–2 líneas, menciona la web https://cocktailsontap.cl/cotizar y ofrece cotizar un cóctel concreto cuando digan formato. No pegues el catálogo completo.
+10. Si preguntan "precios" o "carta" de forma general:
+   - Con CONTEXTO EVENTOS: tip corto Dispensador/Muro + web /eventos + seguir el paso (elegir formato o continuar). Sin desechable.
+   - Con CONTEXTO BARRILES: tip desechable 5L + web /barriles.
+   - Sin contexto: 1–2 líneas con ambos servicios + https://cocktailsontap.cl/cotizar. No pegues el catálogo completo.
 11. Extras o comuna concreta (con categoría clara): responde solo ese dato, amable y breve, en pesos chilenos.
 12. PROHIBIDO decir "no tengo respuesta" o disculparte cuando no hay match. En ese caso SOLO: NO_FAQ
 13. ANTI-JERGA INTERNA (crítica): NUNCA escribas al cliente palabras como "DATOS OFICIALES", "FAQ", "faq.json", "datos.json", "sección", "base de datos", "CONTEXTO DE SESIÓN" ni "consultar la tabla en...". Habla solo como vendedor: da la info útil en español chileno cordial. NUNCA pegues meta-instrucciones de la base FAQ.

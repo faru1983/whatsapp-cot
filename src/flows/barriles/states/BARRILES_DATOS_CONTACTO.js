@@ -11,16 +11,15 @@ import {
   getMissingBarrilesFields,
   askForMissingBarriles
 } from '../../../logic/cot-barriles-contact.js';
-import { getBarrilesPurchaseSummary } from '../../../views/templates.js';
+import { getBarrilesPurchaseSummary, getBarrilesContactIntroAsk } from '../../../views/templates.js';
 
 const AI_PROMPT = `[SISTEMA - ESTADO: DATOS DE CONTACTO PARA COMPRA DE BARRILES]
-El cliente ya aprobó el resumen y quiere generar la compra online.
-1. Pide solo lo que falte: nombre, apellido, email, dirección de despacho, y si faltan: fecha o comuna.
-2. El WhatsApp ya lo tenemos del chat; no lo pidas salvo que el cliente lo corrija.
-3. NUNCA inventes precios nuevos; la compra formal la crea el sistema web.
-4. Si la fecha es solo un mes (ej. "septiembre"), pide el día tentativo.
-5. Dirección: calle y número (ej. "Los Alerces 123, Depto 456").
-6. Al completar, mostraremos un resumen para confirmar antes de crear la compra.`;
+El cliente ya aprobó el resumen. Pedimos nombre y correo (copia), dirección, y si faltan fecha/comuna.
+1. Pide solo lo que falte. WhatsApp ya lo tenemos del chat.
+2. NUNCA inventes precios nuevos.
+3. Si la fecha es solo un mes, pide el día tentativo.
+4. Dirección: calle y número (ej. "Los Alerces 123").
+5. Al completar, confirmamos los datos (OK) antes de crear la compra.`;
 
 export const BARRILES_DATOS_CONTACTO = defineState({
   id: 'BARRILES_DATOS_CONTACTO',
@@ -28,10 +27,12 @@ export const BARRILES_DATOS_CONTACTO = defineState({
     ensureContactBucket(session);
     ensureClientDataBucket(session);
     const missing = getMissingBarrilesFields(session);
-    const intro =
-      `Para generar tu *compra online* (detalle + copia en tu correo), necesito unos últimos datos.\n` +
-      `_Antes de crear la compra revisaremos juntos que todo esté bien._`;
-    return `${intro}\n\n${askForMissingBarriles(missing, session)}`;
+    const needsPerson = missing.some((m) => ['nombre', 'apellido', 'email'].includes(m));
+    const onlyPerson = missing.every((m) => ['nombre', 'apellido', 'email'].includes(m));
+    if (needsPerson && onlyPerson) {
+      return getBarrilesContactIntroAsk();
+    }
+    return askForMissingBarriles(missing, session);
   },
   shortQuestion: (session) => {
     ensureContactBucket(session);

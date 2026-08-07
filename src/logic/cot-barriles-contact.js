@@ -12,9 +12,9 @@ import {
 } from './cot-contact.js';
 import { toIsoDateFromBotText, normalizeBotDateText, exampleConcreteDateHint } from './cot-event-quote.js';
 import { submitBarrilesSaleFromSession } from './cot-barriles-sale.js';
-import { isCotApiConfigured } from './cot-api.js';
+import { canSubmitCotApiWrite, isCotApiMockMode } from './cot-api.js';
 import { formatPrice, preciosData, parseDate, findLocationByFuzzyMatch } from './utils.js';
-import { buildAdminBarrilesOrderBody } from '../views/templates.js';
+import { buildAdminBarrilesOrderBody, getBarrilesSaleCreatedReply } from '../views/templates.js';
 
 /**
  * ensureClientDataBucket: Asegura orderBuilder.clientData (fecha/comuna en Barriles).
@@ -202,9 +202,9 @@ _(ej: ana@email.com)_`;
 
   const contactBits = missing.filter((m) => ['nombre', 'apellido', 'email'].includes(m));
   if (contactBits.length) {
-    return `Para generar tu *compra online*:
+    return `Para enviarte la *copia del pedido*:
 
-*¿Me compartes ${contactBits.join(', ')}?*
+*¿Me compartes tu nombre y correo?*
 _(ej: Ana Pérez, ana@email.com)_`;
   }
 
@@ -349,21 +349,11 @@ export async function submitBarrilesSaleConfirmed(session) {
     const totalStr = session.cotSale.totalPrice != null
       ? formatPrice(session.cotSale.totalPrice)
       : null;
-    const closingReply = [
-      '✅ *Compra creada*',
-      '',
-      totalStr ? `Total: *${totalStr}*` : null,
-      'Aquí tienes el link de tu pedido:',
-      session.cotSale.url,
-      '',
+    const closingReply = getBarrilesSaleCreatedReply({
+      url: session.cotSale.url,
+      totalStr,
       email
-        ? `También te enviamos una *copia a tu correo* (*${email}*).`
-        : 'También te enviamos una *copia a tu correo*.',
-      '',
-      'En esa página puedes *revisar el detalle* y ver las *instrucciones de pago*. Una vez confirmado el pago, tu pedido queda agendado.',
-      '',
-      'Cualquier duda, escríbenos por este chat y te ayudamos. 🍹'
-    ].filter(Boolean).join('\n');
+    });
 
     return {
       success: true,
@@ -373,9 +363,13 @@ export async function submitBarrilesSaleConfirmed(session) {
     };
   }
 
-  if (!isCotApiConfigured()) {
+  if (!canSubmitCotApiWrite()) {
     console.warn('COT API no configurada: cierre barriles sin crear venta web.');
     return legacyCloseBarrilesWithoutApi(session);
+  }
+
+  if (isCotApiMockMode()) {
+    console.log('[TEST] Creando venta barriles en modo SIMULADO (sin API real)');
   }
 
   const result = await submitBarrilesSaleFromSession(session);

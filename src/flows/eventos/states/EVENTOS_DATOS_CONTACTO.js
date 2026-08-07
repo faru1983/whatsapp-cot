@@ -10,25 +10,26 @@ import {
   getMissingEventosContactFields,
   askForMissingEventosContact
 } from '../../../logic/cot-eventos-contact.js';
-import { getEventosEnvioSummary } from '../../../views/templates.js';
+import { getEventosEnvioSummary, getEventosContactIntroAsk } from '../../../views/templates.js';
 
 const AI_PROMPT = `[SISTEMA - ESTADO: DATOS DE CONTACTO PARA COTIZACIÓN WEB]
-El cliente ya aprobó el resumen. Ahora pedimos datos para la cotización formal (detalle + copia al correo).
-1. Pide solo lo que falte: nombre, apellido, email, y si faltan: fecha, comuna o invitados.
-2. El WhatsApp ya lo tenemos del chat; no lo pidas salvo que el cliente lo corrija.
-3. NUNCA inventes precios nuevos; la cotización formal la crea el sistema web.
-4. Si la fecha es solo un mes (ej. "septiembre"), pide el día tentativo.
-5. Al completar, mostraremos un resumen para confirmar antes de crear la cotización.`;
+El cliente ya aprobó el resumen. Pedimos nombre y correo (copia formal), y si faltan: fecha, comuna o invitados.
+1. Pide solo lo que falte. WhatsApp ya lo tenemos del chat.
+2. NUNCA inventes precios nuevos; la cotización formal la crea el sistema web.
+3. Si la fecha es solo un mes (ej. "septiembre"), pide el día tentativo.
+4. Al completar, confirmamos los datos de contacto (OK) antes de crear la cotización.`;
 
 export const EVENTOS_DATOS_CONTACTO = defineState({
   id: 'EVENTOS_DATOS_CONTACTO',
   promptQuestion: (session) => {
     ensureContactBucket(session);
     const missing = getMissingEventosContactFields(session);
-    const intro =
-      `Para dejarte la *cotización formal* (detalle completo + copia en tu correo), necesito unos últimos datos.\n` +
-      `_Antes de crearla revisaremos juntos que todo esté bien._`;
-    return `${intro}\n\n${askForMissingEventosContact(missing, session)}`;
+    // Si faltan nombre/email (entrada típica), usamos el intro corto unificado
+    const needsPerson = missing.some((m) => ['nombre', 'apellido', 'email'].includes(m));
+    if (needsPerson && missing.every((m) => ['nombre', 'apellido', 'email'].includes(m))) {
+      return getEventosContactIntroAsk();
+    }
+    return askForMissingEventosContact(missing, session);
   },
   shortQuestion: (session) => {
     ensureContactBucket(session);

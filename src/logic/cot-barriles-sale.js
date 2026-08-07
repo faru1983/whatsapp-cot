@@ -6,6 +6,7 @@ import { mapDisposableCartToApiItems, resolveComunaForApi } from './cot-catalog.
 import { createDirectSaleViaApi } from './cot-api.js';
 import { toIsoDateFromBotText } from './cot-event-quote.js';
 import { formatPrice } from './utils.js';
+import { getBarrilesSaleCreatedReply } from '../views/templates.js';
 
 /**
  * formatExtrasAsComments: Resume extras del bot (hielo, etc.) para comments de la API.
@@ -139,21 +140,11 @@ export async function submitBarrilesSaleFromSession(session) {
     : null;
 
   const clientEmail = built.payload.client.email;
-  const closingReply = [
-    '✅ *Compra creada*',
-    '',
-    totalStr ? `Total: *${totalStr}*` : null,
-    'Aquí tienes el link de tu pedido:',
-    apiResult.url,
-    '',
-    clientEmail
-      ? `También te enviamos una *copia a tu correo* (*${clientEmail}*).`
-      : 'También te enviamos una *copia a tu correo*.',
-    '',
-    'En esa página puedes *revisar el detalle* y ver las *instrucciones de pago*. Una vez confirmado el pago, tu pedido queda agendado.',
-    '',
-    'Cualquier duda, escríbenos por este chat y te ayudamos. 🍹'
-  ].filter(Boolean).join('\n');
+  const closingReply = getBarrilesSaleCreatedReply({
+    url: apiResult.url,
+    totalStr,
+    email: clientEmail
+  });
 
   const clientData = session.orderBuilder?.clientData || {};
   const adminBody = [

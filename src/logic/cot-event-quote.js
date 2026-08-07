@@ -4,8 +4,8 @@
 // ==============================================================================
 import { mapEventCartToApiItems, resolveComunaForApi } from './cot-catalog.js';
 import { createEventQuoteViaApi } from './cot-api.js';
-import { getEventFormatKey } from './eventos-helpers.js';
 import { formatPrice } from './utils.js';
+import { getEventQuoteCreatedReply } from '../views/templates.js';
 
 const MONTHS = {
   enero: 1,
@@ -142,8 +142,37 @@ function resolveRelativeDateParts(dateText) {
 }
 
 /**
- * normalizeBotDateText: Si la fecha es relativa (este sábado, mañana),
- * la convierte a "3 de agosto". Si ya es concreta, la deja igual.
+ * formatDdMmYyyy: Fecha canónica chileña para sesión, resumen y API.
+ * Ej.: 8, 8, 2026 → "08/08/2026"
+ *
+ * @param {number} year
+ * @param {number} month - 1–12
+ * @param {number} day
+ * @returns {string}
+ */
+export function formatDdMmYyyy(year, month, day) {
+  const dd = String(Number(day)).padStart(2, '0');
+  const mm = String(Number(month)).padStart(2, '0');
+  return `${dd}/${mm}/${Number(year)}`;
+}
+
+/**
+ * isoToDdMmYyyy: "2026-08-08" → "08/08/2026"
+ *
+ * @param {string} iso
+ * @returns {string|null}
+ */
+function isoToDdMmYyyy(iso) {
+  const m = String(iso || '').match(/^(\d{4})-(\d{2})-(\d{2})$/);
+  if (!m) return null;
+  return `${m[3]}/${m[2]}/${m[1]}`;
+}
+
+/**
+ * normalizeBotDateText: Canoniza fechas concretas a DD/MM/YYYY al guardarlas.
+ * Así "8 de agosto" / "mañana" / "este sábado" quedan listas para el resumen
+ * y para toIsoDateFromBotText → API, sin volver a adivinar el año después.
+ * Solo mes o frases vagas ("diciembre", "próximo año") se dejan igual.
  *
  * @param {string|null|undefined} dateText
  * @returns {string|null}
@@ -152,14 +181,9 @@ export function normalizeBotDateText(dateText) {
   const text = String(dateText || '').trim();
   if (!text) return null;
 
-  // Ya concreta (día + mes) o numérica → no tocamos el texto guardado
-  if (toIsoDateFromBotText(text) && !resolveRelativeDateParts(text)) {
-    return text;
-  }
-
-  const rel = resolveRelativeDateParts(text);
-  if (rel) {
-    return formatDayMonthEs(rel.year, rel.month, rel.day);
+  const iso = toIsoDateFromBotText(text);
+  if (iso) {
+    return isoToDdMmYyyy(iso);
   }
 
   return text;
@@ -190,8 +214,8 @@ export function toIsoDateFromBotText(dateText) {
     return buildIso(rel.year, rel.month, rel.day);
   }
 
-  // dd/mm/yyyy o dd-mm-yyyy
-  const slash = text.match(/^(\d{1,2})[/-](\d{1,2})(?:[/-](\d{2,4}))?$/);
+  // dd/mm/yyyy o dd-mm-yyyy (también con espacios: "16 /9 /2026")
+  const slash = text.match(/^(\d{1,2})\s*[/-]\s*(\d{1,2})(?:\s*[/-]\s*(\d{2,4}))?$/);
   if (slash) {
     const day = Number(slash[1]);
     const month = Number(slash[2]);
@@ -280,8 +304,9 @@ export function mapCelebrationToEventType(celebrationType) {
  * @returns {'portatil'|'muro'}
  */
 export function dispenserFromSession(session) {
-  const key = getEventFormatKey(session.eventoFormato);
-  return key === 'muro' ? 'muro' : 'portatil';
+  // Misma regla que getEventFormatKey (evitamos import circular con eventos-helpers)
+  const isMuro = session?.eventoFormato === 'Muro de Coctelería';
+  return isMuro ? 'muro' : 'portatil';
 }
 
 /**
@@ -401,21 +426,11 @@ export async function submitEventQuoteFromSession(session) {
     : null;
 
   const clientEmail = built.payload.client.email;
-  const closingReply = [
-    '✅ *Cotización creada*',
-    '',
-    totalStr ? `Total referencial: *${totalStr}*` : null,
-    'Aquí tienes tu cotización:',
-    apiResult.url,
-    '',
-    clientEmail
-      ? `También te enviamos una *copia a tu correo* (*${clientEmail}*).`
-      : 'También te enviamos una *copia a tu correo*.',
-    '',
-    'Puedes *revisarla* e incluso *modificarla* en ese link. Cuando estés segura/seguro, *confírmala* desde ahí: en la misma página verás las instrucciones de pago para agendar la reserva.',
-    '',
-    'Cualquier duda, escríbenos por este chat y te ayudamos. 🥂'
-  ].filter(Boolean).join('\n');
+  const closingReply = getEventQuoteCreatedReply({
+    url: apiResult.url,
+    totalStr,
+    email: clientEmail
+  });
 
   const adminBody = [
     `Cliente: ${built.payload.client.firstName} ${built.payload.client.lastName}`,

@@ -107,7 +107,13 @@ assert(fs.existsSync(path.join(ASSETS_DIR, 'eventos_dispensador1.webp')), `exist
 assert(fs.existsSync(path.join(ASSETS_DIR, 'eventos_muro.mp4')), `existe asset eventos_muro.mp4`);
 
 // Helpers de *seguimos*: puro vs mezclado con pedido
-const { isOnlyAdvanceProductsOrder, wantsAdvanceProductsOrder } = await import('../src/logic/interruptions.js');
+const {
+  isOnlyAdvanceProductsOrder,
+  wantsAdvanceProductsOrder,
+  asksCocktailPriceOrCatalog,
+  buildContextualPriceOrCatalogTip,
+  resolveFlowLane
+} = await import('../src/logic/interruptions.js');
 assert(isOnlyAdvanceProductsOrder('seguimos'), `"seguimos" puro → isOnlyAdvance`);
 assert(isOnlyAdvanceProductsOrder('listo'), `"listo" puro → isOnlyAdvance`);
 assert(isOnlyAdvanceProductsOrder('ok'), `"ok" puro → isOnlyAdvance`);
@@ -115,6 +121,38 @@ assert(!isOnlyAdvanceProductsOrder('2 mojitos y 1 aperol seguimos'), `pedido+seg
 assert(wantsAdvanceProductsOrder('2 mojitos y 1 aperol seguimos'), `pedido+seguimos sí quiere avanzar`);
 assert(wantsAdvanceProductsOrder('ok'), `"ok" sí quiere avanzar`);
 assert(!isOnlyAdvanceProductsOrder('aka'), `"aka" no es advance`);
+
+// Precio contextual: no mezclar Barriles↔Eventos según el carril
+assert(asksCocktailPriceOrCatalog('Valor de los cocteles'), `detecta valor de cócteles`);
+assert(!asksCocktailPriceOrCatalog('cuánto cuesta el despacho a Providencia'), `despacho ≠ tip de cócteles`);
+assert(resolveFlowLane({ userIntent: 'EVENTOS' }, 'EVENTOS_ELECCION_FORMATO') === 'EVENTOS', `carril eventos`);
+{
+  const tipFmt = buildContextualPriceOrCatalogTip(
+    { userIntent: 'EVENTOS' },
+    'EVENTOS_ELECCION_FORMATO',
+    'Valor de los cocteles'
+  );
+  assert(/Dispensador|Muro/i.test(tipFmt), `tip formato menciona Dispensador/Muro`);
+  assert(/cocktailsontap\.cl\/eventos/i.test(tipFmt), `tip formato linkea /eventos`);
+  assert(!/desechable/i.test(tipFmt), `tip formato NO mezcla Barriles Desechables`);
+  assert(/elige el formato|elige.*formato/i.test(tipFmt), `tip formato pide elegir formato`);
+
+  const tipConFormato = buildContextualPriceOrCatalogTip(
+    { userIntent: 'EVENTOS', eventoFormato: 'Dispensador Portátil' },
+    'EVENTOS_ELECCION_MENU',
+    'precios'
+  );
+  assert(/Dispensador Portátil/i.test(tipConFormato), `tip con formato nombra el servicio`);
+  assert(!/desechable/i.test(tipConFormato), `tip con formato sin desechable`);
+
+  const tipBar = buildContextualPriceOrCatalogTip(
+    { userIntent: 'BARRILES' },
+    'BARRILES_FILTRO_CANAL',
+    'precios'
+  );
+  assert(/31\.990|desechable/i.test(tipBar), `tip barriles menciona desechable/precio base`);
+  assert(!/Dispensador|Muro/i.test(tipBar), `tip barriles no pivotea a eventos`);
+}
 
 // Comunas: "no" NUNCA debe matchear Ñuñoa (substring "no" ⊂ "nunoa")
 const { findLocationByFuzzyMatch, parseDate, isValidFreeformLocationCapture } = await import('../src/logic/utils.js');
@@ -159,15 +197,32 @@ assert(parseDate('el año que viene') != null, `año que viene es fecha vaga`);
 assert(toIsoDateFromBotText('15 de mayo') != null, `ISO: 15 de mayo`);
 assert(toIsoDateFromBotText('15 diciembre') != null, `ISO: 15 diciembre (sin "de")`);
 assert(toIsoDateFromBotText('15/12') != null, `ISO: 15/12`);
+assert(toIsoDateFromBotText('16 /9 /2026') === '2026-09-16', `ISO: 16 /9 /2026 con espacios`);
+assert(parseDate('16 /9 /2026') != null, `parseDate: 16 /9 /2026 con espacios`);
 assert(toIsoDateFromBotText('diciembre') == null, `ISO: solo mes → null`);
 assert(toIsoDateFromBotText('15 diciembre 2027') === '2027-12-15', `ISO: año explícito`);
 assert(toIsoDateFromBotText('mañana') != null, `ISO: mañana relativa`);
 assert(toIsoDateFromBotText('este sábado') != null, `ISO: este sábado relativa`);
 {
-  const { normalizeBotDateText, exampleConcreteDateHint } = await import('../src/logic/cot-event-quote.js');
-  const norm = normalizeBotDateText('este sábado');
-  assert(/\d{1,2}\s+de\s+\w+/i.test(String(norm)), `normaliza este sábado → día de mes (es ${norm})`);
-  assert(/\d{1,2}\s+de\s+\w+/i.test(exampleConcreteDateHint()), `ejemplo concreto de entrega`);
+  const { normalizeBotDateText, exampleConcreteDateHint, todayPartsChile } = await import('../src/logic/cot-event-quote.js');
+  const normSab = normalizeBotDateText('este sábado');
+  assert(/^\d{2}\/\d{2}\/\d{4}$/.test(String(normSab)), `normaliza este sábado → DD/MM/YYYY (es ${normSab})`);
+  assert(toIsoDateFromBotText(normSab) != null, `DD/MM/YYYY de sábado sigue siendo ISO-válida`);
+  assert(/\d{1,2}\s+de\s+\w+/i.test(exampleConcreteDateHint()), `ejemplo concreto de entrega (copy)`);
+
+  // "8 de agosto" → 08/08/<año Chile o siguiente>
+  const today = todayPartsChile();
+  const normAgo = normalizeBotDateText('8 de agosto');
+  assert(/^\d{2}\/08\/\d{4}$/.test(String(normAgo)), `"8 de agosto" → DD/MM/YYYY (es ${normAgo})`);
+  assert(String(normAgo).startsWith('08/08/'), `"8 de agosto" día/mes 08/08`);
+  const yAgo = Number(String(normAgo).slice(6));
+  const expectY = (today.month > 8 || (today.month === 8 && today.day > 8))
+    ? today.year + 1
+    : today.year;
+  assert(yAgo === expectY, `"8 de agosto" año correcto (es ${yAgo}, esperaba ${expectY})`);
+
+  assert(normalizeBotDateText('diciembre') === 'diciembre', `solo mes no se inventa día`);
+  assert(normalizeBotDateText('15/12/2027') === '15/12/2027', `DD/MM/YYYY explícita se conserva`);
 }
 // Sin año: usa año Chile actual; si ya pasó → próximo. Diciembre desde agosto → mismo año.
 {
@@ -239,7 +294,7 @@ assert(isValidFreeformLocationCapture('Talca'), `Talca libre sigue siendo válid
     const sess = { guests: 50 };
     applyEventDataFromMessage('15 de diciembre', sess);
     assert(sess.guests === 50, `applyEvent: fecha no pisa guests 50`);
-    assert(/diciembre/i.test(String(sess.date || '')), `applyEvent: sí guarda fecha`);
+    assert(/15\/12\/\d{4}/.test(String(sess.date || '')), `applyEvent: sí guarda fecha canónica (es ${sess.date})`);
   }
   // Fecha no pisa nombre ya guardado
   {
@@ -253,15 +308,17 @@ assert(isValidFreeformLocationCapture('Talca'), `Talca libre sigue siendo válid
 
   const cases = [
     { msg: '50 invitados en diciembre', guests: 50, dateRe: /diciembre/i, loc: null },
-    { msg: '50 invitados en lunes', guests: 50, dateRe: /lunes/i, loc: null },
+    // "lunes" relativo → DD/MM/YYYY (ya no queda la palabra lunes)
+    { msg: '50 invitados en lunes', guests: 50, dateRe: /^\d{2}\/\d{2}\/\d{4}$/, loc: null },
     { msg: 'en diciembre en Providencia', guests: null, dateRe: /diciembre/i, loc: 'Providencia' },
-    { msg: 'cumpleaños en septiembre en Las Condes', guests: null, dateRe: /septiembre/i, loc: 'Las Condes' }
+    { msg: 'cumpleaños en septiembre en Las Condes', guests: null, dateRe: /septiembre/i, loc: 'Las Condes' },
+    { msg: '8 de agosto, las condes', guests: null, dateRe: /^08\/08\/\d{4}$/, loc: 'Las Condes' }
   ];
   for (const c of cases) {
     const sess = {};
     applyEventDataFromMessage(c.msg, sess);
     if (c.guests != null) assert(sess.guests === c.guests, `${c.msg} → guests`);
-    assert(c.dateRe.test(String(sess.date || '')), `${c.msg} → fecha`);
+    assert(c.dateRe.test(String(sess.date || '')), `${c.msg} → fecha (es ${sess.date})`);
     assert(
       c.loc ? sess.location === c.loc : !sess.location,
       `${c.msg} → comuna=${c.loc || 'ninguna'} (es ${sess.location || 'null'})`
@@ -448,6 +505,40 @@ assert(
     && ordenInvertido.some((p) => /Sangr/i.test(p.name) && p.litrage === '10L'),
   `también acepta cóctel+litraje (orden libre)`
 );
+
+// Cierre cotización/compra: aire entre bloques (no pegar con filter(Boolean))
+{
+  const { getEventQuoteCreatedReply, getBarrilesSaleCreatedReply, getEventFormatPitch } = await import('../src/views/templates.js');
+  const eventClose = getEventQuoteCreatedReply({
+    url: 'https://cocktailsontap.cl/cotizar/abc',
+    totalStr: '$100.000',
+    email: 'ana@test.cl'
+  });
+  assert(/\n\n/.test(eventClose), `cierre eventos conserva saltos en blanco`);
+  assert(/¡Cotización lista!/i.test(eventClose), `cierre eventos título corto`);
+  assert(/💰/.test(eventClose) && /🔗/.test(eventClose) && /📧/.test(eventClose), `cierre eventos con emojis`);
+  assert(/Revisar y modificar/.test(eventClose), `cierre eventos bullets cortos`);
+  assert(!/Cuando estés segura/.test(eventClose), `cierre eventos sin párrafo largo viejo`);
+
+  const saleClose = getBarrilesSaleCreatedReply({
+    url: 'https://cocktailsontap.cl/compra/xyz',
+    totalStr: '$50.000',
+    email: 'ana@test.cl'
+  });
+  assert(/\n\n/.test(saleClose), `cierre barriles conserva saltos en blanco`);
+  assert(/¡Compra lista!/i.test(saleClose), `cierre barriles título corto`);
+  assert(!/filter\(Boolean\)/.test(saleClose), `sanity`);
+
+  // Pitch formato: corto + misma promesa de incluido
+  const pitchMuro = getEventFormatPitch('muro');
+  const pitchDisp = getEventFormatPitch('dispensador');
+  assert(/Todo esto está incluido, sin costo adicional/i.test(pitchMuro), `pitch muro mantiene incluido`);
+  assert(/Hielo/.test(pitchMuro) && /Garnish/.test(pitchMuro) && /Vasos/.test(pitchMuro), `pitch muro lista lo incluido`);
+  assert(pitchMuro.length < 520, `pitch muro compacto (len=${pitchMuro.length})`);
+  assert(!/verdadero punto de atracción para tus invitados/i.test(pitchMuro), `pitch muro sin intro larga`);
+  assert(/Todo esto está incluido, sin costo adicional/i.test(pitchDisp), `pitch dispensador mantiene incluido`);
+  assert(pitchDisp.length < 520, `pitch dispensador compacto (len=${pitchDisp.length})`);
+}
 
 // Grep nextState en flows
 const flowsRoot = path.join(__dirname, '../src/flows');
@@ -825,8 +916,8 @@ try {
       'pide email al generar compra'
     );
     assert(
-      /compra online|generar tu compra/i.test(String(rOk.customReply || '')),
-      'explica compra online'
+      /copia del pedido|correo/i.test(String(rOk.customReply || '')),
+      'explica copia / correo'
     );
     assert(/direcci[oó]n/i.test(String(rOk.customReply || '')), 'menciona dirección de despacho');
 
@@ -847,8 +938,8 @@ try {
     );
     assert(rAddr.nextState === 'BARRILES_CONFIRMAR_COMPRA', 'con dirección (+comuna) → CONFIRMAR_COMPRA');
     assert(
-      /Resumen para crear tu compra/i.test(String(rAddr.customReplies?.[0] || rAddr.customReply || '')),
-      'muestra resumen de compra'
+      /Datos para tu compra/i.test(String(rAddr.customReplies?.[0] || rAddr.customReply || '')),
+      'muestra confirmación liviana de compra'
     );
     assert(/Los Alerces 123/i.test(String(session.contact?.address || '')), 'guarda dirección barriles');
     assert(
@@ -859,7 +950,7 @@ try {
       /Providencia/i.test(String(session.orderBuilder?.clientData?.location || '')),
       'mantiene comuna Providencia'
     );
-    assert(/Confirmar/i.test(replyToText(rAddr.customReplies || rAddr.customReply)), 'menú Confirmar/Corregir');
+    assert(/OK/i.test(replyToText(rAddr.customReplies || rAddr.customReply)), 'pide OK para crear compra');
 
     session.currentState = 'BARRILES_CONFIRMAR_COMPRA';
     const stConfirm = statesMap.BARRILES_CONFIRMAR_COMPRA;
@@ -1529,6 +1620,31 @@ try {
     assert(!t.includes('lo que pueda'), `no menciona comuna inventada`);
   }
 
+  console.log('\n-- Eventos formato: precio de cócteles no mezcla Desechable --');
+  resetSession(SESSION_ID);
+  {
+    const session = getSession(SESSION_ID);
+    session.currentState = 'EVENTOS_ELECCION_FORMATO';
+    session.userIntent = 'EVENTOS';
+    session.guests = 70;
+    session.celebrationType = 'Cumpleaños';
+    saveSession(SESSION_ID, session);
+
+    const reply = await processMessage(SESSION_ID, 'Valor de los cocteles');
+    const text = typeof reply === 'string'
+      ? reply
+      : Array.isArray(reply)
+        ? reply.map((p) => (typeof p === 'string' ? p : p?.caption || '')).join('\n')
+        : String(reply || '');
+    const after = getSession(SESSION_ID);
+    assert(after.currentState === 'EVENTOS_ELECCION_FORMATO', `sigue en ELECCION_FORMATO`);
+    assert(/Dispensador|Muro/i.test(text), `menciona Dispensador/Muro`);
+    assert(/cocktailsontap\.cl\/eventos/i.test(text), `ofrece web eventos`);
+    assert(!/desechable/i.test(text), `no mezcla Barriles Desechables`);
+    assert(!/3 formatos|tres formatos|elige.*desechable/i.test(text), `no pide cotizar desechable`);
+    assert(/1️⃣|Dispensador/i.test(text), `re-pregunta el menú de formato`);
+  }
+
   await runCase('Anti-loop eventos handoff hablado', [
     {
       input: 'eventos',
@@ -1573,21 +1689,24 @@ try {
     const stCot = statesMap.EVENTOS_COTIZACION;
     const rOk = await stCot.validateAndProcess('ok', session);
     assert(rOk.nextState === 'EVENTOS_DATOS_CONTACTO', 'ok cotización → DATOS_CONTACTO');
-    assert(String(rOk.customReply || '').includes('email'), 'pide email al confirmar');
+    assert(String(rOk.customReply || '').includes('email') || String(rOk.customReply || '').includes('correo'), 'pide email al confirmar');
     assert(
-      String(rOk.customReply || '').toLowerCase().includes('cotización formal')
-        || String(rOk.customReply || '').toLowerCase().includes('copia en tu correo'),
-      'explica cotización formal / copia al correo'
+      String(rOk.customReply || '').toLowerCase().includes('copia formal')
+        || String(rOk.customReply || '').toLowerCase().includes('correo'),
+      'explica copia formal / correo'
     );
 
     session.currentState = 'EVENTOS_DATOS_CONTACTO';
     const stContact = statesMap.EVENTOS_DATOS_CONTACTO;
     const rContact = await stContact.validateAndProcess('Ana Pérez, ana@test.cl', session);
     assert(rContact.nextState === 'EVENTOS_CONFIRMAR_ENVIO', 'contacto completo → CONFIRMAR_ENVIO');
+    const envioText = replyToText(rContact.customReplies || rContact.customReply);
     assert(
-      /Resumen para tu cotizaci[oó]n formal/i.test(replyToText(rContact.customReplies || rContact.customReply)),
-      'muestra resumen de envío eventos'
+      /Datos para enviarte la cotizaci[oó]n/i.test(envioText),
+      'muestra confirmación liviana de contacto'
     );
+    assert(!/10L Mojito|Subtotal|TOTAL/i.test(envioText), 'no re-lista el pedido completo');
+    assert(/OK/i.test(envioText), 'pide OK para crear');
 
     session.currentState = 'EVENTOS_CONFIRMAR_ENVIO';
     const stConfirm = statesMap.EVENTOS_CONFIRMAR_ENVIO;
@@ -1659,7 +1778,7 @@ try {
     const stContact = statesMap.EVENTOS_DATOS_CONTACTO;
     const rDay = await stContact.validateAndProcess('15 diciembre', session);
     assert(rDay.nextState === 'EVENTOS_CONFIRMAR_ENVIO', '"15 diciembre" sin "de" → CONFIRMAR_ENVIO');
-    assert(/15\s+diciembre/i.test(String(session.date || '')), 'guarda día+mes sin "de"');
+    assert(/15\/12\/\d{4}/.test(String(session.date || '')), 'guarda "15 diciembre" como DD/MM/YYYY');
     assert(session.guests === 50, 'fecha no pisa invitados (sigue 50)');
     assert(session.contact?.firstName === 'Felipe', 'fecha no pisa nombre');
     assert(session.contact?.lastName === 'Ramirez', 'fecha no pisa apellido');
@@ -2155,6 +2274,44 @@ console.log('\n-- CRM Interesado: Eventos al confirmar→formato; Barriles al sa
     notifyCrmOnBotStateChange(s3, 'BARRILES_FILTRO_CANAL', 'BARRILES_RECOGIDA_PRODUCTOS') === true,
     'Barriles: salir del filtro sigue marcando Interesado'
   );
+}
+
+console.log('\n-- CLI API ask: OK → menú 1/2 → simulada cierra sin POST --');
+{
+  const { setCotApiWriteMode, getCotApiWriteMode } = await import('../src/logic/cot-api.js');
+  const prevMode = getCotApiWriteMode();
+  setCotApiWriteMode('ask');
+  resetSession(SESSION_ID);
+  const session = getSession(SESSION_ID);
+  session.currentState = 'EVENTOS_CONFIRMAR_ENVIO';
+  session.userIntent = 'EVENTOS';
+  session.eventoFormato = 'Dispensador Portátil';
+  session.guests = 40;
+  session.celebrationType = 'Cumpleaños';
+  session.date = '20 de septiembre';
+  session.location = 'Providencia';
+  session.isRM = true;
+  session.contact = { firstName: 'Ana', lastName: 'Pérez', email: 'ana@test.cl' };
+  session.orderBuilder = {
+    type: 'dispensador',
+    products: { 'Mojito::10L': { name: 'Mojito', litrage: '10L', quantity: 1 } },
+    extras: {},
+    quote: { total: 109990 }
+  };
+
+  const st = statesMap.EVENTOS_CONFIRMAR_ENVIO;
+  const rAsk = await st.validateAndProcess('OK', session);
+  assert(rAsk.nextState === 'EVENTOS_CONFIRMAR_ENVIO', 'ask: tras OK sigue en confirmar');
+  assert(/\[TEST\].*Real|Simulada/i.test(String(rAsk.customReply || '')), 'ask: muestra menú real/simulada');
+  assert(session.cliAwaitingApiMode === true, 'ask: marca espera de 1/2');
+
+  const rMock = await st.validateAndProcess('2', session);
+  assert(rMock.nextState === 'CERRADO', 'ask→2: cierra con mock');
+  assert(rMock.mute === true, 'ask→2: mute');
+  assert(/simulated=1|cotizar\/mock/i.test(String(rMock.customReply || '')), 'ask→2: link simulado en cierre');
+  assert(session.cliAwaitingApiMode !== true, 'ask→2: limpia espera');
+
+  setCotApiWriteMode(prevMode === 'ask' ? 'real' : prevMode);
 }
 
 // Restaura credenciales COT por si el proceso padre las reutiliza

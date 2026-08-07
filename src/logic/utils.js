@@ -1015,7 +1015,7 @@ export function parseDate(text) {
 			`\\b((?:(?:para|en|durante|este|el)\\s+)?(?:${months})(?:\\s+(?:de\\s+)?\\d{4})?)\\b`,
 			'i'
 		),
-		/(\d{1,2}[-/]\d{1,2}(?:[-/]\d{2,4})?)/,
+		/(\d{1,2}\s*[-/]\s*\d{1,2}(?:\s*[-/]\s*\d{2,4})?)/,
 		/((?:el\s+)?(?:lunes|martes|mi[eé]rcoles|jueves|jeuves|viernes|s[aá]bado|domingo)(?:\s+\d{1,2})?)/i,
 		/(hoy|ma[ñn]ana|mañana|pasado ma[ñn]ana|este (?:lunes|martes|mi[eé]rcoles|jueves|jeuves|viernes|s[aá]bado|domingo)|proxima (?:semana|semana)|próxima semana)/i,
 		// Año relativo (sin día concreto): "próximo año", "el año que viene"

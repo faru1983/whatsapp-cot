@@ -10,9 +10,9 @@ import {
   getEventFormatKey
 } from './eventos-helpers.js';
 import { submitEventQuoteFromSession, toIsoDateFromBotText } from './cot-event-quote.js';
-import { isCotApiConfigured } from './cot-api.js';
+import { canSubmitCotApiWrite, isCotApiMockMode } from './cot-api.js';
 import { formatPrice, preciosData } from './utils.js';
-import { buildAdminEventosOrderBody } from '../views/templates.js';
+import { buildAdminEventosOrderBody, getEventQuoteCreatedReply } from '../views/templates.js';
 
 /**
  * getMissingEventosContactFields: Campos que faltan para la API de eventos.
@@ -161,9 +161,9 @@ _(ej: ana@email.com)_`;
 
   const contactBits = missing.filter((m) => ['nombre', 'apellido', 'email'].includes(m));
   if (contactBits.length) {
-    return `Para enviarte la cotización formal:
+    return `Para enviarte la *copia formal* de tu cotización:
 
-*¿Me compartes ${contactBits.join(', ')}?*
+*¿Me compartes tu nombre y correo?*
 _(ej: Ana Pérez, ana@email.com)_`;
   }
 
@@ -270,21 +270,11 @@ export async function submitEventosQuoteConfirmed(session) {
     const totalStr = session.cotQuote.totalPrice != null
       ? formatPrice(session.cotQuote.totalPrice)
       : null;
-    const closingReply = [
-      '✅ *Cotización creada*',
-      '',
-      totalStr ? `Total referencial: *${totalStr}*` : null,
-      'Aquí tienes tu cotización:',
-      session.cotQuote.url,
-      '',
+    const closingReply = getEventQuoteCreatedReply({
+      url: session.cotQuote.url,
+      totalStr,
       email
-        ? `También te enviamos una *copia a tu correo* (*${email}*).`
-        : 'También te enviamos una *copia a tu correo*.',
-      '',
-      'Puedes *revisarla* e incluso *modificarla* en ese link. Cuando estés segura/seguro, *confírmala* desde ahí: en la misma página verás las instrucciones de pago para agendar la reserva.',
-      '',
-      'Cualquier duda, escríbenos por este chat y te ayudamos. 🥂'
-    ].filter(Boolean).join('\n');
+    });
 
     return {
       success: true,
@@ -294,9 +284,14 @@ export async function submitEventosQuoteConfirmed(session) {
     };
   }
 
-  if (!isCotApiConfigured()) {
+  // Mock (test:local) permite el cierre con link falso aunque no haya keys
+  if (!canSubmitCotApiWrite()) {
     console.warn('COT API no configurada: cierre eventos sin crear quote web.');
     return legacyCloseEventosWithoutApi(session);
+  }
+
+  if (isCotApiMockMode()) {
+    console.log('[TEST] Creando cotización eventos en modo SIMULADO (sin API real)');
   }
 
   const result = await submitEventQuoteFromSession(session);

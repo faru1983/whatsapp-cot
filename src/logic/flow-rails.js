@@ -183,7 +183,7 @@ _(ej: 2 mojitos — o escribe *lista*)_`,
     cart: `*¿Qué cócteles te gustaría incluir?*
 _(ej: 5L Mojito)_`,
     confirm_quote: '¿Te parece bien? Escribe *1* *Confirmar* o *2* *Modificar*.',
-    contact: `*¿Me compartes nombre, apellido y email?*
+    contact: `*¿Me compartes tu nombre y correo?*
 _(ej: Ana Pérez, ana@email.com)_`,
     mod_choice: 'Escribe *1* para cambiar cócteles o *2* para cambiar fecha/comuna.',
     client_data: `*¿Me pasas la fecha y comuna de entrega?*

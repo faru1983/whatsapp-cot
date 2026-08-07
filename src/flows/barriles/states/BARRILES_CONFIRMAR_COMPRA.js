@@ -6,7 +6,7 @@ import { defineState } from '../../../logic/compile-state.js';
 import { getBarrilesPurchaseSummary } from '../../../views/templates.js';
 import { resolveDecisionIntent } from '../../../logic/decision-intent.js';
 import { rulesConfirmarOCorregirDatos } from '../../../logic/keyword-intent.js';
-import { formatMenuBlock, withAssistantFooter } from '../../../logic/flow-rails.js';
+import { withAssistantFooter } from '../../../logic/flow-rails.js';
 import {
   applyBarrilesDataFromMessage,
   getMissingBarrilesFields,
@@ -14,22 +14,26 @@ import {
   submitBarrilesSaleConfirmed,
   wantsToChangeBarrilesOrder
 } from '../../../logic/cot-barriles-contact.js';
-
-const MENU_BLOCK = formatMenuBlock(['Confirmar', 'Corregir']);
+import {
+  applyCliApiModeChoice,
+  beginCliApiModeAsk,
+  getCliApiSubmitAskReply,
+  isAwaitingCliApiMode,
+  parseCliApiModeChoice,
+  shouldAskCliApiModeOnConfirm
+} from '../../../logic/cot-api.js';
 
 const SHORT_Q = withAssistantFooter(`*¿Todo bien?*
 
-${MENU_BLOCK}
-
-_(ej: escribe el dato directo)_`);
+Escribe *OK* para crear tu compra, o corrige el dato que falte.
+_(ej: dirección Los Alerces 99)_`);
 
 const AI_PROMPT = `[SISTEMA - ESTADO: CONFIRMAR COMPRA DE BARRILES]
-El cliente ya dio todos los datos y recibió un resumen (nombre, email, fecha, comuna, dirección, pedido).
-Debe escribir *1* Confirmar, *2* Corregir, o el dato nuevo (ej. "dirección Los Alerces 99").
+El cliente ya dio contacto y entrega. Debe escribir *OK* / *1* Confirmar, o corregir un dato.
 1. Responde dudas breves sin inventar precios.
 2. Si corrige un dato, confirma el cambio y vuelve a pedir confirmación.
-3. NUNCA crees la compra web hasta que confirme (opción 1 / ok).
-4. Si quiere cambiar cócteles, indícale que puede escribirlo o escribir *2* Corregir.`;
+3. NUNCA crees la compra web hasta que confirme (ok / opción 1).
+4. Si quiere cambiar cócteles, indícale que puede escribirlo o escribir *corregir*.`;
 
 export const BARRILES_CONFIRMAR_COMPRA = defineState({
   id: 'BARRILES_CONFIRMAR_COMPRA',
@@ -38,6 +42,21 @@ export const BARRILES_CONFIRMAR_COMPRA = defineState({
   aiPrompt: AI_PROMPT,
 
   async validateAndProcess(messageText, session) {
+    // Simulador: tras OK preguntamos 1️⃣ real / 2️⃣ simulada
+    if (isAwaitingCliApiMode(session)) {
+      const choice = parseCliApiModeChoice(messageText);
+      if (!choice) {
+        return {
+          success: true,
+          nextState: 'BARRILES_CONFIRMAR_COMPRA',
+          customReply: getCliApiSubmitAskReply(),
+          flowProgress: true
+        };
+      }
+      applyCliApiModeChoice(session, choice);
+      return submitBarrilesSaleConfirmed(session);
+    }
+
     // Cambiar cócteles/pedido → router de modificación
     if (wantsToChangeBarrilesOrder(messageText)) {
       return {
@@ -86,6 +105,15 @@ _(ej: agrega 1 mojito o es en Providencia)_`
     });
 
     if (intent === 'CONFIRMAR') {
+      if (shouldAskCliApiModeOnConfirm()) {
+        beginCliApiModeAsk(session);
+        return {
+          success: true,
+          nextState: 'BARRILES_CONFIRMAR_COMPRA',
+          customReply: getCliApiSubmitAskReply(),
+          flowProgress: true
+        };
+      }
       return submitBarrilesSaleConfirmed(session);
     }
 

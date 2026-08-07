@@ -41,10 +41,22 @@ process.env.COT_API_KEY = 'test-key-mocked';
 const {
   createDirectSaleViaApi,
   createEventQuoteViaApi,
-  isCotApiConfigured
+  createContactViaApi,
+  isCotApiConfigured,
+  setCotApiWriteMode,
+  getCotApiWriteMode,
+  isCotApiMockMode,
+  canSubmitCotApiWrite,
+  parseCliApiModeChoice,
+  shouldAskCliApiModeOnConfirm
 } = await import('../src/logic/cot-api.js');
 
 assert(isCotApiConfigured() === true, 'API marcada como configurada con env de test');
+assert(getCotApiWriteMode() === 'real', 'modo escritura por defecto: real');
+assert(canSubmitCotApiWrite() === true, 'canSubmit con keys');
+assert(parseCliApiModeChoice('1') === 'real', 'parse 1 → real');
+assert(parseCliApiModeChoice('2️⃣') === 'mock', 'parse 2️⃣ → mock');
+assert(parseCliApiModeChoice('ok') === null, 'parse ok no es modo API');
 
 // --- Éxito direct-sales ---
 {
@@ -323,6 +335,37 @@ console.log('\n=== Engaged lead context ===\n');
   assert(barriles.intent === 'direct', 'intent barriles → direct');
   assert(barriles.comuna === 'Providencia', 'comuna barriles');
   assert(barriles.eventDate === '5 de agosto', 'fecha barriles');
+}
+
+// --- Modo COT_API mock (sin fetch; test:local) ---
+{
+  setCotApiWriteMode('mock');
+  assert(isCotApiMockMode() === true, 'modo mock activo');
+  assert(shouldAskCliApiModeOnConfirm() === false, 'mock no pide menú ask');
+
+  let fetchCalled = false;
+  const restore = installFetchMock(async () => {
+    fetchCalled = true;
+    throw new Error('no debería llamar fetch en mock');
+  });
+
+  const q = await createEventQuoteViaApi({ pricing: { total: 99000 } });
+  assert(q.success === true && q.mocked === true, 'quote mock éxito');
+  assert(/simulated=1/.test(q.url), 'quote mock url marcada');
+  assert(q.totalPrice === 99000, 'quote mock reusa total del payload');
+
+  const s = await createDirectSaleViaApi({});
+  assert(s.success === true && s.mocked === true, 'sale mock éxito');
+
+  const c = await createContactViaApi({ phone: '+56911111111' });
+  assert(c.success === true && c.mocked === true && c.clientId, 'contact mock éxito');
+  assert(fetchCalled === false, 'modo mock no usa fetch');
+  restore();
+
+  setCotApiWriteMode('ask');
+  assert(shouldAskCliApiModeOnConfirm() === true, 'modo ask activa menú 1/2');
+  setCotApiWriteMode('real');
+  assert(isCotApiMockMode() === false, 'vuelve a real');
 }
 
 if (failed > 0) {

@@ -17,7 +17,7 @@ import { warmCotCatalog } from '../logic/cot-catalog.js';
 import { statesMap } from '../flows/index.js';
 import { readPrompt } from '../views/prompts.js';
 import { buildFaqCatalogContext, sanitizeCustomerFacingReply } from '../logic/utils.js';
-import { isGreetingOrNoise, wantsExplicitHandoff } from '../logic/interruptions.js';
+import { isGreetingOrNoise, wantsExplicitHandoff, asksCocktailPriceOrCatalog, buildContextualPriceOrCatalogTip, resolveFlowLane } from '../logic/interruptions.js';
 import { getPendingFlowRequirement } from '../logic/flow-stall.js';
 import { isImagePart, isVideoPart, isMediaPart, assertImageExists } from '../logic/media.js';
 import { buildAdminSosBody, HANDOFF_CLIENT_REPLY } from '../views/templates.js';
@@ -36,11 +36,22 @@ import {
 import { clearNudgeFlag } from '../logic/inactivity-nudge.js';
 import { jidToE164 } from '../logic/cot-event-quote.js';
 import { syncCrmCuriousAsync, syncCrmNameAsync, notifyCrmOnBotStateChange } from '../logic/cot-crm-sync.js';
+import {
+  getCotApiWriteMode,
+  setCotApiWriteMode,
+  isCotApiConfigured
+} from '../logic/cot-api.js';
 
 const isMainModule = process.argv[1] === fileURLToPath(import.meta.url);
 
-// En el simulador CLI activamos logs [TEST] para todo el proceso (keywords, NLU, FAQ…)
-if (isMainModule) enableTestDebug();
+// En el simulador CLI: logs [TEST] + por defecto preguntar real vs simulada al enviar
+if (isMainModule) {
+  enableTestDebug();
+  // Si el .env ya fija COT_API_MOCK, respetarlo; si no, modo ask (menú 1/2 al confirmar)
+  if (!String(process.env.COT_API_MOCK || '').trim()) {
+    setCotApiWriteMode('ask');
+  }
+}
 
 // Configuración cargada una vez al arrancar (incluye umbrales SECURITY_* del .env)
 const botConfig = loadBotConfig();
@@ -552,26 +563,31 @@ async function processMessageUnlocked(sessionId, messageText, options = {}) {
     }
   }
 
-  // 2.9 Pre-intercepción de preguntas (FAQ) para evitar extracción ansiosa (shadowing)
-  const isQuestion = /\?/.test(messageText)
-    || /^(como|cómo|donde|dónde|cuando|cuándo|quien|quién|porque|por\s*qu[eé]|que\s+es|qué\s+es|tienen|tienen\s+disponibilidad|cuanto|cuánto|cuesta|cuestan|vale|valen|hacen|realizan|despachan|envian|envían|van|llegan)\b/i.test(messageText.trim());
-
+  // 2.9 Pre-FAQ: no adelantar precios genéricos si ya hay carril (tip va en fallback / estado)
   const pendingFlow = getPendingFlowRequirement(session, currentStateId);
   const flowAlreadyStalling = Boolean(pendingFlow && (session.consecutiveErrors || 0) > 0);
   const faqSidequestAllowed = canUseFaqSidequest(session, pendingFlow);
 
-  // Si ya hubo un strike y el paso sigue pendiente, no usamos FAQ: dejamos que el fallback cuente el strike
-  // El router inicial es cerrado y determinístico: primero debe elegirse
-  // Eventos o Barriles. No permitimos que FAQ/IA responda antes de esa elección.
+  // El router inicial es cerrado: primero Eventos/Barriles/Humano (sin FAQ/IA previa).
   const canPrecheckFaq = currentStateId !== 'CERRADO'
     && currentStateId !== 'ESPERANDO_INTENCION';
 
-  if (isQuestion && canPrecheckFaq && !flowAlreadyStalling && faqSidequestAllowed) {
+  const isQuestion = /\?/.test(messageText)
+    || /^(como|cómo|donde|dónde|cuando|cuándo|quien|quién|porque|por\s*qu[eé]|que\s+es|qué\s+es|tienen|tienen\s+disponibilidad|cuanto|cuánto|cuesta|cuestan|vale|valen|hacen|realizan|despachan|envian|envían|van|llegan)\b/i.test(messageText.trim());
+
+  // Si ya cotiza Eventos/Barriles, el tip contextual (o el estado) responde precios de cócteles.
+  // Evita que FAQ diga "elige Desechable / Dispensador / Muro" a mitad de un flujo.
+  const skipFaqForContextualPrice = asksCocktailPriceOrCatalog(messageText)
+    && resolveFlowLane(session, currentStateId) !== 'UNKNOWN';
+
+  // Si ya hubo un strike y el paso sigue pendiente, no usamos FAQ: dejamos que el fallback cuente el strike
+  if (isQuestion && canPrecheckFaq && !flowAlreadyStalling && faqSidequestAllowed && !skipFaqForContextualPrice) {
     cliLog(`FAQ PRE-CHECK: Detectada posible pregunta en '${messageText}'`);
     const faqData = JSON.parse(fs.readFileSync(FAQ_JSON_PATH, 'utf8'));
     const faqResponse = await responderFAQ(messageText, faqData, {
       userIntent: session.userIntent,
-      eventoFormato: session.eventoFormato
+      eventoFormato: session.eventoFormato,
+      currentStateId
     });
 
     if (faqResponse === 'SOS_HANDOFF') {
@@ -822,14 +838,32 @@ async function processMessageUnlocked(sessionId, messageText, options = {}) {
       return reply;
     }
 
-    // 4.3 FAQ (precios, despacho, ingredientes oficiales…)
+    // 4.25 Precio/carta de cócteles según flujo (programático; sin mezclar Barriles↔Eventos)
+    // Cubre "Valor de los cocteles" en ELECCION_FORMATO y hermanos que hacen success:false.
+    if (asksCocktailPriceOrCatalog(trimmedMessage) && faqSidequestAllowed
+        && resolveFlowLane(session, currentStateId) !== 'UNKNOWN') {
+      const tip = buildContextualPriceOrCatalogTip(session, currentStateId, trimmedMessage);
+      if (pendingFlow) {
+        incrementFaqSidequest(session, pendingFlow);
+        cliLog(`PRECIO contextual (${pendingFlow} / ${currentStateId}) → tip sin FAQ/LLM`);
+      } else {
+        session.consecutiveErrors = 0;
+        cliLog(`PRECIO contextual (${currentStateId}) → tip + re-pregunta`);
+      }
+      reply = appendStepQuestionIfNeeded(sanitizeCustomerFacingReply(tip), finalQuestion);
+      pushModelTextAndSave(session, sessionId, reply);
+      return reply;
+    }
+
+    // 4.3 FAQ (despacho, ingredientes, FAQs; precios genéricos ya salieron arriba si hay carril)
     let faqResponse = 'NO_FAQ';
     if (faqSidequestAllowed) {
       cliLog('FAQ: consultando faq.json + catálogo/despachos (datos.json) con IA...');
       const faqData = JSON.parse(fs.readFileSync(FAQ_JSON_PATH, 'utf8'));
       faqResponse = await responderFAQ(messageText, faqData, {
         userIntent: session.userIntent,
-        eventoFormato: session.eventoFormato
+        eventoFormato: session.eventoFormato,
+        currentStateId
       });
     } else {
       cliLog(`FAQ: sidequest agotado para "${pendingFlow}" → plantilla on-miss`);
@@ -883,10 +917,12 @@ async function processMessageUnlocked(sessionId, messageText, options = {}) {
       }
       systemInstruction = `${systemInstruction}\n\n${buildFaqCatalogContext()}
 REGLA FALLBACK (crítica): Máximo 2 frases cortas. Si no sabes con certeza → di que no tienes esa info y ofrece escribir *NO* o *HUMANO* para un humano. NO inventes pitch, precios ni historias.
-REGLA ANTI-JERGA: NUNCA digas "DATOS OFICIALES", "FAQ" ni "datos.json".`;
+REGLA ANTI-JERGA: NUNCA digas "DATOS OFICIALES", "FAQ" ni "datos.json".
+REGLA DE CARRIL: Si Intención=EVENTOS, NO menciones Barriles Desechables ni pidas cotizar desechable. Si Intención=BARRILES, NO pivotees a Dispensador/Muro salvo que el cliente lo pida.`;
 
       systemInstruction = `${systemInstruction}\n\n[DATOS CONOCIDOS]:
       - Intención: ${session.userIntent || 'No definido'}
+      - Estado actual: ${currentStateId}
       - Nombre: ${session.orderBuilder?.clientData?.name || session.userName || 'No informado'}`;
       if (session.eventoFormato) {
         systemInstruction += `\n- Formato evento: ${session.eventoFormato}`;
@@ -954,6 +990,7 @@ function formatCliSnapshotLines(session, opts = {}) {
     lines.push(`Estado: ${stateId}`);
   }
   lines.push(`Mute: ${session.isMuted ? 'SÍ (bot silenciado)' : 'no'}`);
+  lines.push(`API escritura: ${getCotApiWriteMode()}${session.cliAwaitingApiMode ? ' (esperando 1/2)' : ''}`);
   lines.push(`Intención: ${session.userIntent || '(sin elegir)'}`);
   lines.push(`Strikes: ${strikes}/${threshold}${strikes >= threshold ? ' → SOS/handoff' : ''}`);
   lines.push(`Dato pendiente (stall): ${pending || '(ninguno — paso libre o ya completo)'}`);
@@ -991,12 +1028,19 @@ function formatCliSnapshotLines(session, opts = {}) {
  */
 function printCliStartupIntro(session) {
   const stateId = session.currentState || '(sin estado)';
+  const apiMode = getCotApiWriteMode();
+  const apiHint = apiMode === 'ask'
+    ? 'ask (al confirmar: 1️⃣ real / 2️⃣ simulada)'
+    : apiMode === 'mock'
+      ? 'mock (sin POST real)'
+      : `real${isCotApiConfigured() ? '' : ' ⚠️ sin COT_API_*'}`;
   console.log(`
 ─────────────────────────────────────────
   Simulador Local — WhatsApp Lite Bot
   Rails: estado · stall · strikes · FAQ
+  API escritura: ${apiHint}
 
-  Comandos: /status /help /reset /mute /unmute /exit
+  Comandos: /status /help /api /reset /mute /unmute /exit
 
 Estado: ${stateId}
 ─────────────────────────────────────────
@@ -1026,10 +1070,18 @@ function printCliHelp() {
 Comandos:
   /status  — panel interno sin enviar mensaje
   /help    — esta ayuda
+  /api     — ver modo API (real / mock / ask)
+  /api mock — simular quotes/ventas (sin red)
+  /api real — POST real a cocktailsontap.cl
+  /api ask  — al confirmar OK: menú 1️⃣ real / 2️⃣ simulada
   /reset   — borrar sesión
   /mute    — silenciar a mano
   /unmute  — reactivar
   /exit    — salir
+
+API escritura (actual: ${getCotApiWriteMode()}):
+  En modo ask, tras *OK* en confirmar envío/compra aparece el menú [TEST].
+  Env: COT_API_MOCK=1|mock|ask (si está vacío, el CLI usa ask).
 
 Qué mirar en el PANEL INTERNO:
   • Estado          → paso actual de la máquina
@@ -1080,6 +1132,22 @@ function cliChat() {
     }
     if (cmd === '/status') {
       printCliSessionSnapshot(getSession(sessionId), { hadReply: true });
+      cliChat();
+      return;
+    }
+
+    // /api · /api mock · /api real · /api ask
+    if (cmd === '/api' || cmd.startsWith('/api ')) {
+      const arg = cmd.slice(4).trim();
+      if (!arg) {
+        cliLog(`API escritura: ${getCotApiWriteMode()} | credenciales: ${isCotApiConfigured() ? 'sí' : 'no'}`);
+        cliLog('Cambia con /api mock | /api real | /api ask');
+      } else if (arg === 'mock' || arg === 'real' || arg === 'ask') {
+        setCotApiWriteMode(arg);
+        cliLog(`API escritura → ${arg}`);
+      } else {
+        cliLog(`Uso: /api | /api mock | /api real | /api ask (recibí: ${arg})`);
+      }
       cliChat();
       return;
     }

@@ -122,6 +122,27 @@ export function asksPriceOrCatalog(messageText) {
   return /\b(precio|precios|valor|valores|vale|cu[aá]nto|cuanto|cuestan|cuesta|carta|lista|cat[aá]logo|menu|men[uú]|sabores|variedades)\b/i.test(lower);
 }
 
+/**
+ * asksCocktailPriceOrCatalog: ¿Pide precios/carta de cócteles (no despacho ni ingredientes)?
+ * Sirve para tip contextual sin pisar FAQ de envío/cobertura.
+ *
+ * @param {string} messageText
+ * @returns {boolean}
+ */
+export function asksCocktailPriceOrCatalog(messageText) {
+  if (!asksPriceOrCatalog(messageText)) return false;
+  const lower = String(messageText || '').toLowerCase();
+  // Despacho / cobertura → FAQ o helpers de cobertura
+  if (/\b(despacho|env[ií]o|encomienda|cobertura|flete|tarifa\s+de\s+env|costo\s+de\s+env)\b/i.test(lower)) {
+    return false;
+  }
+  // Ingredientes → FAQ de ficha
+  if (/\b(ingrediente|de\s+qu[eé]\s+est[aá]|qu[eé]\s+lleva|contiene|receta)\b/i.test(lower)) {
+    return false;
+  }
+  return true;
+}
+
 /** Regex: el mensaje entero es solo “seguir / listo / ok / no” (sin sabores al lado). */
 const ONLY_ADVANCE_PRODUCTS_RE =
   /^(nada|nada\s*mas|nada\s*más|solo\s*esto|solo\s*estos|eso\s*es|listo|ya|fin|sin\s*mas|sin\s*más|no\s*hay\s*mas|no\s*quiero\s*mas|continuar|continuamos|avanzar|seguir|seguimos|siguiente|ok|okay|dale|perfecto|si|sí|no)([\s!.?]*)$/i;
@@ -190,6 +211,73 @@ export function formatDesechablePriceReply(cocktailName) {
   const price = preciosData.cocteles?.[cocktailName]?.desechable?.['5L'];
   if (price == null) return null;
   return `El *${cocktailName}* en Barril Desechable de 5L vale *${formatPrice(price)}* (rinde ≈ 25 cócteles).`;
+}
+
+/**
+ * resolveFlowLane: ¿El cliente está en Barriles, Eventos o aún no eligió?
+ * Usa userIntent y el id del estado (por si la sesión quedó a medias).
+ *
+ * @param {object} session
+ * @param {string} [stateId]
+ * @returns {'BARRILES'|'EVENTOS'|'UNKNOWN'}
+ */
+export function resolveFlowLane(session = {}, stateId = '') {
+  const sid = String(stateId || session.currentState || '');
+  const intent = String(session.userIntent || '').toUpperCase();
+  if (intent === 'BARRILES' || sid.startsWith('BARRILES_')) return 'BARRILES';
+  if (intent === 'EVENTOS' || sid.startsWith('EVENTOS_')) return 'EVENTOS';
+  return 'UNKNOWN';
+}
+
+/**
+ * buildContextualPriceOrCatalogTip: Tip de precio/carta según el flujo y el paso.
+ * Evita que FAQ/LLM mezcle Barriles Desechables cuando ya cotiza Eventos (y viceversa).
+ * El engine/estados re-preguntan el dato pendiente después (shortQuestion).
+ *
+ * @param {object} [session]
+ * @param {string} [stateId] - Estado actual (ej. EVENTOS_ELECCION_FORMATO)
+ * @param {string} [messageText] - Para precio puntual de un cóctel en Barriles
+ * @returns {string} Tip breve + guía a web / siguiente paso
+ */
+export function buildContextualPriceOrCatalogTip(session = {}, stateId = '', messageText = '') {
+  const lane = resolveFlowLane(session, stateId);
+  const sid = String(stateId || session.currentState || '');
+
+  // --- Barriles Desechables ---
+  if (lane === 'BARRILES') {
+    const cocktail = findMentionedCocktail(messageText);
+    const priceLine = cocktail ? formatDesechablePriceReply(cocktail) : null;
+    if (priceLine) return priceLine;
+    return `Los precios dependen del sabor. Barriles Desechables *5L* desde *$31.990* (≈ 25 cócteles).
+Catálogo: www.cocktailsontap.cl/barriles`;
+  }
+
+  // --- Servicio para Eventos ---
+  if (lane === 'EVENTOS') {
+    const formato = session.eventoFormato;
+    if (formato) {
+      const isMuro = /muro/i.test(String(formato));
+      const minL = isMuro ? 30 : 10;
+      const sizes = isMuro ? '10L, 20L o 30L' : '5L o 10L';
+      return `Los precios dependen del cóctel y el litraje del *${formato}* (barriles ${sizes}; pedido mín. *${minL}L*).
+Puedes ver la carta en https://www.cocktailsontap.cl/eventos — si seguimos por aquí, te la muestro al continuar.`;
+    }
+
+    // Aún eligiendo Dispensador vs Muro (o datos previos): NUNCA ofrecer Desechable
+    const choosingFormat = sid === 'EVENTOS_ELECCION_FORMATO' || sid === 'EVENTOS_CONFIRMAR_DATOS';
+    const continueHint = choosingFormat
+      ? 'Si prefieres continuar por aquí, primero elige el formato.'
+      : 'Si prefieres continuar por aquí, te oriento según invitados y formato.';
+
+    return `Los precios dependen del servicio (*Dispensador* o *Muro*): hay barriles desde *5L* / *10L* según el formato que elijas.
+Puedes ver rangos en https://www.cocktailsontap.cl/eventos
+
+${continueHint}`;
+  }
+
+  // --- Router / sin intención ---
+  return `Los precios dependen del servicio: *Barriles Desechables* (5L) o *Eventos* (Dispensador / Muro).
+Catálogo: https://www.cocktailsontap.cl/cotizar`;
 }
 
 // ==============================================================================
