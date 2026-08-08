@@ -881,25 +881,69 @@ try {
     }
   ]);
 
-  await runCase('Barriles match sabor → pitch + menú', [
+  await runCase('Barriles match sabor único → carrito directo (sin menú intermedio)', [
     { input: 'desechables', expectState: 'BARRILES_FILTRO_CANAL', expectMuted: false },
     {
       input: 'mojito',
-      expectState: 'BARRILES_INTRO_MENU',
+      expectState: 'BARRILES_RECOGIDA_PRODUCTOS',
       expectMuted: false,
-      expectIncludes: ['Genial', 'Mojito', 'barril_desechable_precios', 'Cotizar mi pedido', 'consulta'],
-      expectNotIncludes: ['no estoy seguro', 'número de la opción']
+      expectIncludes: ['Genial', 'Mojito', 'barril_desechable_precios', 'OK'],
+      expectNotIncludes: ['no estoy seguro', 'número de la opción', 'Cotizar mi pedido']
     }
   ]);
 
-  await runCase('Barriles "tienes sangría?" → match (no FAQ genérico)', [
+  await runCase('Barriles "tienes sangría?" → match directo (no FAQ genérico)', [
     { input: 'desechables', expectState: 'BARRILES_FILTRO_CANAL' },
     {
       input: 'tienes sangria?',
+      expectState: 'BARRILES_RECOGIDA_PRODUCTOS',
+      expectMuted: false,
+      expectIncludes: ['Genial', 'Sangría', 'OK'],
+      expectNotIncludes: ['asistente virtual', 'Sabores disponibles y precios', 'Cotizar mi pedido']
+    }
+  ]);
+
+  await runCase('Barriles nombra 1 cóctel real + 1 inexistente → match + aviso honesto (no en silencio)', [
+    { input: 'desechables', expectState: 'BARRILES_FILTRO_CANAL' },
+    {
+      input: 'mojito y piña colada',
+      expectState: 'BARRILES_RECOGIDA_PRODUCTOS',
+      expectMuted: false,
+      expectIncludes: ['Mojito', 'piña colada', 'aún no', 'barril_desechable_precios', 'OK'],
+      expectNotIncludes: ['por si quieres agregar otro sabor']
+    }
+  ]);
+
+  await runCase('Barriles nombra 2 cócteles a la vez → ambos quedan en el carrito', [
+    { input: 'desechables', expectState: 'BARRILES_FILTRO_CANAL' },
+    {
+      input: 'Sangría y Ramazzotti',
+      expectState: 'BARRILES_RECOGIDA_PRODUCTOS',
+      expectMuted: false,
+      expectIncludes: ['Anoté', 'Sangría', 'Ramazzotti', 'Subtotal'],
+      expectNotIncludes: ['Cotizar mi pedido']
+    }
+  ]);
+
+  await runCase('Barriles nombra cóctel que no existe → respuesta directa + catálogo (no "no entendí")', [
+    { input: 'desechables', expectState: 'BARRILES_FILTRO_CANAL' },
+    {
+      input: 'negroni',
       expectState: 'BARRILES_INTRO_MENU',
       expectMuted: false,
-      expectIncludes: ['Genial', 'Sangría', 'Cotizar'],
-      expectNotIncludes: ['asistente virtual', 'Sabores disponibles y precios']
+      expectIncludes: ['aún no lo tenemos', 'barril_desechable_precios', 'Cotizar'],
+      expectNotIncludes: ['no te entendí', 'Disculpa', 'Excelente elección']
+    }
+  ]);
+
+  await runCase('Barriles "tienes piña colada?" → fuera de carta + catálogo (no FAQ/LLM)', [
+    { input: 'desechables', expectState: 'BARRILES_FILTRO_CANAL' },
+    {
+      input: 'tienes piña colada?',
+      expectState: 'BARRILES_INTRO_MENU',
+      expectMuted: false,
+      expectIncludes: ['aún no lo tenemos', 'barril_desechable_precios', 'Cotizar'],
+      expectNotIncludes: ['no te entendí', 'Disculpa', 'Excelente elección', 'asistente virtual']
     }
   ]);
 
@@ -923,9 +967,9 @@ try {
     }
   ]);
 
-  await runCase('Barriles menú 1️⃣ cotizar → productos', [
+  await runCase('Barriles menú (sin match) 1️⃣ cotizar → productos', [
     { input: 'desechables', expectState: 'BARRILES_FILTRO_CANAL' },
-    { input: 'mojito', expectState: 'BARRILES_INTRO_MENU' },
+    { input: 'algo bien dulce y raro que no tienen', expectState: 'BARRILES_INTRO_MENU' },
     {
       input: '1',
       expectState: 'BARRILES_RECOGIDA_PRODUCTOS',
@@ -934,9 +978,22 @@ try {
     }
   ]);
 
-  await runCase('Barriles menú 2️⃣ consulta → SOS + mute', [
+  await runCase('Barriles productos: cóctel fuera de carta → catálogo (sin preguntar OK + sabor a la vez)', [
     { input: 'desechables', expectState: 'BARRILES_FILTRO_CANAL' },
-    { input: 'pisco sour', expectState: 'BARRILES_INTRO_MENU' },
+    { input: 'algo bien dulce y raro que no tienen', expectState: 'BARRILES_INTRO_MENU' },
+    { input: '1', expectState: 'BARRILES_RECOGIDA_PRODUCTOS' },
+    {
+      input: '1 negroni',
+      expectState: 'BARRILES_RECOGIDA_PRODUCTOS',
+      expectMuted: false,
+      expectIncludes: ['aún no lo tenemos', 'barril_desechable_precios', 'sabor'],
+      expectNotIncludes: ['Todo bien con el pedido', 'no te entendí']
+    }
+  ]);
+
+  await runCase('Barriles menú (sin match) 2️⃣ consulta → SOS + mute', [
+    { input: 'desechables', expectState: 'BARRILES_FILTRO_CANAL' },
+    { input: 'algo bien dulce y raro que no tienen', expectState: 'BARRILES_INTRO_MENU' },
     {
       input: '2',
       expectState: 'CERRADO',
@@ -949,7 +1006,7 @@ try {
 
   await runCase('Seguimos con carrito vacío', [
     { input: 'desechables', expectState: 'BARRILES_FILTRO_CANAL' },
-    { input: 'mojito', expectState: 'BARRILES_INTRO_MENU' },
+    { input: 'algo bien dulce y raro que no tienen', expectState: 'BARRILES_INTRO_MENU' },
     { input: '1', expectState: 'BARRILES_RECOGIDA_PRODUCTOS' },
     {
       input: 'seguimos',
@@ -984,7 +1041,15 @@ try {
 
   console.log('\n-- Barriles intro helpers: match pitch + prices-only --');
   {
-    const { buildBarrilesMatchPitch, buildBarrilesIntroGateReplies, looksLikeBarrilesFlavorInterest } = await import('../src/logic/barriles-intro.js');
+    const {
+      buildBarrilesMatchPitch,
+      buildBarrilesMatchedCartReplies,
+      buildBarrilesNoMatchGateReplies,
+      buildBarrilesUnknownFlavorGateReplies,
+      looksLikeBarrilesFlavorInterest,
+      looksLikeUnrecognizedFlavorAttempt,
+      resolveBarrilesFlavorMatches
+    } = await import('../src/logic/barriles-intro.js');
     const { wantsPricesOnlyBrowseClose } = await import('../src/logic/interruptions.js');
     const pitch = buildBarrilesMatchPitch('Mojito');
     assert(/Genial/i.test(pitch), 'pitch match abre con Genial');
@@ -992,18 +1057,37 @@ try {
     assert(/Ron Blanco|Menta/i.test(pitch), 'pitch usa ingredientes de datos.json');
     assert(/25 tragos/i.test(pitch), 'pitch menciona rendimiento');
     assert(/\$/.test(pitch), 'pitch muestra precio');
-    const matchReplies = buildBarrilesIntroGateReplies('Mojito');
-    assert(matchReplies.length === 3, 'con match: pitch + imagen + menú');
+    const matchReplies = buildBarrilesMatchedCartReplies(['Mojito'], { Mojito: 1 });
+    assert(matchReplies.length === 2, 'con 1 match: pitch+CTA + imagen catálogo');
     assert(/barril_desechable_precios/.test(String(matchReplies[1]?.file || '')), 'con match: incluye catálogo');
-    const replies = buildBarrilesIntroGateReplies(null);
-    assert(replies.length === 2, 'sin match: imagen+caption + menú');
-    assert(replies[0]?.type === 'image' || replies[0]?.file, 'sin match: primer bubble es imagen');
-    assert(/Excelente elección/i.test(String(replies[0]?.caption || '')), 'sin match: copy va en caption');
-    assert(/👆/.test(String(replies[0]?.caption || '')), 'sin match: caption con 👆');
+    const multiReplies = buildBarrilesMatchedCartReplies(['Sangría', 'Ramazzotti Spritz'], { Sangría: 1, 'Ramazzotti Spritz': 1 });
+    assert(/Sangría/.test(multiReplies[0]) && /Ramazzotti/.test(multiReplies[0]), 'con 2+ match: resumen nombra ambos');
+    const noMatchReplies = buildBarrilesNoMatchGateReplies();
+    assert(noMatchReplies.length === 2, 'sin match: imagen+caption + menú');
+    assert(noMatchReplies[0]?.type === 'image' || noMatchReplies[0]?.file, 'sin match: primer bubble es imagen');
+    assert(/Excelente elección/i.test(String(noMatchReplies[0]?.caption || '')), 'sin match: copy va en caption');
+    assert(/👆/.test(String(noMatchReplies[0]?.caption || '')), 'sin match: caption con 👆');
+    assert(/Cotizar/.test(noMatchReplies[1]), 'sin match: segunda burbuja es el menú cotizar/consulta');
+    const unknownReplies = buildBarrilesUnknownFlavorGateReplies();
+    assert(/aún no lo tenemos/i.test(String(unknownReplies[0]?.caption || '')), 'fuera de carta: copy honesto');
+    assert(/Cotizar/.test(unknownReplies[1]), 'fuera de carta: menú cotizar/consulta');
     assert(looksLikeBarrilesFlavorInterest('tienes sangria?'), 'tienes sangria = interés sabor');
+    assert(looksLikeBarrilesFlavorInterest('tienes piña colada?'), 'tienes X? = interés sabor (conjugación tienes)');
     assert(!looksLikeBarrilesFlavorInterest('hacen despacho a Maipú?'), 'despacho ≠ interés sabor');
+    assert(looksLikeUnrecognizedFlavorAttempt('negroni'), 'nombre suelto fuera de carta');
+    assert(looksLikeUnrecognizedFlavorAttempt('tienes piña colada?'), 'tienes X? fuera de carta');
+    assert(looksLikeUnrecognizedFlavorAttempt('hay cosmopolitan'), 'hay X fuera de carta');
+    assert(!looksLikeUnrecognizedFlavorAttempt('algo bien dulce y raro que no tienen'), 'preferencia genérica ≠ nombre desconocido');
+    assert(!looksLikeUnrecognizedFlavorAttempt('hacen despacho?'), 'despacho ≠ nombre desconocido');
     assert(wantsPricesOnlyBrowseClose('solo quiero ver precios, no cotizo'), 'prices-only + no cotizo');
     assert(!wantsPricesOnlyBrowseClose('cuánto vale el mojito?'), 'precio de un cóctel ≠ cierre');
+
+    // Bug reportado: nombrar 2 cócteles en el mismo mensaje debe reconocer AMBOS
+    const twoMatches = await resolveBarrilesFlavorMatches('Sangría y Ramazzotti', 'contexto');
+    assert(twoMatches.includes('Sangría') && twoMatches.includes('Ramazzotti Spritz'), 'detecta AMBOS cócteles en "Sangría y Ramazzotti"');
+    // Comuna suelta (sin ninguna señal de sabor) nunca debe gatillar la IA / inventar un cóctel
+    const comunaMatches = await resolveBarrilesFlavorMatches('Las Condes', 'contexto');
+    assert(comunaMatches.length === 0, '"Las Condes" (comuna, sin señal de sabor) no dispara la IA ni inventa un cóctel');
   }
 
   console.log('\n-- Barriles: generar compra → contacto → cierre legacy --');
@@ -1481,6 +1565,13 @@ try {
     const r = await st.validateAndProcess('Gracias por la información', session);
     assert(r.success === false, 'cortesía en menú barriles → success false');
     assert(Object.keys(session.orderBuilder.products).length === 0, 'carrito barriles sigue vacío');
+    const shortEmpty = typeof st.shortQuestion === 'function' ? st.shortQuestion(session) : st.shortQuestion;
+    assert(/sabor/i.test(String(shortEmpty)) && !/Todo bien con el pedido/i.test(String(shortEmpty)),
+      'sin carrito: shortQuestion pide sabor (no OK)');
+    session.orderBuilder.products = { Mojito: 1 };
+    const shortFull = typeof st.shortQuestion === 'function' ? st.shortQuestion(session) : st.shortQuestion;
+    assert(/Todo bien con el pedido/i.test(String(shortFull)) && !/Qué sabor/i.test(String(shortFull)),
+      'con carrito: shortQuestion pide OK (no sabor otra vez)');
   }
 
   console.log('\n-- Eventos menú muro monito aperol y duda de precio --');
@@ -2546,6 +2637,12 @@ console.log('\n-- CRM Interesado: Eventos al confirmar→formato; Barriles al co
   assert(
     notifyCrmOnBotStateChange(s3, 'BARRILES_INTRO_MENU', 'BARRILES_RECOGIDA_PRODUCTOS') === true,
     'Barriles: elige cotizar SÍ marca Interesado / Cliente potencial'
+  );
+
+  const s4 = { userIntent: 'BARRILES', waLabelClientePotencialApplied: false };
+  assert(
+    notifyCrmOnBotStateChange(s4, 'BARRILES_FILTRO_CANAL', 'BARRILES_RECOGIDA_PRODUCTOS') === true,
+    'Barriles: nombra sabor directo en la entrada SÍ marca Interesado / Cliente potencial'
   );
 }
 

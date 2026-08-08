@@ -27,7 +27,6 @@ import {
   isGreetingOrNoise
 } from '../../../logic/interruptions.js';
 import { extractProductsWithAI } from '../../../core/llm.js';
-import { OrderBuilder } from '../../../logic/order-builder.js';
 import { getDoubtClarificationTemplate, getBrowseOnlyGoodbye, getFlavorListReply } from '../../../views/templates.js';
 import { withAssistantFooter } from '../../../logic/flow-rails.js';
 import {
@@ -36,6 +35,7 @@ import {
   stripDeliveryQuestionForCart,
   parseBarrilesProductsProgrammatic
 } from '../../../logic/eventos-helpers.js';
+import { formatBarrilesCartLines, CART_OK_CTA, looksLikeUnrecognizedFlavorAttempt, buildBarrilesCatalogImage } from '../../../logic/barriles-intro.js';
 
 const AI_PROMPT = `[SISTEMA - ESTADO: CATÁLOGO (FALLBACK)]
 El cliente debe indicar sabor y cantidad de Barriles Desechables (5L).
@@ -43,33 +43,26 @@ El cliente debe indicar sabor y cantidad de Barriles Desechables (5L).
 2. Solo formato 5L. Si solo mira / no quiere ahora: despídete y NO preguntes más.
 3. Si no: cierra pidiendo sabor/cantidad (ej. "1 mojito y 1 sangría"). Si ya tiene pedido, sugiere escribir *OK* para continuar con la cotización.`;
 
+/** Pregunta cuando aún no hay cócteles en el carrito. */
+const ASK_FLAVOR_QTY = `*¿Qué sabor y cuántos barriles quieres?*
+_(ej: 2 mojitos — o escribe *lista*)_`;
+
+/** Pregunta cuando ya hay ítems: confirmar / editar. */
+const ASK_OK_AFTER_CART = `*¿Todo bien con el pedido?*
+_(ej: escribe *OK* para continuar, o "elimina el aperol, agrega 1 sangría")_`;
+
 /**
- * formatCartLines: Lista de ítems + subtotal + explicación de litros/tragos.
+ * shortQuestionForSession: Sin carrito → pedir sabor/cantidad; con carrito → *OK*.
+ * Evita el mensaje repetitivo que pegaba ambas preguntas a la vez en el miss del engine.
  *
- * @param {object} products - Mapa nombre → cantidad
+ * @param {object} session
  * @returns {string}
  */
-function formatCartLines(products) {
-  const orderBuilder = new OrderBuilder('desechable', preciosData);
-  orderBuilder.products = products;
-  const quote = orderBuilder.calculateQuote();
-
-  let lines = '';
-  for (const [name, qty] of Object.entries(products)) {
-    const price = preciosData.cocteles[name]?.desechable?.['5L'] || 0;
-    lines += `- ${qty}x ${name} 5L: ${formatPrice(price * qty)}\n`;
-  }
-  lines += `\n*Subtotal de cócteles:* ${formatPrice(quote.subtotal)}`;
-  // Línea aparte: litros totales y qué significa en copas (≈200ml con hielo)
-  if (quote.totalLiters > 0) {
-    lines += `\n\nSerían *${quote.totalLiters}L totales*, que equivalen a *${quote.totalDrinks} tragos* de 200ml en una copa/vaso con hielo.`;
-  }
-  return lines;
+function shortQuestionForSession(session) {
+  const hasCart = session.orderBuilder?.products
+    && Object.keys(session.orderBuilder.products).length > 0;
+  return withAssistantFooter(hasCart ? ASK_OK_AFTER_CART : ASK_FLAVOR_QTY);
 }
-
-/** CTA tras confirmar carrito: *OK* o pedir cambio con ejemplo concreto. */
-const CART_OK_CTA = `Si está bien así, escribe *OK* para continuar o dime qué agregar o quitar.
-_(ej: elimina el aperol, agrega 1 sangría)_`;
 
 /**
  * buildCartConfirmReply: Resumen de cócteles + CTA (*OK* para seguir; también vale *seguimos*).
@@ -83,7 +76,7 @@ function buildCartConfirmReply(products, extraNote = '') {
   const note = extraNote ? `\n\n${extraNote}` : '';
   return `🍹 Te confirmo los cócteles seleccionados:
 
-${formatCartLines(products)}
+${formatBarrilesCartLines(products)}
 
 ${CART_OK_CTA}${note}`;
 }
@@ -114,10 +107,8 @@ function nextStateAfterProducts(session) {
 export const BARRILES_RECOGIDA_PRODUCTOS = defineState({
   id: 'BARRILES_RECOGIDA_PRODUCTOS',
   // Al entrar: solo pedimos sabor/cantidad. *OK* se ofrece cuando ya hay carrito.
-  promptQuestion: () => `*¿Qué sabor y cuántos barriles quieres?*
-_(ej: 1 mojito y 1 sangría)_`,
-  shortQuestion: withAssistantFooter(`*¿Todo bien con el pedido?*
-_(ej: escribe *OK* para continuar, o "elimina el aperol, agrega 1 sangría")_`),
+  promptQuestion: () => ASK_FLAVOR_QTY,
+  shortQuestion: shortQuestionForSession,
   aiPrompt: AI_PROMPT,
 
   async validateAndProcess(messageText, session) {
@@ -175,7 +166,7 @@ _(ej: 2 mojitos y 1 aperol)_`
         nextState: 'BARRILES_RECOGIDA_PRODUCTOS',
         customReply: `✅ Eliminado. Ahora tu pedido incluye:
 
-${formatCartLines(session.orderBuilder.products)}
+${formatBarrilesCartLines(session.orderBuilder.products)}
 
 ${CART_OK_CTA}`
       };
@@ -192,7 +183,7 @@ ${CART_OK_CTA}`
 *¿Qué quieres quitar de tu pedido?*
 _(ej: quita el mojito)_
 
-${formatCartLines(session.orderBuilder.products)}`
+${formatBarrilesCartLines(session.orderBuilder.products)}`
       };
     }
 
@@ -208,7 +199,7 @@ ${formatCartLines(session.orderBuilder.products)}`
         customReply: `No encontré ese cóctel en tu pedido 😊
 
 Tu pedido actual:
-${formatCartLines(session.orderBuilder.products)}
+${formatBarrilesCartLines(session.orderBuilder.products)}
 
 *¿Qué quieres quitar o agregar?*
 _(ej: quita el mojito)_`
@@ -254,7 +245,19 @@ _(ej: quita el mojito)_`
     } else if (interceptedOption) {
       extractedList.push(interceptedOption);
     } else if (!hasProductOrderSignal(extractText || messageText)) {
-      // Sin señal de cóctel/barril → no llamar NLU (evita inventar productos)
+      // Sin señal de cóctel del catálogo: si parece un sabor inventado ("1 negroni"),
+      // respondemos con catálogo; si no, el engine re-pregunta (sin NLU inventando).
+      if (looksLikeUnrecognizedFlavorAttempt(messageText)) {
+        return {
+          success: true,
+          nextState: 'BARRILES_RECOGIDA_PRODUCTOS',
+          customReplies: [
+            buildBarrilesCatalogImage(`Ese cóctel aún no lo tenemos en la carta 😅
+👆 Aquí tienes los que sí manejamos.`),
+            ASK_FLAVOR_QTY
+          ]
+        };
+      }
       return { success: false };
     } else {
       const result = await extractProductsWithAI(extractText || messageText, catalogNames, lastBotMessage);
@@ -356,6 +359,19 @@ _(ej: quita el mojito)_`
     if ((isOnlyBrowsing(messageText) || wantsInstagramOrSocial(messageText))
         && Object.keys(session.orderBuilder.products).length === 0) {
       return { success: true, nextState: 'CERRADO', customReply: getBrowseOnlyGoodbye(), mute: true };
+    }
+
+    // Red de seguridad local: NLU no parseó nada pero el mensaje suena a un sabor fuera de carta
+    if (looksLikeUnrecognizedFlavorAttempt(messageText)) {
+      return {
+        success: true,
+        nextState: 'BARRILES_RECOGIDA_PRODUCTOS',
+        customReplies: [
+          buildBarrilesCatalogImage(`Ese cóctel aún no lo tenemos en la carta 😅
+👆 Aquí tienes los que sí manejamos.`),
+          ASK_FLAVOR_QTY
+        ]
+      };
     }
 
     return { success: false };

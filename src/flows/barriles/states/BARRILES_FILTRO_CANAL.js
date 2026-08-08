@@ -15,9 +15,13 @@ import { hasDrinkSelection } from '../../../logic/utils.js';
 import {
   ensureDesechableCart,
   softSaveDeliveryHints,
-  resolveBarrilesFlavorMatch,
+  resolveBarrilesFlavorMatches,
+  findUnmatchedFlavorSegments,
   looksLikeBarrilesFlavorInterest,
-  buildBarrilesIntroGateReplies
+  looksLikeUnrecognizedFlavorAttempt,
+  buildBarrilesNoMatchGateReplies,
+  buildBarrilesMatchedCartReplies,
+  buildBarrilesUnknownFlavorGateReplies
 } from '../../../logic/barriles-intro.js';
 
 /** Pregunta de sabor (burbuja 2 del pitch / re-pregunta). */
@@ -32,16 +36,13 @@ _(ej: Mojito, Sangría, Ramazzotti, etc.)_`;
  */
 function welcomeForSession(_session) {
   return [
-    `Nuestros *barriles desechables* de *5 litros* contienen cócteles *listos para servir*.
-_Solo los refrigeras, sirves y disfrutas._ Si sobra, simplemente vuelves a guardarlo en el refrigerador para otra ocasión.
-
-🍸 *Calidad de bar*, sin preparar nada.
+    `Nuestros *barriles desechables* de *5 litros* contienen cócteles listos para servir. 🍸
 
 ✅ Rinden hasta *25 cócteles*.
-✅ Se conservan refrigerados por *más de 3 semanas*.
+✅ Si sobra, solo vuelve a refrigerarlo. Se conserva por *más de 3 semanas.*
 ✅ Desde *$31.990*, según el sabor.
 
-📍 Despachamos en toda la *Región Metropolitana* y enviamos a otras *Regiones* por Blue Express.`,
+📍 Despachamos en toda la *Región Metropolitana* y enviamos a *otras Regiones* por Blue Express.`,
     ASK_BARRILES_FLAVOR
   ];
 }
@@ -63,12 +64,12 @@ En la *web* encuentras sabores, fotos y precios, y puedes comprar cuando quieras
 ¡Gracias por tu interés!`;
 
 const AI_PROMPT = `[SISTEMA - ESTADO: ENTRADA BARRILES (pitch + sabor)]
-Eres el asistente virtual de Cocktails on Tap. El cliente vio el pitch de Barriles Desechables y debe indicar un *cóctel que le interesa* (ej. "sangría", "tienes mojito?") para enviarle el catálogo.
+Eres el asistente virtual de Cocktails on Tap. El cliente vio el pitch de Barriles Desechables y debe indicar el/los *cóctel(es) que le interesan* (ej. "sangría", "tienes mojito?", "sangría y ramazzotti") para enviarle el catálogo.
 0. NO digas "hola" ni te presentes como asistente virtual (el copy de entrada ya es directo).
-1. Si pregunta por un sabor concreto, confirma disponibilidad con datos reales; no inventes cócteles.
+1. Si pregunta por uno o varios sabores concretos, confirma disponibilidad de TODOS con datos reales; no inventes cócteles.
 2. Dudas breves OK (precios desde *$31.990*, 5L ≈ 25 cócteles, despacho). NUNCA inventes tarifas.
 3. NUNCA pegues el catálogo completo como tabla de texto.
-4. Al final, vuelve a pedir el nombre del cóctel que le interesa.`;
+4. Al final, vuelve a pedir el nombre del/los cóctel(es) que le interesan.`;
 
 export const BARRILES_FILTRO_CANAL = defineState({
   id: 'BARRILES_FILTRO_CANAL',
@@ -114,20 +115,53 @@ export const BARRILES_FILTRO_CANAL = defineState({
       };
     }
 
-    // Si adelanta comuna/fecha, las guardamos para más adelante (sin cambiar el paso)
-    softSaveDeliveryHints(messageText, session);
+    // Si adelanta comuna/fecha, las guardamos para más adelante (sin cambiar el paso).
+    // Si SÍ reconocimos un dato de despacho, este mensaje NO es un intento de sabor
+    // (evita que "Las Condes" se trate como cóctel desconocido más abajo).
+    const recognizedDeliveryHint = softSaveDeliveryHints(messageText, session);
 
-    // Match de sabor: "tienes sangría?", "mojito", etc. (reglas → IA)
+    // Match de sabor: "tienes sangría?", "sangría y ramazzotti", etc. (reglas → IA).
+    // Puede traer 1 o varios cócteles del catálogo en el mismo mensaje.
     const lastBot = welcomeForSession(session);
-    const matched = await resolveBarrilesFlavorMatch(messageText, lastBot);
+    const matches = await resolveBarrilesFlavorMatches(messageText, Array.isArray(lastBot) ? lastBot.join('\n') : lastBot);
 
-    // Interés de sabor / carta → catálogo + menú (con o sin match)
-    if (matched || looksLikeBarrilesFlavorInterest(messageText)) {
-      session.barrilesSuggestedCocktail = matched || null;
+    // Nombró sabor(es) concreto(s) → intención de compra clara: los anotamos en el carrito
+    // y saltamos el menú Cotizar/Consulta (evita volver a preguntar lo que ya dijo).
+    if (matches.length > 0) {
+      for (const name of matches) {
+        session.orderBuilder.products[name] = (session.orderBuilder.products[name] || 0) + 1;
+      }
+      session.barrilesSuggestedCocktail = matches[0];
+      const unmatched = findUnmatchedFlavorSegments(messageText);
+      return {
+        success: true,
+        nextState: 'BARRILES_RECOGIDA_PRODUCTOS',
+        customReplies: buildBarrilesMatchedCartReplies(matches, session.orderBuilder.products, unmatched),
+        flowProgress: true
+      };
+    }
+
+    // Nombró un sabor concreto que NO está en la carta ("negroni", "tienes piña colada?")
+    // → se lo decimos claro + catálogo real + menú (antes del interés genérico, para no
+    // responder "Excelente elección" ni caer en FAQ/LLM improvisado).
+    if (!recognizedDeliveryHint && looksLikeUnrecognizedFlavorAttempt(messageText)) {
+      session.barrilesSuggestedCocktail = null;
       return {
         success: true,
         nextState: 'BARRILES_INTRO_MENU',
-        customReplies: buildBarrilesIntroGateReplies(matched),
+        customReplies: buildBarrilesUnknownFlavorGateReplies(),
+        flowProgress: true
+      };
+    }
+
+    // Interés genérico de carta/precios sin nombrar sabor → catálogo + menú Cotizar/Consulta
+    // (aquí sí conviene filtrar curiosos antes de seguir armando el pedido)
+    if (looksLikeBarrilesFlavorInterest(messageText)) {
+      session.barrilesSuggestedCocktail = null;
+      return {
+        success: true,
+        nextState: 'BARRILES_INTRO_MENU',
+        customReplies: buildBarrilesNoMatchGateReplies(),
         flowProgress: true
       };
     }

@@ -197,6 +197,18 @@ _(ej: Providencia, 5 de agosto)_`
     return 'Escribe *1* para *cotizar* o *2* si tienes una *consulta*.';
   }
 
+  // Barriles productos: el hint debe coincidir con lo que falta (sabores vs confirmar *OK*),
+  // si no el engine pega las dos preguntas y el mensaje se ve repetitivo.
+  if (stateId === 'BARRILES_RECOGIDA_PRODUCTOS') {
+    const hasCart = session.orderBuilder?.products
+      && Object.keys(session.orderBuilder.products).length > 0;
+    if (hasCart) {
+      return `*¿Todo bien con el pedido?*
+_(ej: escribe *OK* para continuar, o "elimina el aperol, agrega 1 sangría")_`;
+    }
+    return hints.products;
+  }
+
   if (key && hints[key]) return hints[key];
 
   // Refinamiento parcial fecha/comuna en recogida de datos barriles

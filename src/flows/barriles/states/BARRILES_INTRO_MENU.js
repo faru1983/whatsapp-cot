@@ -10,7 +10,12 @@ import { withAssistantFooter } from '../../../logic/flow-rails.js';
 import { buildAdminSosBody } from '../../../views/templates.js';
 import {
   barrilesIntroMenuQuestion,
-  ensureDesechableCart
+  ensureDesechableCart,
+  resolveBarrilesFlavorMatches,
+  findUnmatchedFlavorSegments,
+  looksLikeUnrecognizedFlavorAttempt,
+  buildBarrilesUnknownFlavorGateReplies,
+  buildBarrilesMatchedCartReplies
 } from '../../../logic/barriles-intro.js';
 
 const MENU_Q = barrilesIntroMenuQuestion();
@@ -86,6 +91,32 @@ export const BARRILES_INTRO_MENU = defineState({
         success: true,
         nextState: 'BARRILES_RECOGIDA_PRODUCTOS',
         customReply: cotizarAskCopy(),
+        flowProgress: true
+      };
+    }
+
+    // En el menú aún puede nombrar un sabor: si está en la carta → carrito directo;
+    // si no ("negroni") → le decimos que no lo tenemos + catálogo + menú otra vez.
+    const matches = await resolveBarrilesFlavorMatches(messageText, MENU_Q);
+    if (matches.length > 0) {
+      for (const name of matches) {
+        session.orderBuilder.products[name] = (session.orderBuilder.products[name] || 0) + 1;
+      }
+      session.barrilesSuggestedCocktail = matches[0];
+      const unmatched = findUnmatchedFlavorSegments(messageText);
+      return {
+        success: true,
+        nextState: 'BARRILES_RECOGIDA_PRODUCTOS',
+        customReplies: buildBarrilesMatchedCartReplies(matches, session.orderBuilder.products, unmatched),
+        flowProgress: true
+      };
+    }
+    if (looksLikeUnrecognizedFlavorAttempt(messageText)) {
+      session.barrilesSuggestedCocktail = null;
+      return {
+        success: true,
+        nextState: 'BARRILES_INTRO_MENU',
+        customReplies: buildBarrilesUnknownFlavorGateReplies(),
         flowProgress: true
       };
     }

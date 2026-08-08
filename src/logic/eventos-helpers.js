@@ -615,7 +615,7 @@ export function parseBareQuantityWithoutUnit(messageText) {
  * @param {string[]} catalogNames
  * @returns {string[]}
  */
-function matchCocktailNamesInText(messageText, catalogNames) {
+export function matchCocktailNamesInText(messageText, catalogNames) {
   const norm = normalizeString(messageText);
   const matched = [];
 

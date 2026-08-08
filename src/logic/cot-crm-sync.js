@@ -407,8 +407,10 @@ export function syncCrmCtwaAttributionAsync(session) {
  * ¿Esta transición debe marcar Interesado (engaged) en el CRM?
  *
  * Eventos: recién al confirmar datos → elegir formato (ya hay invitados + resumen OK).
- * Barriles: al elegir 1️⃣ Cotizar en el intro (BARRILES_INTRO_MENU → RECOGIDA_PRODUCTOS).
- * Mirar el pitch o solo nombrar un sabor = sigue Curioso (aún no cotiza).
+ * Barriles: al elegir 1️⃣ Cotizar en el intro (BARRILES_INTRO_MENU → RECOGIDA_PRODUCTOS), o al
+ * nombrar un sabor concreto en la entrada (BARRILES_FILTRO_CANAL → RECOGIDA_PRODUCTOS directo,
+ * sin pasar por el menú) — nombrar un cóctel de la carta ya es intención de compra clara.
+ * Mirar el pitch sin nombrar sabor, o quedarse en el menú intro, sigue siendo Curioso.
  *
  * @param {string} from
  * @param {string} to
@@ -418,8 +420,9 @@ function shouldEngageCrmOnTransition(from, to) {
   if (!from || !to || from === to) return false;
   // Eventos: Interesado con el snapshot completo al pasar a formato
   if (from === 'EVENTOS_CONFIRMAR_DATOS' && to === 'EVENTOS_ELECCION_FORMATO') return true;
-  // Barriles: Interesado solo cuando elige cotizar (no al salir del pitch ni en consulta)
-  if (from === 'BARRILES_INTRO_MENU' && to === 'BARRILES_RECOGIDA_PRODUCTOS') return true;
+  // Barriles: Interesado al elegir cotizar, o al nombrar sabor directo desde la entrada
+  if (to === 'BARRILES_RECOGIDA_PRODUCTOS'
+      && (from === 'BARRILES_INTRO_MENU' || from === 'BARRILES_FILTRO_CANAL')) return true;
   return false;
 }
 
@@ -454,7 +457,9 @@ export function notifyCrmOnBotStateChange(session, fromState, toState) {
       ? 'eventos_datos_confirmados'
       : from === 'BARRILES_INTRO_MENU'
         ? 'barriles_elige_cotizar'
-        : 'flow_entry_exit',
+        : from === 'BARRILES_FILTRO_CANAL'
+          ? 'barriles_nombra_sabor'
+          : 'flow_entry_exit',
   };
 
   if (!session.crmEngagedSynced) {
