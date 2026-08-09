@@ -3,7 +3,9 @@ import {
   preciosData,
   groupCocktailLinesByName,
   formatEventCocktailLitersLine,
-  formatBarrelPartsLabel
+  formatBarrelPartsLabel,
+  getMocktailFamilyOptions,
+  getAllMocktailNames
 } from '../logic/utils.js';
 import { formatMenuBlock, MENU_WRITE_CTA } from '../logic/flow-rails.js';
 
@@ -126,6 +128,43 @@ export function getFlavorListReply(family, opciones, opts = {}) {
     const example = (opciones && opciones[0]) || family;
     text += `\n*¿Cuál quieres y en qué litros?*
 _(ej: 10L ${example})_ 🍹`;
+  } else {
+    text += `\n*(Dime el nombre de la que quieres para poder agregarla)* 🍹`;
+  }
+  return text;
+}
+
+/**
+ * getNonAlcoholicSuggestionReply: Respuesta cuando el cliente pide una opción *sin alcohol*.
+ * Si el mensaje/carrito ya apunta a un sabor con alcohol (ej. Mojito), sugiere primero las
+ * versiones Mocktail de esa misma familia (Mojito Mocktail, Mojito Maracuyá Mocktail, …);
+ * si no hay ninguna relación clara, muestra toda la carta Mocktails. Nunca agrega nada al
+ * carrito por su cuenta: solo sugiere y deja que el cliente confirme el nombre exacto.
+ *
+ * @param {string[]} referenceNames - Cócteles ya en el carrito o mencionados en el mensaje
+ * @param {string[]} [catalogNames] - Por defecto, todo el catálogo de datos.json
+ * @param {{ withLitersHint?: boolean }} [opts] - `withLitersHint` = true en Eventos (litraje)
+ * @returns {string}
+ */
+export function getNonAlcoholicSuggestionReply(referenceNames, catalogNames, opts = {}) {
+  const withLiters = opts.withLitersHint === true;
+
+  const found = new Set();
+  for (const ref of referenceNames || []) {
+    for (const opcion of getMocktailFamilyOptions(ref, catalogNames)) found.add(opcion);
+  }
+
+  const opciones = found.size > 0 ? [...found] : getAllMocktailNames(catalogNames);
+  const intro = found.size > 0
+    ? `¡Claro! 🍹 Tenemos ${opciones.length > 1 ? 'estas versiones' : 'esta versión'} *sin alcohol*:`
+    : `¡Claro! 🍹 Estas son nuestras opciones *sin alcohol (Mocktails)*:`;
+
+  let text = `${intro}\n\n`;
+  for (const opcion of opciones) text += `- ${opcion}\n`;
+
+  if (withLiters) {
+    const example = opciones[0] || 'Mojito Mocktail';
+    text += `\n*¿Cuál quieres y en qué litros?*\n_(ej: 10L ${example})_ 🍹`;
   } else {
     text += `\n*(Dime el nombre de la que quieres para poder agregarla)* 🍹`;
   }

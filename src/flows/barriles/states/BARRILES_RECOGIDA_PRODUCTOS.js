@@ -19,7 +19,9 @@ import {
   asksCocktailFlavorList,
   getProductFamilyBase,
   getCatalogFamilyFlavorOptions,
-  hasProductOrderSignal
+  hasProductOrderSignal,
+  wantsNonAlcoholicOption,
+  isMocktailName
 } from '../../../logic/utils.js';
 import {
   wantsAdvanceProductsOrder,
@@ -27,13 +29,14 @@ import {
   isGreetingOrNoise
 } from '../../../logic/interruptions.js';
 import { extractProductsWithAI } from '../../../core/llm.js';
-import { getDoubtClarificationTemplate, getBrowseOnlyGoodbye, getFlavorListReply } from '../../../views/templates.js';
+import { getDoubtClarificationTemplate, getBrowseOnlyGoodbye, getFlavorListReply, getNonAlcoholicSuggestionReply } from '../../../views/templates.js';
 import { withAssistantFooter } from '../../../logic/flow-rails.js';
 import {
   asksDeliveryOrDispatchQuestion,
   REPLY_DISPATCH_SIDEBAR_BARRILES,
   stripDeliveryQuestionForCart,
-  parseBarrilesProductsProgrammatic
+  parseBarrilesProductsProgrammatic,
+  matchCocktailNamesInText
 } from '../../../logic/eventos-helpers.js';
 import { formatBarrilesCartLines, CART_OK_CTA, looksLikeUnrecognizedFlavorAttempt, buildBarrilesCatalogImage } from '../../../logic/barriles-intro.js';
 
@@ -207,6 +210,29 @@ _(ej: quita el mojito)_`
     }
 
     const catalogNames = Object.keys(preciosData.cocteles || {});
+
+    // "sin alcohol" / "mocktail" → NO es un sabor inventado (looksLikeUnrecognizedFlavorAttempt
+    // ya lo excluye) ni un pedido normal: sugerimos el Mocktail del sabor mencionado en el mismo
+    // mensaje (ej. "mojito sin alcohol") o de lo que ya tiene en el carrito; si no hay ninguna
+    // relación clara, mostramos toda la carta Mocktails. Nunca agregamos nada solos.
+    // Excepción: si el mensaje YA nombra un Mocktail exacto (ej. respondiendo a esa misma
+    // sugerencia con "Mojito Mocktail"), seguimos el flujo normal de abajo para agregarlo
+    // al carrito en vez de repetir la misma sugerencia en bucle.
+    if (wantsNonAlcoholicOption(messageText)) {
+      const allMentioned = matchCocktailNamesInText(messageText, catalogNames);
+      const directMocktailMatches = allMentioned.filter(isMocktailName);
+      if (directMocktailMatches.length === 0) {
+        const mentioned = allMentioned.filter((n) => !isMocktailName(n));
+        const referenceNames = mentioned.length > 0
+          ? mentioned
+          : Object.keys(session.orderBuilder.products || {});
+        return {
+          success: true,
+          nextState: 'BARRILES_RECOGIDA_PRODUCTOS',
+          customReply: getNonAlcoholicSuggestionReply(referenceNames, catalogNames)
+        };
+      }
+    }
 
     // Pregunta de sabores → listar sin mutar carrito
     const flavorAsk = detectFlavorListRequest(messageText, catalogNames);

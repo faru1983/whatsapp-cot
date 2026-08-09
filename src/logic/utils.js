@@ -1709,6 +1709,81 @@ export function getCatalogFamilyFlavorOptions(familyBase, catalogNames) {
 	});
 }
 
+// ==============================================================================
+// SIN ALCOHOL (MOCKTAILS): detección de intención + mapeo a la carta sin alcohol
+// ==============================================================================
+
+/**
+ * isMocktailName: ¿Este nombre del catálogo es una versión Mocktail (sin alcohol)?
+ * Todas las versiones sin alcohol de datos.json llevan la palabra "Mocktail" en el nombre
+ * (categoría MOCKTAILS). Lo usan los estados de productos para no ofrecer por error la
+ * versión con alcohol cuando el cliente pidió "sin alcohol".
+ *
+ * @param {string} name - Nombre del catálogo
+ * @returns {boolean}
+ */
+export function isMocktailName(name) {
+	return /\bmocktail\b/i.test(String(name || ''));
+}
+
+/**
+ * wantsNonAlcoholicOption: ¿El cliente pide una opción SIN ALCOHOL (Mocktail)?
+ * Cubre variantes del mismo patrón (no un string puntual): "sin alcohol", "no alcohólico",
+ * "cero alcohol", "0% alcohol", "libre de alcohol", "no tiene/lleva/quiero alcohol", o
+ * directamente "mocktail(s)". Exige la palabra "alcohol"/"alcohólico" (o "mocktail")
+ * explícita: así "sin problema" o "sin duda" nunca activan esta rama.
+ *
+ * @param {string} text - Mensaje del cliente
+ * @returns {boolean}
+ */
+export function wantsNonAlcoholicOption(text) {
+	const norm = normalizeString(text);
+	if (!norm) return false;
+	if (/\bmocktail(s)?\b/.test(norm)) return true;
+	if (!/\balcoholic[oa]s?\b|\balcohol\b/.test(norm)) return false;
+	return /\b(sin|cero|libre\s+de|no|0)\b/.test(norm);
+}
+
+/**
+ * getMocktailFamilyOptions: Versiones sin alcohol (Mocktail) relacionadas a un cóctel dado.
+ * Ej. "Mojito" → [Mojito Mocktail, Mojito Maracuyá Mocktail, Mojito Frambuesa Mocktail, ...].
+ * Si el cóctel no tiene familia conocida (Aperol Spritz, Piscola, etc.) intenta una
+ * coincidencia directa "<nombre> Mocktail" antes de rendirse (deja la puerta abierta a
+ * futuros sabores sin tener que tocar esta función).
+ *
+ * @param {string} cocktailName - Nombre del catálogo (con o sin alcohol)
+ * @param {string[]} [catalogNames] - Por defecto, todo el catálogo de datos.json
+ * @returns {string[]} Nombres exactos del catálogo (Mocktail), puede ser []
+ */
+export function getMocktailFamilyOptions(cocktailName, catalogNames) {
+	const names = catalogNames || Object.keys(preciosData.cocteles || {});
+	const family = getProductFamilyBase(cocktailName);
+	if (family) {
+		const fb = normalizeString(family);
+		return names.filter((n) => {
+			if (!isMocktailName(n)) return false;
+			const nn = normalizeString(n);
+			return nn === fb || nn.startsWith(`${fb} `);
+		});
+	}
+	const direct = `${normalizeString(cocktailName)} mocktail`;
+	const hit = names.find((n) => normalizeString(n) === direct);
+	return hit ? [hit] : [];
+}
+
+/**
+ * getAllMocktailNames: Todos los cócteles Mocktail (sin alcohol) del catálogo.
+ * Sirve como catálogo general cuando el cliente pide "sin alcohol" sin relacionarse
+ * a ningún sabor concreto (carrito vacío / sin sabor mencionado en el mismo mensaje).
+ *
+ * @param {string[]} [catalogNames] - Por defecto, todo el catálogo de datos.json
+ * @returns {string[]}
+ */
+export function getAllMocktailNames(catalogNames) {
+	const names = catalogNames || Object.keys(preciosData.cocteles || {});
+	return names.filter((n) => isMocktailName(n));
+}
+
 /**
  * detectFlavorListRequest: Si el cliente pregunta por sabores de una familia, arma la lista.
  *

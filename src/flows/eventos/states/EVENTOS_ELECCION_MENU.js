@@ -4,7 +4,7 @@
 // el carrito cumple el mínimo de litros del formato elegido.
 // ==============================================================================
 import { defineState } from '../../../logic/compile-state.js';
-import { getDoubtClarificationTemplate, getFlavorListReply } from '../../../views/templates.js';
+import { getDoubtClarificationTemplate, getFlavorListReply, getNonAlcoholicSuggestionReply } from '../../../views/templates.js';
 import {
   hasDrinkSelection,
   hasProductOrderSignal,
@@ -21,7 +21,9 @@ import {
   asksAvailableCocktailsList,
   getCoctelesNamesCatalog,
   getProductFamilyBase,
-  getCatalogFamilyFlavorOptions
+  getCatalogFamilyFlavorOptions,
+  wantsNonAlcoholicOption,
+  isMocktailName
 } from '../../../logic/utils.js';
 import {
   wantsAdvanceProductsOrder,
@@ -48,7 +50,8 @@ import {
   ASK_EVENT_COCKTAILS,
   asksDeliveryOrDispatchQuestion,
   REPLY_DISPATCH_SIDEBAR_EVENTOS,
-  stripDeliveryQuestionForCart
+  stripDeliveryQuestionForCart,
+  matchCocktailNamesInText
 } from '../../../logic/eventos-helpers.js';
 import { withAssistantFooter, formatMenuBlock } from '../../../logic/flow-rails.js';
 import { matchesMenuOption } from '../../../logic/keyword-intent.js';
@@ -247,6 +250,25 @@ _(ej: ${allowedLitrages[0]} — disponibles: ${allowedLitrages.join(', ')})_`
     const cartEmpty = Object.keys(session.orderBuilder.products).length === 0;
     const cartHasItems = !cartEmpty;
     const wantsPriceList = /precio|precios|cu[aá]nto|cuanto|valor|cat[aá]logo|lista|menu|men[uú]/i.test(messageText);
+
+    // "sin alcohol" / "mocktail" (con o sin sabor en el mismo mensaje, ej. "mojito sin
+    // alcohol") → sugerimos el Mocktail de ese sabor o de lo que ya tiene en el carrito;
+    // sin relación clara, mostramos toda la carta Mocktails. Nunca agregamos nada solos.
+    // Excepción: si el mensaje YA nombra un Mocktail exacto, seguimos el flujo normal para
+    // agregarlo al carrito (evita repetir la misma sugerencia en bucle).
+    if (wantsNonAlcoholicOption(messageText)) {
+      const allMentioned = matchCocktailNamesInText(messageText, catalogNames);
+      const directMocktailMatches = allMentioned.filter(isMocktailName);
+      if (directMocktailMatches.length === 0) {
+        const mentioned = allMentioned.filter((n) => !isMocktailName(n));
+        const referenceNames = mentioned.length > 0 ? mentioned : [...namesAlreadyInCart(session.orderBuilder.products)];
+        return {
+          success: true,
+          nextState: 'EVENTOS_ELECCION_MENU',
+          customReply: getNonAlcoholicSuggestionReply(referenceNames, catalogNames, { withLitersHint: true })
+        };
+      }
+    }
 
     // Duda de precio con carrito (no re-parsear cócteles ni error de litraje)
     if (cartHasItems && (asksEventCartPriceQuestion(messageText)

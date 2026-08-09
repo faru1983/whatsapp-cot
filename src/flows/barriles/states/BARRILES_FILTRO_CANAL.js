@@ -11,7 +11,8 @@ import {
 import { getBrowseOnlyGoodbye } from '../../../views/templates.js';
 import { withAssistantFooter } from '../../../logic/flow-rails.js';
 import { matchKeywordIntent, rulesWebVsChat } from '../../../logic/keyword-intent.js';
-import { hasDrinkSelection } from '../../../logic/utils.js';
+import { hasDrinkSelection, wantsNonAlcoholicOption, isMocktailName } from '../../../logic/utils.js';
+import { getNonAlcoholicSuggestionReply } from '../../../views/templates.js';
 import {
   ensureDesechableCart,
   softSaveDeliveryHints,
@@ -124,6 +125,21 @@ export const BARRILES_FILTRO_CANAL = defineState({
     // Puede traer 1 o varios cócteles del catálogo en el mismo mensaje.
     const lastBot = welcomeForSession(session);
     const matches = await resolveBarrilesFlavorMatches(messageText, Array.isArray(lastBot) ? lastBot.join('\n') : lastBot);
+
+    // "sin alcohol" / "mocktail" (con o sin sabor nombrado en el mismo mensaje, ej.
+    // "mojito sin alcohol") → NUNCA anotamos la versión con alcohol; sugerimos el Mocktail
+    // de esa familia (o toda la carta Mocktails si no hay sabor claro) y no cerramos el paso.
+    // Excepción: si ya nombró un Mocktail exacto (ej. "Mojito Mocktail"), lo dejamos pasar
+    // al flujo normal de match para que se agregue directo al carrito (nada de repetir la
+    // misma sugerencia en bucle).
+    if (wantsNonAlcoholicOption(messageText) && !matches.some(isMocktailName)) {
+      session.barrilesSuggestedCocktail = null;
+      return {
+        success: true,
+        nextState: 'BARRILES_RECOGIDA_PRODUCTOS',
+        customReply: getNonAlcoholicSuggestionReply(matches)
+      };
+    }
 
     // Nombró sabor(es) concreto(s) → intención de compra clara: los anotamos en el carrito
     // y saltamos el menú Cotizar/Consulta (evita volver a preguntar lo que ya dijo).

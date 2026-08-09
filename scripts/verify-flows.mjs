@@ -991,6 +991,56 @@ try {
     }
   ]);
 
+  // Bug reportado: cliente eligió Mojito y pidió "Sin alcohol" → el bot respondía
+  // "Ese cóctel aún no lo tenemos en la carta" (trataba el pedido válido de Mocktails
+  // como un sabor inventado). Ahora debe ofrecer la versión sin alcohol de esa familia.
+  await runCase('Barriles "sin alcohol" con Mojito en carrito → sugiere Mojito Mocktail (no "fuera de carta")', [
+    { input: 'desechables', expectState: 'BARRILES_FILTRO_CANAL' },
+    { input: 'mojito', expectState: 'BARRILES_RECOGIDA_PRODUCTOS' },
+    {
+      input: 'Sin alcohol',
+      expectState: 'BARRILES_RECOGIDA_PRODUCTOS',
+      expectMuted: false,
+      expectIncludes: ['sin alcohol', 'Mojito Mocktail'],
+      expectNotIncludes: ['aún no lo tenemos', 'no te entendí']
+    },
+    {
+      // Confirma el nombre exacto → debe agregarse al carrito (no repetir la sugerencia)
+      input: 'Mojito Mocktail',
+      expectState: 'BARRILES_RECOGIDA_PRODUCTOS',
+      expectMuted: false,
+      expectIncludes: ['Mojito Mocktail', 'Subtotal'],
+      expectNotIncludes: ['Dime el nombre de la que quieres']
+    }
+  ]);
+
+  // Mismo patrón sin ningún sabor mencionado antes (carrito vacío) → carta completa de Mocktails
+  await runCase('Barriles "mocktail" con carrito vacío → carta completa Mocktails', [
+    { input: 'desechables', expectState: 'BARRILES_FILTRO_CANAL' },
+    { input: 'algo bien dulce y raro que no tienen', expectState: 'BARRILES_INTRO_MENU' },
+    { input: '1', expectState: 'BARRILES_RECOGIDA_PRODUCTOS' },
+    {
+      input: '¿tienen mocktails?',
+      expectState: 'BARRILES_RECOGIDA_PRODUCTOS',
+      expectMuted: false,
+      expectIncludes: ['Mojito Mocktail', 'Sangría Mocktail'],
+      expectNotIncludes: ['aún no lo tenemos']
+    }
+  ]);
+
+  // Mismo patrón en la entrada de Barriles (antes de tener carrito): sabor + "sin alcohol"
+  // en el mismo mensaje debe reconocer la familia, no agregar la versión con alcohol.
+  await runCase('Barriles entrada "mojito sin alcohol" → sugiere Mocktail (no agrega el Mojito con alcohol)', [
+    { input: 'desechables', expectState: 'BARRILES_FILTRO_CANAL' },
+    {
+      input: 'mojito sin alcohol',
+      expectState: 'BARRILES_RECOGIDA_PRODUCTOS',
+      expectMuted: false,
+      expectIncludes: ['Mojito Mocktail'],
+      expectNotIncludes: ['$39.990', 'Ron Blanco']
+    }
+  ]);
+
   await runCase('Barriles menú (sin match) 2️⃣ consulta → SOS + mute', [
     { input: 'desechables', expectState: 'BARRILES_FILTRO_CANAL' },
     { input: 'algo bien dulce y raro que no tienen', expectState: 'BARRILES_INTRO_MENU' },
@@ -1088,6 +1138,55 @@ try {
     // Comuna suelta (sin ninguna señal de sabor) nunca debe gatillar la IA / inventar un cóctel
     const comunaMatches = await resolveBarrilesFlavorMatches('Las Condes', 'contexto');
     assert(comunaMatches.length === 0, '"Las Condes" (comuna, sin señal de sabor) no dispara la IA ni inventa un cóctel');
+
+    // Bug reportado: "sin alcohol" NO debe tratarse como sabor inventado (categoría
+    // Mocktails real). Cubrimos el patrón general, no solo el string del reporte.
+    assert(!looksLikeUnrecognizedFlavorAttempt('Sin alcohol'), '"sin alcohol" ≠ sabor inexistente (hay categoría Mocktails)');
+    assert(!looksLikeUnrecognizedFlavorAttempt('no alcohólico'), '"no alcohólico" ≠ sabor inexistente');
+    assert(!looksLikeUnrecognizedFlavorAttempt('cero alcohol'), '"cero alcohol" ≠ sabor inexistente');
+    assert(!looksLikeUnrecognizedFlavorAttempt('mocktail'), '"mocktail" ≠ sabor inexistente');
+    assert(!looksLikeUnrecognizedFlavorAttempt('mojito sin alcohol'), '"mojito sin alcohol" ≠ sabor inexistente');
+  }
+
+  console.log('\n-- Sin alcohol (Mocktails): detección + sugerencia --');
+  {
+    const {
+      wantsNonAlcoholicOption,
+      getMocktailFamilyOptions,
+      getAllMocktailNames,
+      isMocktailName
+    } = await import('../src/logic/utils.js');
+    const { getNonAlcoholicSuggestionReply } = await import('../src/views/templates.js');
+
+    // Detección: variantes del mismo patrón (no solo "sin alcohol" literal)
+    assert(wantsNonAlcoholicOption('Sin alcohol'), 'detecta "sin alcohol"');
+    assert(wantsNonAlcoholicOption('mojito sin alcohol'), 'detecta sabor + "sin alcohol" en el mismo mensaje');
+    assert(wantsNonAlcoholicOption('no alcohólico por favor'), 'detecta "no alcohólico"');
+    assert(wantsNonAlcoholicOption('cero alcohol'), 'detecta "cero alcohol"');
+    assert(wantsNonAlcoholicOption('0% alcohol'), 'detecta "0% alcohol"');
+    assert(wantsNonAlcoholicOption('libre de alcohol'), 'detecta "libre de alcohol"');
+    assert(wantsNonAlcoholicOption('mocktail'), 'detecta "mocktail" directo');
+    assert(wantsNonAlcoholicOption('tienen mocktails?'), 'detecta "mocktails?"');
+    assert(!wantsNonAlcoholicOption('sin problema, dame un mojito'), '"sin problema" NO dispara (sin palabra alcohol/mocktail)');
+    assert(!wantsNonAlcoholicOption('algo bien fuerte con alcohol'), 'pedir CON alcohol no dispara la sugerencia sin alcohol');
+
+    // Mapeo a la carta Mocktail: familia conocida (Mojito) vs sin familia (Aperol Spritz)
+    const mojitoOptions = getMocktailFamilyOptions('Mojito');
+    assert(mojitoOptions.includes('Mojito Mocktail') && mojitoOptions.length >= 4, 'Mojito → 4+ variantes Mocktail de esa familia');
+    const sangriaOptions = getMocktailFamilyOptions('Sangría');
+    assert(sangriaOptions.length === 1 && sangriaOptions[0] === 'Sangría Mocktail', 'Sangría → Sangría Mocktail');
+    const aperolOptions = getMocktailFamilyOptions('Aperol Spritz');
+    assert(aperolOptions.length === 0, 'Aperol Spritz sin familia Mocktail conocida → []');
+    assert(getAllMocktailNames().every(isMocktailName), 'getAllMocktailNames devuelve solo nombres Mocktail');
+    assert(getAllMocktailNames().length >= 6, 'carta Mocktails tiene las 6 variantes de datos.json');
+
+    // Respuesta: con referencia (Mojito en carrito) sugiere la familia; sin referencia, la carta completa
+    const withRef = getNonAlcoholicSuggestionReply(['Mojito']);
+    assert(/Mojito Mocktail/.test(withRef) && !/Sangría Mocktail/.test(withRef), 'con Mojito en carrito: solo sugiere variantes Mojito Mocktail');
+    const withoutRef = getNonAlcoholicSuggestionReply([]);
+    assert(/Sangría Mocktail/.test(withoutRef) && /Mojito Mocktail/.test(withoutRef), 'sin referencia: muestra toda la carta Mocktails');
+    const eventReply = getNonAlcoholicSuggestionReply(['Mojito'], undefined, { withLitersHint: true });
+    assert(/litros/i.test(eventReply), 'en eventos (withLitersHint) pregunta también por litraje');
   }
 
   console.log('\n-- Barriles: generar compra → contacto → cierre legacy --');
@@ -1822,6 +1921,37 @@ try {
     assert(!session.orderBuilder.products['Mojito::10L'], `"saca el mojito" borra el Mojito base`);
     assert(session.orderBuilder.products['Mojito Frambuesa::10L'], `"saca el mojito" NO toca Mojito Frambuesa`);
     assert(/10L Mojito Frambuesa/i.test(t2), `Frambuesa sigue en el resumen`);
+  }
+
+  // Mismo patrón que en Barriles (sistémico, no un parche puntual de Barriles):
+  // "sin alcohol" en Eventos con Mojito en el carrito → sugiere la familia Mojito
+  // Mocktail; confirmar el nombre exacto lo agrega normalmente (con litraje).
+  console.log('\n-- Eventos: "sin alcohol" sugiere Mocktail de la misma familia --');
+  resetSession(SESSION_ID);
+  {
+    const session = getSession(SESSION_ID);
+    session.currentState = 'EVENTOS_ELECCION_MENU';
+    session.userIntent = 'EVENTOS';
+    session.eventoFormato = 'Dispensador Portátil';
+    session.guests = 60;
+    session.orderBuilder = {
+      type: 'dispensador',
+      products: { 'Mojito::10L': { name: 'Mojito', quantity: 1, litrage: '10L' } },
+      extras: {}
+    };
+
+    const st = statesMap.EVENTOS_ELECCION_MENU;
+    const r1 = await st.validateAndProcess('sin alcohol', session);
+    const t1 = typeof r1.customReply === 'string' ? r1.customReply : '';
+    assert(/Mojito Mocktail/.test(t1), 'sugiere Mojito Mocktail (misma familia que el Mojito del carrito)');
+    assert(!/Sangría Mocktail/.test(t1), 'no mezcla otras familias Mocktail sin relación');
+    assert(r1.nextState === 'EVENTOS_ELECCION_MENU', 'se queda en el mismo paso (no muta el carrito solo)');
+    assert(session.orderBuilder.products['Mojito::10L'], 'no toca el Mojito con alcohol ya en el carrito');
+
+    const r2 = await st.validateAndProcess('10L Mojito Mocktail', session);
+    const t2 = typeof r2.customReply === 'string' ? r2.customReply : '';
+    assert(/Mojito Mocktail/.test(t2) && /10L/.test(t2), 'confirmar el nombre exacto lo agrega al carrito (con litraje)');
+    assert(session.orderBuilder.products['Mojito Mocktail::10L'], 'Mojito Mocktail queda en el carrito');
   }
 
   console.log('\n-- Eventos: re-pedir litros reemplaza (no suma) --');

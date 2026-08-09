@@ -16,7 +16,7 @@ import { warmCotCatalog } from '../logic/cot-catalog.js';
 
 import { statesMap } from '../flows/index.js';
 import { readPrompt } from '../views/prompts.js';
-import { buildFaqCatalogContext, sanitizeCustomerFacingReply } from '../logic/utils.js';
+import { buildFaqCatalogContext, sanitizeCustomerFacingReply, wantsNonAlcoholicOption } from '../logic/utils.js';
 import { isGreetingOrNoise, wantsExplicitHandoff, asksCocktailPriceOrCatalog, buildContextualPriceOrCatalogTip, resolveFlowLane } from '../logic/interruptions.js';
 import { asksCoverageAreaQuestion } from '../logic/eventos-helpers.js';
 import { getPendingFlowRequirement } from '../logic/flow-stall.js';
@@ -599,10 +599,15 @@ async function processMessageUnlocked(sessionId, messageText, options = {}) {
   const skipFaqForEventosCoverage = currentStateId === 'EVENTOS_RECOGIDA_DATOS'
     && asksCoverageAreaQuestion(messageText);
 
+  // "¿tienen mocktails?" / "algo sin alcohol?" → el estado de productos ya sabe sugerir
+  // la carta Mocktails real (con sabores concretos); el FAQ genérico solo confirmaría
+  // "sí, tenemos" sin decir cuáles ni dejar avanzar el pedido.
+  const skipFaqForNonAlcoholic = wantsNonAlcoholicOption(messageText);
+
   // Si ya hubo un strike y el paso sigue pendiente, no usamos FAQ: dejamos que el fallback cuente el strike
   if (isQuestion && canPrecheckFaq && !flowAlreadyStalling && faqSidequestAllowed
       && !skipFaqForContextualPrice && !skipFaqForBarrilesFlavorIntro
-      && !skipFaqForEventosCoverage) {
+      && !skipFaqForEventosCoverage && !skipFaqForNonAlcoholic) {
     cliLog(`FAQ PRE-CHECK: Detectada posible pregunta en '${messageText}'`);
     const faqData = JSON.parse(fs.readFileSync(FAQ_JSON_PATH, 'utf8'));
     const faqResponse = await responderFAQ(messageText, faqData, {
