@@ -1,6 +1,6 @@
 // ==============================================================================
-// OBJETIVO: Helpers del intro Barriles — match de sabor, pitch, menú cotizar/consulta.
-// Lo usan BARRILES_FILTRO_CANAL (respuesta abierta) y BARRILES_INTRO_MENU (decisión).
+// OBJETIVO: Helpers del intro Barriles — pitch, menú de intención, match de sabor.
+// Lo usan BARRILES_FILTRO_CANAL (pedido/precios/duda) y BARRILES_INTRO_MENU (sí/no tras precios).
 // Ingredientes y precios salen de datos.json (el catálogo API no trae receta).
 // ==============================================================================
 import { extractProductsWithAI } from '../core/llm.js';
@@ -12,7 +12,9 @@ import {
   parseDate,
   findLocationByFuzzyMatch,
   hasDrinkSelection,
-  wantsNonAlcoholicOption
+  wantsNonAlcoholicOption,
+  getCoctelesByCategoria,
+  asksAvailableCocktailsList
 } from './utils.js';
 import { findMentionedCocktail, asksPriceOrCatalog, isGreetingOrNoise } from './interruptions.js';
 import { formatMenuBlock } from './flow-rails.js';
@@ -29,6 +31,17 @@ const RENDIMIENTO_5L = Number(preciosData.rendimientos_barriles?.['5L']) || 25;
  */
 export const CART_OK_CTA = `Si está bien así, escribe *OK* para continuar o dime qué agregar o quitar.
 _(ej: elimina el aperol, agrega 1 sangría)_`;
+
+/**
+ * ASK_BARRILES_FLAVORS: Pregunta de sabores tras elegir pedido (o sí tras ver precios).
+ * Va junto al catálogo para que el cliente elija desde la foto.
+ *
+ * @returns {string}
+ */
+export function askBarrilesFlavorsCopy() {
+  return `👉 *¿Qué cóctel(es) del catálogo te interesan?*
+_(ej: Mojito, Sangría, Ramazzotti — o "1 mojito y 2 sangría")_`;
+}
 
 /**
  * formatBarrilesCartLines: Lista de ítems del carrito + subtotal + litros/tragos totales.
@@ -55,24 +68,73 @@ export function formatBarrilesCartLines(products) {
 }
 
 /**
- * barrilesIntroMenuBlock: Menú 1️⃣ cotizar / 2️⃣ consulta (burbuja de decisión).
+ * BARRILES_PEDIDO_SYNONYMS: Palabras/frases que equivalen a la opción 1️⃣ (hacer pedido).
+ * Cubre variantes del mismo patrón: pedido, compra, orden, cotizar, etc.
+ * Lo usan FILTRO_CANAL e INTRO_MENU para no desalinear sinónimos.
+ */
+export const BARRILES_PEDIDO_SYNONYMS =
+  /hacer\s+((un|una)\s+)?(pedido|compra|orden)|\b(pedido|compra|orden)\b|\bcomprar\b|\border\b|\bcotizar\b|quiero\s+(pedir|comprar|ordenar)|armar\s+((un|una)\s+)?(pedido|compra|orden)|opci[oó]n\s*1|^(uno|primera?)$/i;
+
+/**
+ * BARRILES_PRECIOS_SYNONYMS: Palabras/frases que equivalen a la opción 2️⃣ (ver precios).
+ * Cubre variantes del mismo patrón: precios, valores, costo, vale/valen, catálogo, etc.
+ * Lo usa FILTRO_CANAL para no desalinear sinónimos.
+ */
+export const BARRILES_PRECIOS_SYNONYMS =
+  /\bprecios?\b|\bvalores?\b|\bcostos?\b|\btarifas?\b|\bvalen?\b|\bcuestan?\b|cu[aá]nto\s+(valen?|cuestan?|salen?)|ver\s+(precios|valores|costos)|lista\s+de\s+precios|\bcat[aá]logo\b|\bcarta\b|opci[oó]n\s*2|^(dos|segunda?)$/i;
+
+/**
+ * BARRILES_DUDA_SYNONYMS: Palabras/frases que equivalen a la opción 3️⃣ (tengo una duda).
+ * Cubre variantes del mismo patrón: duda, consulta, pregunta, ayuda, humano/asesor, etc.
+ * Lo usa FILTRO_CANAL para no desalinear sinónimos.
+ */
+export const BARRILES_DUDA_SYNONYMS =
+  /\bdudas?\b|\bconsultas?\b|\bpreguntas?\b|\binquietud(es)?\b|\bayuda\b|\bhumano\b|\bpersona\b|\basesor\b|\bejeci?utivo\b|ayuda\s+humana|hablar\s+con\s+(alguien|una?\s+persona|un\s+humano|un\s+asesor)|tengo\s+(una\s+)?(duda|consulta|pregunta)|quiero\s+(consultar|preguntar)|opci[oó]n\s*3|^(tres|tercera?)$/i;
+
+/**
+ * barrilesIntentMenuBlock: Menú 1️⃣ pedido / 2️⃣ precios / 3️⃣ duda (entrada Barriles).
  *
  * @returns {string}
  */
-export function barrilesIntroMenuBlock() {
-  return formatMenuBlock(['Cotizar mi pedido', 'Tengo una consulta']);
+export function barrilesIntentMenuBlock() {
+  return formatMenuBlock(['Quiero hacer un pedido', 'Quiero ver precios', 'Tengo una duda']);
 }
 
 /**
- * barrilesIntroMenuQuestion: Pregunta + menú para la burbuja de alternativas.
+ * barrilesIntentMenuQuestion: Pregunta + menú de intención (burbuja 2 del pitch).
  *
  * @returns {string}
  */
-export function barrilesIntroMenuQuestion() {
-  return `*¿Qué te gustaría hacer ahora?*
+export function barrilesIntentMenuQuestion() {
+  return `*Para continuar, ¿qué estás buscando?*
 
-${barrilesIntroMenuBlock()}`;
+${barrilesIntentMenuBlock()}`;
 }
+
+/**
+ * barrilesPostPreciosMenuBlock: Menú 1️⃣ sí pedir / 2️⃣ no gracias (tras ver catálogo).
+ *
+ * @returns {string}
+ */
+export function barrilesPostPreciosMenuBlock() {
+  return formatMenuBlock(['Sí, quiero hacer un pedido', 'No, gracias']);
+}
+
+/**
+ * barrilesPostPreciosMenuQuestion: Pregunta + menú después de mostrar precios/catálogo.
+ *
+ * @returns {string}
+ */
+export function barrilesPostPreciosMenuQuestion() {
+  return `*¿Quieres continuar y hacer un pedido?*
+
+${barrilesPostPreciosMenuBlock()}`;
+}
+
+/** Alias legacy: el menú de intención reemplazó al viejo cotizar/consulta. */
+export const barrilesIntroMenuBlock = barrilesIntentMenuBlock;
+/** Alias legacy: misma pregunta de intención de entrada. */
+export const barrilesIntroMenuQuestion = barrilesIntentMenuQuestion;
 
 /**
  * ensureDesechableCart: Inicializa orderBuilder tipo desechable si falta.
@@ -264,7 +326,7 @@ export async function resolveBarrilesFlavorMatches(messageText, lastBotMessage =
     const { productos } = await extractProductsWithAI(
       messageText,
       catalogNames,
-      lastBotMessage || '👉 *Escribe el nombre del cóctel que te interesa y te enviaré el catálogo completo.*'
+      lastBotMessage || '👉 *¿Qué cóctel(es) del catálogo te interesan?*'
     );
     const names = [];
     for (const item of Array.isArray(productos) ? productos : []) {
@@ -323,19 +385,17 @@ export function buildBarrilesMatchPitch(cocktailName) {
   const ingredientes = String(data.ingredientes || '').trim().replace(/\.$/, '');
   const perGlass = Math.round(Number(price) / RENDIMIENTO_5L);
   const ingredientesLine = ingredientes
-    ? `Nosotros lo hacemos con _${ingredientes}._`
-    : 'Es un cóctel *listo para servir*, con calidad de bar.';
+    ? `El *${cocktailName}* lo hacemos con _${ingredientes}._`
+    : `El *${cocktailName}* es un cóctel *listo para servir*, con calidad de bar.`;
 
-  return `Genial, tenemos disponible *${cocktailName}* 🍸
+  return `¡Excelente elección! 🍸
 ${ingredientesLine}
-Su valor es *${formatPrice(price)}*.
-
-Como rinde *${RENDIMIENTO_5L} tragos*, cada copa te sale alrededor de *${formatPrice(perGlass)}*.`;
+Tiene un valor de *${formatPrice(price)}* y, como rinde *${RENDIMIENTO_5L} cócteles*, cada uno sale a *${formatPrice(perGlass)}*.`;
 }
 
 /**
  * buildBarrilesCatalogImage: Foto de precios/sabores (con o sin caption).
- * La usan el intro (gate sin match / fuera de carta) y RECOGIDA_PRODUCTOS.
+ * La usan el intro (pedido / precios) y RECOGIDA_PRODUCTOS.
  *
  * @param {string} [caption]
  * @returns {object}
@@ -345,33 +405,197 @@ export function buildBarrilesCatalogImage(caption = '') {
 }
 
 /**
- * buildBarrilesNoMatchReplies: Sin match → imagen del catálogo con el copy en el caption.
- * Una sola burbuja (foto + texto), luego el menú va aparte.
+ * formatBarrilesCompactCatalog: Lista compacta por categoría (sin imagen ni precios).
+ * Para "¿cuáles tienes?" / "lista" cuando el catálogo foto ya se envió más arriba.
+ *
+ * @returns {string}
+ */
+export function formatBarrilesCompactCatalog() {
+  const cats = getCoctelesByCategoria();
+
+  /**
+   * joinNames: Une nombres de una categoría con " / ".
+   *
+   * @param {Array<{ name: string }>} items
+   * @param {{ mocktailLabel?: boolean }} [opts]
+   * @returns {string}
+   */
+  const joinNames = (items, opts = {}) => {
+    const names = (Array.isArray(items) ? items : [])
+      .map((item) => {
+        const raw = String(item?.name || '').trim();
+        if (!raw) return '';
+        // Mocktails: "Mojito Mocktail" → "Mojito Sin Alcohol" (más claro para el cliente)
+        if (opts.mocktailLabel) {
+          return raw.replace(/\s*Mocktail\s*$/i, ' Sin Alcohol');
+        }
+        return raw;
+      })
+      .filter(Boolean)
+      .sort((a, b) => a.localeCompare(b, 'es'));
+    return names.join(' / ');
+  };
+
+  const clasicos = joinNames(cats['CLÁSICOS']);
+  const combinados = joinNames(cats.COMBINADOS);
+  const mocktails = joinNames(cats.MOCKTAILS, { mocktailLabel: true });
+
+  return `*Cócteles:* ${clasicos}
+
+*Combinados:* ${combinados}
+
+*Mocktails:* ${mocktails}`;
+}
+
+/**
+ * buildBarrilesCompactCatalogReply: Respuesta a "¿cuáles tienes?" / lista.
+ * Texto compacto + re-pregunta de sabor (sin reenviar la imagen del catálogo).
+ *
+ * @returns {string}
+ */
+export function buildBarrilesCompactCatalogReply() {
+  return `Estos son los que manejamos 🍸
+
+${formatBarrilesCompactCatalog()}
+
+${askBarrilesFlavorsCopy()}`;
+}
+
+/**
+ * asksBarrilesCatalogList: ¿Pide ver qué sabores hay (lista / cuáles tienes / disponibles)?
+ * Reglas primero; cubre el patrón general (no un string puntual).
+ *
+ * @param {string} messageText
+ * @returns {boolean}
+ */
+export function asksBarrilesCatalogList(messageText) {
+  return asksAvailableCocktailsList(messageText);
+}
+
+/**
+ * buildBarrilesProductOrderMissReply: Pedido no entendido en RECOGIDA_PRODUCTOS.
+ * El catálogo ya se envió: no fingimos “ese cóctel no existe” ante cualquier texto
+ * (ej. "valores"). Strike 1 = recordatorio suave; strike 2+ = asistente + HUMANO.
+ *
+ * @param {number} [strike=1] - Número de strike actual (1, 2, …)
+ * @returns {string}
+ */
+export function buildBarrilesProductOrderMissReply(strike = 1) {
+  if (Number(strike) >= 2) {
+    return `Disculpa, no te entendí 😊 Soy un *asistente virtual*.
+Indícame tu cóctel del *catálogo* o escribe *HUMANO* para que te asista alguien del equipo.`;
+  }
+  return `Disculpa, no entendí tu pedido 😊
+Recuerda revisar el *catálogo* que te envié más arriba.
+
+${askBarrilesFlavorsCopy()}`;
+}
+
+/**
+ * buildBarrilesUnknownFlavorTextReply: Alias del miss (strike 1).
+ * Se mantiene el nombre por tests / imports antiguos.
+ *
+ * @returns {string}
+ */
+export function buildBarrilesUnknownFlavorTextReply() {
+  return buildBarrilesProductOrderMissReply(1);
+}
+
+/**
+ * registerBarrilesProductOrderMiss: Suma strike y arma la respuesta del miss de productos.
+ * El engine debe respetar `stallHandled` para no resetear ni duplicar el strike.
+ *
+ * @param {object} session
+ * @param {number} [stallThreshold=2] - SECURITY_MAX_CONSECUTIVE_ERRORS
+ * @returns {object} Resultado validateAndProcess
+ */
+export function registerBarrilesProductOrderMiss(session, stallThreshold = 2) {
+  const threshold = Math.max(2, Number(stallThreshold) || 2);
+  session.consecutiveErrors = (session.consecutiveErrors || 0) + 1;
+  const strike = session.consecutiveErrors;
+
+  // Último intento (strike == umbral): aviso con HUMANO, aún sin mute
+  // Siguiente miss (strike > umbral): SOS + mute
+  if (strike > threshold) {
+    return {
+      success: true,
+      stallHandled: true,
+      nextState: 'CERRADO',
+      mute: true,
+      notifyAdmin: {
+        type: 'SOS',
+        title: 'ANTI-LOOP',
+        labelKey: 'asistencia',
+        body: 'Varios pedidos de cóctel no entendidos en Barriles (catálogo ya enviado).'
+      },
+      customReply: `Te comunico con alguien del equipo para ayudarte con tu pedido. ¡Ya te escriben! 🙌`
+    };
+  }
+
+  return {
+    success: true,
+    stallHandled: true,
+    nextState: 'BARRILES_RECOGIDA_PRODUCTOS',
+    customReply: buildBarrilesProductOrderMissReply(strike >= threshold ? 2 : 1)
+  };
+}
+
+/**
+ * buildBarrilesPedidoReplies: Opción 1️⃣ (hacer pedido) → catálogo + pregunta de sabores.
+ *
+ * @returns {Array} customReplies para el engine
+ */
+export function buildBarrilesPedidoReplies() {
+  return [
+    buildBarrilesCatalogImage('👆 Catálogo completo con sabores y precios.'),
+    askBarrilesFlavorsCopy()
+  ];
+}
+
+/**
+ * buildBarrilesPreciosReplies: Opción 2️⃣ (ver precios) → catálogo + ¿quieres pedir?
+ *
+ * @returns {Array} customReplies para el engine
+ */
+export function buildBarrilesPreciosReplies() {
+  return [
+    buildBarrilesCatalogImage('👆 Catálogo completo con sabores y precios.'),
+    barrilesPostPreciosMenuQuestion()
+  ];
+}
+
+/**
+ * buildBarrilesAskDoubtReply: Opción 3️⃣ — pide que escriba la duda (aún no muteamos).
+ *
+ * @returns {string}
+ */
+export function buildBarrilesAskDoubtReply() {
+  return `Perfecto. 😊 Escríbeme tu duda y te conectamos con el equipo para responderte.`;
+}
+
+/**
+ * buildBarrilesNoMatchReplies: Catálogo genérico (caption corto). Legacy / fuera de carta.
  *
  * @returns {Array}
  */
 export function buildBarrilesNoMatchReplies() {
   return [
-    buildBarrilesCatalogImage(`👆 Excelente elección. 🍸
-Te envío nuestro catálogo para que conozcas todos los sabores disponibles.`)
+    buildBarrilesCatalogImage(`👆 Te dejo el catálogo con todos los sabores disponibles.`)
   ];
 }
 
 /**
- * buildBarrilesNoMatchGateReplies: Sin match claro (interés genérico / "quiero ver precios")
- * → catálogo + menú 1️⃣ Cotizar / 2️⃣ Consulta. Aquí sí vale la pena preguntar, porque todavía
- * no sabemos si quiere comprar o solo está curioseando.
+ * buildBarrilesNoMatchGateReplies: Sin match claro → catálogo + menú post-precios (sí/no pedir).
+ * Se mantiene por compatibilidad con tests/helpers; el intro nuevo ya no llega aquí.
  *
  * @returns {Array} customReplies para el engine
  */
 export function buildBarrilesNoMatchGateReplies() {
-  return [...buildBarrilesNoMatchReplies(), barrilesIntroMenuQuestion()];
+  return [...buildBarrilesNoMatchReplies(), barrilesPostPreciosMenuQuestion()];
 }
 
 /**
- * buildBarrilesUnknownFlavorGateReplies: El cliente nombró un cóctel que NO está en la carta
- * ("negroni", "tienes piña colada?"). Se lo decimos claro, dejamos el catálogo real y la
- * pregunta Cotizar/Consulta para que elija cómo seguir el pedido.
+ * buildBarrilesUnknownFlavorGateReplies: Cóctel fuera de carta → aviso + catálogo + menú sí/no.
  *
  * @returns {Array} customReplies para el engine
  */
@@ -379,48 +603,36 @@ export function buildBarrilesUnknownFlavorGateReplies() {
   return [
     buildBarrilesCatalogImage(`Ese cóctel aún no lo tenemos en la carta 😅
 👆 Mejor te dejo el catálogo para que revises los que sí manejamos.`),
-    barrilesIntroMenuQuestion()
+    barrilesPostPreciosMenuQuestion()
   ];
 }
 
 /**
- * buildBarrilesMatchedCartReplies: El cliente ya nombró 1+ cócteles concretos ("mojito",
- * "sangría y ramazzotti") → los anotamos directo en el carrito (1 barril c/u) y saltamos el
- * menú Cotizar/Consulta: nombrar un sabor de la carta YA es intención de compra clara, no
- * hace falta que además elija "1️⃣ Cotizar" para que el bot le pregunte los mismos sabores
- * de nuevo. Menos pasos = menos fricción (y menos gente perdida antes de cotizar).
- *
- * Un solo CTA (en la burbuja del catálogo) en vez de dos preguntas separadas de "agregar
- * algo más": así queda claro que el siguiente paso natural es *OK* para seguir cotizando.
- * Si el mensaje traía además un sabor que no existe (ej. "mojito y piña colada"), se lo
- * decimos ahí mismo en vez de ignorarlo en silencio.
+ * buildBarrilesMatchedCartReplies: El cliente nombró 1+ cócteles → pitch/resumen + CTA *OK*.
+ * NO reenvía la imagen del catálogo: esa foto ya se mandó al elegir 1️⃣ Pedido (o precios).
+ * Si el mensaje traía además un sabor fuera de carta, se avisa en el mismo texto.
  *
  * @param {string[]} cocktailNames - Nombres exactos del catálogo ya agregados al carrito
  * @param {object} products - Carrito actualizado (para mostrar subtotal correcto)
  * @param {string[]} [unmatchedNames] - Otros sabores mencionados que NO están en la carta
- * @returns {Array} customReplies para el engine
+ * @returns {Array} customReplies para el engine (solo texto)
  */
 export function buildBarrilesMatchedCartReplies(cocktailNames, products, unmatchedNames = []) {
   const unmatchedNote = unmatchedNames.length > 0
-    ? `\n\n😅 *${unmatchedNames.join(', ')}* aún no ${unmatchedNames.length > 1 ? 'están' : 'está'} en la carta, pero revisa el catálogo 👇 por si te gusta otra opción.`
+    ? `\n\n😅 *${unmatchedNames.join(', ')}* aún no ${unmatchedNames.length > 1 ? 'están' : 'está'} en la carta. Si quieres, elige otro del catálogo de arriba.`
     : '';
-  const catalogBubble = buildBarrilesCatalogImage(`👆 Catálogo completo con todos los sabores.\n\n${CART_OK_CTA}`);
 
-  // Un solo sabor: mantenemos el pitch rico (ingredientes + precio + valor por copa)
+  // Un solo sabor: pitch rico (ingredientes + precio + valor por copa) + CTA
   if (cocktailNames.length === 1) {
     const pitch = buildBarrilesMatchPitch(cocktailNames[0]);
     if (pitch) {
-      return [
-        `${pitch}${unmatchedNote}`,
-        catalogBubble
-      ];
+      return [`${pitch}${unmatchedNote}\n\n${CART_OK_CTA}`];
     }
   }
 
   // Dos o más sabores: resumen de carrito compacto (evita repetir ingredientes de cada uno)
   return [
-    `¡Genial! Anoté en tu pedido:\n\n${formatBarrilesCartLines(products)}${unmatchedNote}`,
-    catalogBubble
+    `¡Genial! Anoté en tu pedido:\n\n${formatBarrilesCartLines(products)}${unmatchedNote}\n\n${CART_OK_CTA}`
   ];
 }
 

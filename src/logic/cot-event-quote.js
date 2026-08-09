@@ -101,6 +101,40 @@ export function exampleConcreteDateHint() {
 }
 
 /**
+ * daysUntilDeliveryChile: Días desde hoy (Chile) hasta la fecha de entrega.
+ * Usa toIsoDateFromBotText; si la fecha no es concreta, null.
+ *
+ * @param {string|null|undefined} dateText
+ * @returns {number|null} Días (0 = hoy, negativo = pasado)
+ */
+export function daysUntilDeliveryChile(dateText) {
+  const iso = toIsoDateFromBotText(dateText);
+  if (!iso) return null;
+  const m = iso.match(/^(\d{4})-(\d{2})-(\d{2})$/);
+  if (!m) return null;
+  const today = todayPartsChile();
+  const t0 = Date.UTC(today.year, today.month - 1, today.day);
+  const t1 = Date.UTC(Number(m[1]), Number(m[2]) - 1, Number(m[3]));
+  return Math.round((t1 - t0) / 86400000);
+}
+
+/**
+ * evaluateDeliveryLeadTime: ¿La fecha cumple el mínimo de anticipación?
+ * Por defecto 2 días. Si es menor, se acepta pero hay que avisar disponibilidad.
+ *
+ * @param {string|null|undefined} dateText
+ * @param {number} [minDays=2]
+ * @returns {{ ok: boolean, tooSoon?: boolean, days?: number|null, reason?: string }}
+ */
+export function evaluateDeliveryLeadTime(dateText, minDays = 2) {
+  const days = daysUntilDeliveryChile(dateText);
+  if (days == null) return { ok: false, reason: 'invalid', days: null };
+  if (days < 0) return { ok: false, reason: 'past', days };
+  if (days < minDays) return { ok: true, tooSoon: true, days };
+  return { ok: true, tooSoon: false, days };
+}
+
+/**
  * resolveRelativeDateParts: Resuelve hoy/mañana/este sábado → partes de fecha Chile.
  *
  * @param {string} dateText

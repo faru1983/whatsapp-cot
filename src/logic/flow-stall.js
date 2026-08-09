@@ -27,10 +27,11 @@ export function getPendingFlowRequirement(session, stateId) {
       return session.guests ? 'confirm' : 'guests';
 
     case 'BARRILES_FILTRO_CANAL':
-      // Espera un sabor / preferencia abierta (comuna/fecha van después)
-      return 'flavor';
+      // Espera menú 1️⃣ pedido / 2️⃣ precios / 3️⃣ duda (o el texto de la duda)
+      return session.barrilesAwaitingDoubt ? 'doubt' : 'intent';
 
     case 'BARRILES_INTRO_MENU':
+      // Tras ver precios: ¿quiere hacer un pedido? (sí/no)
       return 'continue';
 
     case 'BARRILES_RECOGIDA_PRODUCTOS': {
@@ -40,6 +41,13 @@ export function getPendingFlowRequirement(session, stateId) {
     }
 
     case 'BARRILES_RECOGIDA_DATOS': {
+      // Checkout pedido: una fase a la vez (comuna → fecha → nombre → email → dirección)
+      const phase = session.barrilesPedidoPhase;
+      if (phase === 'comuna') return 'comuna';
+      if (phase === 'fecha') return 'fecha';
+      if (phase === 'nombre') return 'nombre';
+      if (phase === 'email') return 'email';
+      if (phase === 'direccion') return 'direccion';
       const cd = session.orderBuilder?.clientData;
       if (cd?.date && cd?.location) return null;
       return 'client_data';

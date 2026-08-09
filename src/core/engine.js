@@ -16,8 +16,14 @@ import { warmCotCatalog } from '../logic/cot-catalog.js';
 
 import { statesMap } from '../flows/index.js';
 import { readPrompt } from '../views/prompts.js';
-import { buildFaqCatalogContext, sanitizeCustomerFacingReply, wantsNonAlcoholicOption } from '../logic/utils.js';
+import {
+  buildFaqCatalogContext,
+  sanitizeCustomerFacingReply,
+  wantsNonAlcoholicOption,
+  asksAvailableCocktailsList
+} from '../logic/utils.js';
 import { isGreetingOrNoise, wantsExplicitHandoff, asksCocktailPriceOrCatalog, buildContextualPriceOrCatalogTip, resolveFlowLane } from '../logic/interruptions.js';
+import { looksLikeUnrecognizedFlavorAttempt } from '../logic/barriles-intro.js';
 import { asksCoverageAreaQuestion } from '../logic/eventos-helpers.js';
 import { getPendingFlowRequirement } from '../logic/flow-stall.js';
 import { isImagePart, isVideoPart, isMediaPart, assertImageExists } from '../logic/media.js';
@@ -32,7 +38,8 @@ import {
   buildGuidedStepQuestion,
   withoutAssistantFooter,
   stepQuestionAfterIdentityBody,
-  MENU_WRITE_REMINDER
+  MENU_WRITE_REMINDER,
+  MENU_OPTION_MISS_PREFIX
 } from '../logic/flow-rails.js';
 import { clearNudgeFlag } from '../logic/inactivity-nudge.js';
 import { waitBeforeFirstReply, waitBetweenBubbles } from '../logic/reply-timing.js';
@@ -591,8 +598,11 @@ async function processMessageUnlocked(sessionId, messageText, options = {}) {
   const skipFaqForContextualPrice = asksCocktailPriceOrCatalog(messageText)
     && resolveFlowLane(session, currentStateId) !== 'UNKNOWN';
 
-  // Intro Barriles: el estado hace match de sabor ("tienes sangría?") antes que el FAQ genérico.
-  const skipFaqForBarrilesFlavorIntro = currentStateId === 'BARRILES_FILTRO_CANAL';
+  // Menús estrictos Barriles: sin FAQ improvisando mientras espera 1️⃣/2️⃣/3️⃣ (o sí/no).
+  // Con duda pendiente tampoco FAQ: el siguiente mensaje ES la pregunta para el SOS.
+  const skipFaqForStrictBarrilesMenu =
+    currentStateId === 'BARRILES_FILTRO_CANAL'
+    || currentStateId === 'BARRILES_INTRO_MENU';
 
   // Eventos entrada: cobertura (¿llegan a Viña?) → respuesta programática del estado (datos.json),
   // no FAQ/LLM que a veces afirma zonas fuera de RM o da la bienvenida a la ciudad.
@@ -604,10 +614,19 @@ async function processMessageUnlocked(sessionId, messageText, options = {}) {
   // "sí, tenemos" sin decir cuáles ni dejar avanzar el pedido.
   const skipFaqForNonAlcoholic = wantsNonAlcoholicOption(messageText);
 
+  // Barriles productos: "tienes piña colada?" / "cuáles tienes" lo resuelve el estado
+  // (fuera de carta o lista compacta); el FAQ no debe adelantarse.
+  const skipFaqForBarrilesProductsAsk = currentStateId === 'BARRILES_RECOGIDA_PRODUCTOS'
+    && (
+      looksLikeUnrecognizedFlavorAttempt(messageText)
+      || asksAvailableCocktailsList(messageText)
+    );
+
   // Si ya hubo un strike y el paso sigue pendiente, no usamos FAQ: dejamos que el fallback cuente el strike
   if (isQuestion && canPrecheckFaq && !flowAlreadyStalling && faqSidequestAllowed
-      && !skipFaqForContextualPrice && !skipFaqForBarrilesFlavorIntro
-      && !skipFaqForEventosCoverage && !skipFaqForNonAlcoholic) {
+      && !skipFaqForContextualPrice && !skipFaqForStrictBarrilesMenu
+      && !skipFaqForEventosCoverage && !skipFaqForNonAlcoholic
+      && !skipFaqForBarrilesProductsAsk) {
     cliLog(`FAQ PRE-CHECK: Detectada posible pregunta en '${messageText}'`);
     const faqData = JSON.parse(fs.readFileSync(FAQ_JSON_PATH, 'utf8'));
     const faqResponse = await responderFAQ(messageText, faqData, {
@@ -669,8 +688,11 @@ async function processMessageUnlocked(sessionId, messageText, options = {}) {
     // con el mismo pending nunca llegaba al anti-loop (DATOS_CONTACTO).
     const madePartialProgress = Boolean(processResult.flowProgress);
 
-    // Solo reseteamos strikes si el flujo avanzó, hubo progreso parcial, o ya no hay pendiente
-    if (stateAdvanced || madePartialProgress || !pendingBefore || (pendingBefore && !pendingAfter)) {
+    // stallHandled: el estado ya sumó el strike (ej. miss de productos Barriles)
+    if (processResult.stallHandled) {
+      cliLog(`paso miss manejado por estado (strikes ${session.consecutiveErrors || 0}/${stallThreshold})`);
+    } else if (stateAdvanced || madePartialProgress || !pendingBefore || (pendingBefore && !pendingAfter)) {
+      // Solo reseteamos strikes si el flujo avanzó, hubo progreso parcial, o ya no hay pendiente
       session.consecutiveErrors = 0;
       cliLog(`paso OK (success${madePartialProgress && !stateAdvanced ? ', progreso parcial' : ''})`);
     } else if (pendingBefore && pendingAfter && pendingBefore === pendingAfter && !stateAdvanced) {
@@ -798,6 +820,14 @@ async function processMessageUnlocked(sessionId, messageText, options = {}) {
         );
       }
 
+      // Barriles menús estrictos: disculpa corta + repetir el menú (sin FAQ / sin “fuera de carta”)
+      if (
+        (currentStateId === 'BARRILES_FILTRO_CANAL' && !session.barrilesAwaitingDoubt)
+        || currentStateId === 'BARRILES_INTRO_MENU'
+      ) {
+        return `${MENU_OPTION_MISS_PREFIX}\n\n${q}`;
+      }
+
       if (hasPath && isMenuStep) {
         return `Disculpa, soy un *asistente virtual* y no estoy seguro de cómo responder a eso. 😔\n\n${MENU_WRITE_REMINDER}\n\n${q}\n\n${handoff}`;
       }
@@ -831,6 +861,12 @@ async function processMessageUnlocked(sessionId, messageText, options = {}) {
           '¡Hola! 🍸 Soy el *asistente virtual* de Cocktails on Tap.',
           finalQuestion
         );
+      } else if (
+        (currentStateId === 'BARRILES_FILTRO_CANAL' && !session.barrilesAwaitingDoubt)
+        || currentStateId === 'BARRILES_INTRO_MENU'
+      ) {
+        // Menú estricto Barriles: misma disculpa de opción (sin strike por ruido)
+        reply = `${MENU_OPTION_MISS_PREFIX}\n\n${withoutAssistantFooter(finalQuestion)}`;
       } else {
         // Datos libres: no empujar menú 1️⃣/2️⃣
         reply = `Disculpa, no te entendí bien 😊\n\n${finalQuestion}`;
@@ -864,9 +900,14 @@ async function processMessageUnlocked(sessionId, messageText, options = {}) {
       return reply;
     }
 
+    // Menús estrictos Barriles: no FAQ/precio contextual — solo disculpa + menú + strike
+    const strictBarrilesMenuMiss =
+      (currentStateId === 'BARRILES_FILTRO_CANAL' && !session.barrilesAwaitingDoubt)
+      || currentStateId === 'BARRILES_INTRO_MENU';
+
     // 4.25 Precio/carta de cócteles según flujo (programático; sin mezclar Barriles↔Eventos)
     // Cubre "Valor de los cocteles" en ELECCION_FORMATO y hermanos que hacen success:false.
-    if (asksCocktailPriceOrCatalog(trimmedMessage) && faqSidequestAllowed
+    if (!strictBarrilesMenuMiss && asksCocktailPriceOrCatalog(trimmedMessage) && faqSidequestAllowed
         && resolveFlowLane(session, currentStateId) !== 'UNKNOWN') {
       const tip = buildContextualPriceOrCatalogTip(session, currentStateId, trimmedMessage);
       if (pendingFlow) {
@@ -883,7 +924,9 @@ async function processMessageUnlocked(sessionId, messageText, options = {}) {
 
     // 4.3 FAQ (despacho, ingredientes, FAQs; precios genéricos ya salieron arriba si hay carril)
     let faqResponse = 'NO_FAQ';
-    if (faqSidequestAllowed) {
+    if (strictBarrilesMenuMiss) {
+      cliLog('FAQ: omitido (menú estricto Barriles) → disculpa de opción + strike');
+    } else if (faqSidequestAllowed) {
       cliLog('FAQ: consultando faq.json + catálogo/despachos (datos.json) con IA...');
       const faqData = JSON.parse(fs.readFileSync(FAQ_JSON_PATH, 'utf8'));
       faqResponse = await responderFAQ(messageText, faqData, {
@@ -931,9 +974,12 @@ async function processMessageUnlocked(sessionId, messageText, options = {}) {
     }
 
     // ¿Parece una pregunta real? LLM corto solo sin dato pendiente o con sidequest disponible
+    // Menú estricto Barriles: nunca LLM — solo plantilla de opción + strike
     const looksLikeRealQuestion = /\?/.test(trimmedMessage)
       || /\b(como|cómo|donde|dónde|cuando|cuándo|quien|quién|porque|por\s*qu[eé]|que\s+es|qué\s+es)\b/i.test(trimmedMessage);
-    const allowShortLlm = looksLikeRealQuestion && (!pendingFlow || faqSidequestAllowed);
+    const allowShortLlm = !strictBarrilesMenuMiss
+      && looksLikeRealQuestion
+      && (!pendingFlow || faqSidequestAllowed);
 
     if (allowShortLlm) {
       cliLog('FAQ: NO_FAQ → LLM corto disciplinado');

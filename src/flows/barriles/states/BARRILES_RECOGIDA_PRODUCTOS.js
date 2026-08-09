@@ -3,7 +3,6 @@
 // Textos, prompt IA y lógica de productos en un solo archivo.
 // ==============================================================================
 import { defineState } from '../../../logic/compile-state.js';
-import { img } from '../../../logic/media.js';
 import {
   preciosData,
   formatPrice,
@@ -26,9 +25,11 @@ import {
 import {
   wantsAdvanceProductsOrder,
   isOnlyAdvanceProductsOrder,
-  isGreetingOrNoise
+  isGreetingOrNoise,
+  asksCocktailPriceOrCatalog
 } from '../../../logic/interruptions.js';
 import { extractProductsWithAI } from '../../../core/llm.js';
+import { getEnv } from '../../../core/config.js';
 import { getDoubtClarificationTemplate, getBrowseOnlyGoodbye, getFlavorListReply, getNonAlcoholicSuggestionReply } from '../../../views/templates.js';
 import { withAssistantFooter } from '../../../logic/flow-rails.js';
 import {
@@ -38,7 +39,16 @@ import {
   parseBarrilesProductsProgrammatic,
   matchCocktailNamesInText
 } from '../../../logic/eventos-helpers.js';
-import { formatBarrilesCartLines, CART_OK_CTA, looksLikeUnrecognizedFlavorAttempt, buildBarrilesCatalogImage } from '../../../logic/barriles-intro.js';
+import {
+  formatBarrilesCartLines,
+  CART_OK_CTA,
+  looksLikeUnrecognizedFlavorAttempt,
+  buildBarrilesMatchedCartReplies,
+  findUnmatchedFlavorSegments,
+  asksBarrilesCatalogList,
+  buildBarrilesCompactCatalogReply,
+  registerBarrilesProductOrderMiss
+} from '../../../logic/barriles-intro.js';
 
 const AI_PROMPT = `[SISTEMA - ESTADO: CATÁLOGO (FALLBACK)]
 El cliente debe indicar sabor y cantidad de Barriles Desechables (5L).
@@ -85,26 +95,20 @@ ${CART_OK_CTA}${note}`;
 }
 
 /**
- * hasDeliveryData: ¿Ya tenemos fecha y comuna? (se piden en RECOGIDA_DATOS si faltan).
+ * advanceToPedidoDatos: Tras *OK* del carrito → checkout de pedido (datos uno a uno).
+ * Ya no pasamos por cotización intermedia: el cliente eligió *hacer un pedido*.
  *
  * @param {object} session
- * @returns {boolean}
+ * @returns {object}
  */
-function hasDeliveryData(session) {
-  const cd = session.orderBuilder?.clientData;
-  return Boolean(cd?.date && cd?.location);
-}
-
-/**
- * nextStateAfterProducts: Si ya hay despacho → cotización; si no → pedir datos.
- *
- * @param {object} session
- * @returns {'BARRILES_REVISION_COTIZACION'|'BARRILES_RECOGIDA_DATOS'}
- */
-function nextStateAfterProducts(session) {
-  return hasDeliveryData(session)
-    ? 'BARRILES_REVISION_COTIZACION'
-    : 'BARRILES_RECOGIDA_DATOS';
+function advanceToPedidoDatos(session) {
+  // Reset fase para que el intro pregunte lo que falte (comuna primero)
+  session.barrilesPedidoPhase = null;
+  return {
+    success: true,
+    nextState: 'BARRILES_RECOGIDA_DATOS',
+    flowProgress: true
+  };
 }
 
 export const BARRILES_RECOGIDA_PRODUCTOS = defineState({
@@ -141,20 +145,16 @@ _(ej: 1 mojito)_
 _(o escribe *lista* para ver la carta)_`
         };
       }
-      return { success: true, nextState: nextStateAfterProducts(session) };
+      return advanceToPedidoDatos(session);
     }
 
-    // "lista" / precios con carrito vacío → reenviar la carta (sin empujar *seguimos* aún)
-    const wantsFullCatalog = /\b(si|sí|claro|ok|okay|dale|mu[eé]strame|precio|precios|valor|valores|por favor|porfa|todos|todas|todo|lista|cat[áa]logo|menu|opciones|cuales|cu[aá]les|ver)\b/i.test(messageText);
-    if (wantsFullCatalog && cartCount === 0) {
+    // "¿cuáles tienes?" / "lista" / "disponibles" → lista compacta (sin reenviar la imagen)
+    if (asksBarrilesCatalogList(messageText) && !hasProductOrderSignal(messageText)) {
       return {
         success: true,
         nextState: 'BARRILES_RECOGIDA_PRODUCTOS',
-        customReplies: [
-          img('barril_desechable_precios.webp'),
-          `*¿Qué sabor y cuántos barriles quieres?*
-_(ej: 2 mojitos y 1 aperol)_`
-        ]
+        customReply: buildBarrilesCompactCatalogReply(),
+        flowProgress: true
       };
     }
 
@@ -263,39 +263,38 @@ _(ej: quita el mojito)_`
     const hasDispatchQ = asksDeliveryOrDispatchQuestion(messageText);
     const extractText = hasDispatchQ ? stripDeliveryQuestionForCart(messageText) : messageText;
 
-    // Primero reglas locales (como en eventos) — no depender solo del LLM
+    // Precio/valores/carta: el engine da tip contextual (no “no entendí tu pedido”)
+    if (
+      asksCocktailPriceOrCatalog(messageText)
+      && !hasProductOrderSignal(extractText || messageText)
+    ) {
+      return { success: false };
+    }
+
+    // Primero reglas locales (fuzzy/typos) — luego NLU.
     const programmatic = parseBarrilesProductsProgrammatic(extractText || messageText, catalogNames);
     const interceptedOption = interceptBotOptionsAnswer(extractText || messageText, lastBotMessage);
+    const maybeUnknownFlavor = looksLikeUnrecognizedFlavorAttempt(messageText);
     if (programmatic.length > 0) {
       extractedList = programmatic;
     } else if (interceptedOption) {
       extractedList.push(interceptedOption);
-    } else if (!hasProductOrderSignal(extractText || messageText)) {
-      // Sin señal de cóctel del catálogo: si parece un sabor inventado ("1 negroni"),
-      // respondemos con catálogo; si no, el engine re-pregunta (sin NLU inventando).
-      if (looksLikeUnrecognizedFlavorAttempt(messageText)) {
-        return {
-          success: true,
-          nextState: 'BARRILES_RECOGIDA_PRODUCTOS',
-          customReplies: [
-            buildBarrilesCatalogImage(`Ese cóctel aún no lo tenemos en la carta 😅
-👆 Aquí tienes los que sí manejamos.`),
-            ASK_FLAVOR_QTY
-          ]
-        };
-      }
-      return { success: false };
-    } else {
+    } else if (hasProductOrderSignal(extractText || messageText) || maybeUnknownFlavor) {
+      // Pedido claro O nombre suelto/typo: dejamos que la IA mapee al catálogo
       const result = await extractProductsWithAI(extractText || messageText, catalogNames, lastBotMessage);
       extractedList = result.productos;
       dudas = result.dudas;
       quiere_avanzar = result.quiere_avanzar;
+    } else {
+      // Texto suelto sin señal de cóctel → miss con strikes (catálogo ya enviado)
+      const threshold = getEnv().security?.maxConsecutiveErrors || 2;
+      return registerBarrilesProductOrderMiss(session, threshold);
     }
     const wantsAdvance = quiere_avanzar || wantsAdvanceProductsOrder(messageText);
 
     // "seguimos" solo (o NLU dice avanzar) con carrito ya lleno → siguiente paso
     if (wantsAdvance && Object.keys(session.orderBuilder.products).length > 0 && (!extractedList || extractedList.length === 0)) {
-      return { success: true, nextState: nextStateAfterProducts(session) };
+      return advanceToPedidoDatos(session);
     }
 
     if (dudas?.length > 0) {
@@ -355,11 +354,12 @@ _(ej: quita el mojito)_`
     if (Object.keys(parsedProducts).length > 0) {
       // La IA a veces relee el carrito del mensaje anterior al decir "seguimos"/avanzar.
       // Si lo extraído es un eco exacto del carrito, no sumamos otra vez.
+      const hadProductsBefore = Object.keys(session.orderBuilder.products || {}).length > 0;
       const isCartEcho = Object.keys(parsedProducts).length === Object.keys(session.orderBuilder.products).length
         && Object.entries(parsedProducts).every(([name, qty]) => session.orderBuilder.products[name] === qty);
 
       if (wantsAdvance && isCartEcho) {
-        return { success: true, nextState: nextStateAfterProducts(session) };
+        return advanceToPedidoDatos(session);
       }
 
       for (const [pName, pQty] of Object.entries(parsedProducts)) {
@@ -368,11 +368,32 @@ _(ej: quita el mojito)_`
 
       // "2 mojitos y 1 aperol seguimos" → agrega al carrito y avanza (no re-pregunta vacío)
       if (wantsAdvance) {
-        return { success: true, nextState: nextStateAfterProducts(session) };
+        return advanceToPedidoDatos(session);
       }
 
       // Multi-intent: pedido + duda de despacho → carrito + respuesta corta de cobertura
       const dispatchNote = hasDispatchQ ? REPLY_DISPATCH_SIDEBAR_BARRILES : '';
+
+      // Primer sabor(es) del pedido → pitch "Excelente elección" (ingredientes + precio/copa)
+      if (!hadProductsBefore) {
+        const addedNames = Object.keys(parsedProducts);
+        const unmatched = findUnmatchedFlavorSegments(messageText);
+        const replies = buildBarrilesMatchedCartReplies(
+          addedNames,
+          session.orderBuilder.products,
+          unmatched
+        );
+        if (dispatchNote) {
+          // Nota de despacho al final del pitch (sin inventar otra burbuja)
+          if (typeof replies[0] === 'string') replies[0] = `${replies[0]}\n\n${dispatchNote}`;
+        }
+        return {
+          success: true,
+          nextState: 'BARRILES_RECOGIDA_PRODUCTOS',
+          customReplies: replies,
+          flowProgress: true
+        };
+      }
 
       return {
         success: true,
@@ -387,17 +408,10 @@ _(ej: quita el mojito)_`
       return { success: true, nextState: 'CERRADO', customReply: getBrowseOnlyGoodbye(), mute: true };
     }
 
-    // Red de seguridad local: NLU no parseó nada pero el mensaje suena a un sabor fuera de carta
-    if (looksLikeUnrecognizedFlavorAttempt(messageText)) {
-      return {
-        success: true,
-        nextState: 'BARRILES_RECOGIDA_PRODUCTOS',
-        customReplies: [
-          buildBarrilesCatalogImage(`Ese cóctel aún no lo tenemos en la carta 😅
-👆 Aquí tienes los que sí manejamos.`),
-          ASK_FLAVOR_QTY
-        ]
-      };
+    // NLU vacío: miss con strikes (no “aún no lo tenemos” + flowProgress que reseteaba strikes)
+    if (looksLikeUnrecognizedFlavorAttempt(messageText) || String(messageText || '').trim().length > 0) {
+      const threshold = getEnv().security?.maxConsecutiveErrors || 2;
+      return registerBarrilesProductOrderMiss(session, threshold);
     }
 
     return { success: false };

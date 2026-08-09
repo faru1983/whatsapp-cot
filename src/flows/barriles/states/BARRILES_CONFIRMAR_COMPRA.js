@@ -10,7 +10,8 @@ import { withAssistantFooter } from '../../../logic/flow-rails.js';
 import {
   applyBarrilesDataFromMessage,
   getMissingBarrilesFields,
-  askForMissingBarriles,
+  askBarrilesPedidoPhase,
+  resolveBarrilesPedidoPhase,
   submitBarrilesSaleConfirmed,
   wantsToChangeBarrilesOrder
 } from '../../../logic/cot-barriles-contact.js';
@@ -23,17 +24,17 @@ import {
   shouldAskCliApiModeOnConfirm
 } from '../../../logic/cot-api.js';
 
-const SHORT_Q = withAssistantFooter(`*¿Todo bien?*
+const SHORT_Q = withAssistantFooter(`*¿Todo bien con tu pedido?*
 
-Escribe *OK* para crear tu compra, o corrige el dato que falte.
-_(ej: dirección Los Alerces 99)_`);
+Escribe *OK* para generarlo, o dime qué quieres *modificar*.
+_(ej: cambia la fecha, agrega 1 sangría)_`);
 
-const AI_PROMPT = `[SISTEMA - ESTADO: CONFIRMAR COMPRA DE BARRILES]
-El cliente ya dio contacto y entrega. Debe escribir *OK* / *1* Confirmar, o corregir un dato.
-1. Responde dudas breves sin inventar precios.
-2. Si corrige un dato, confirma el cambio y vuelve a pedir confirmación.
+const AI_PROMPT = `[SISTEMA - ESTADO: CONFIRMAR PEDIDO DE BARRILES]
+El cliente ve el carrito final (datos + productos + totales). Debe escribir *OK* / *1*, o indicar qué modificar.
+1. Responde dudas breves sin inventar precios (usa el resumen ya mostrado).
+2. Si corrige un dato o cócteles, confirma el cambio y reenvía el resumen.
 3. NUNCA crees la compra web hasta que confirme (ok / opción 1).
-4. Si quiere cambiar cócteles, indícale que puede escribirlo o escribir *corregir*.`;
+4. Si quiere cambiar cócteles, puede escribirlo o ir al menú de modificación.`;
 
 export const BARRILES_CONFIRMAR_COMPRA = defineState({
   id: 'BARRILES_CONFIRMAR_COMPRA',
@@ -72,12 +73,14 @@ _(ej: agrega 1 mojito o es en Providencia)_`
     const hasNewInfo = applyBarrilesDataFromMessage(messageText, session);
     const missing = getMissingBarrilesFields(session);
 
-    // Si al corregir le falta algo obligatorio, volvemos a pedirlo
+    // Si al corregir le falta algo obligatorio, volvemos al checkout por fases
     if (missing.length) {
+      const phase = resolveBarrilesPedidoPhase(session);
+      session.barrilesPedidoPhase = phase;
       return {
         success: true,
-        nextState: 'BARRILES_DATOS_CONTACTO',
-        customReply: askForMissingBarriles(missing, session),
+        nextState: 'BARRILES_RECOGIDA_DATOS',
+        customReply: askBarrilesPedidoPhase(phase, session),
         flowProgress: hasNewInfo
       };
     }
@@ -122,10 +125,8 @@ _(ej: agrega 1 mojito o es en Providencia)_`
         success: true,
         nextState: 'BARRILES_CONFIRMAR_COMPRA',
         customReply:
-          `*¿Qué dato quieres cambiar?*
-_(ej: email ana@nuevo.com, dirección Los Alerces 99 o Providencia)_
-
-_(si quieres cambiar los *cócteles*, dime qué agregar o quitar)_`,
+          `*¿Qué quieres modificar del pedido?*
+_(ej: email ana@nuevo.com, dirección Los Alerces 99, la comuna es Providencia, o agrega 1 mojito)_`,
         flowProgress: true
       };
     }

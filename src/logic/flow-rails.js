@@ -51,6 +51,13 @@ export const MENU_WRITE_REMINDER =
   'Escribe el número de la opción (1, 2…) o la palabra en *negrita*.';
 
 /**
+ * MENU_OPTION_MISS_PREFIX: Disculpa fija cuando el cliente no eligió una opción de menú.
+ * La usan Barriles (intención / post-precios) para no improvisar con FAQ ni “fuera de carta”.
+ */
+export const MENU_OPTION_MISS_PREFIX =
+  'Disculpa, no entendí la opción elegida. Por favor escribe el *número* de tu opción.';
+
+/**
  * menuKeycap: Devuelve el emoji keycap de una opción (1 → 1️⃣).
  *
  * @param {number} n - Número de opción (1–5)
@@ -176,25 +183,50 @@ _(ej: 15 de mayo, Las Condes — o escribe *después*)_`,
     confirm: 'Revisa los datos: escribe *1* *Confirmar* o *2* *Corregir* (o el dato nuevo).',
     delivery: `*¿Me pasas la fecha y comuna de entrega?*
 _(ej: Providencia, 5 de agosto)_`,
-    flavor: `👉 *Escribe el nombre del cóctel que te interesa y te enviaré el catálogo completo.*
-_(ej: Mojito, Sangría, Ramazzotti, etc.)_`,
+    flavor: `👉 *¿Qué cóctel(es) del catálogo te interesan?*
+_(ej: Mojito, Sangría, Ramazzotti — o "1 mojito y 2 sangría")_`,
     products: `*¿Qué sabor y cuántos barriles quieres?*
 _(ej: 2 mojitos — o escribe *lista*)_`,
     format: 'Escribe *1* *Dispensador* o *2* *Muro* para seguir.',
     continue: 'Escribe *1* cuando quieras ver la carta y precios.',
+    doubt: 'Escríbeme tu duda y te conectamos con el equipo.',
     cart: `*¿Qué cócteles te gustaría incluir?*
 _(ej: 5L Mojito)_`,
     confirm_quote: '¿Te parece bien? Escribe *1* *Confirmar* o *2* *Modificar*.',
     contact: `*¿Me compartes tu nombre y correo?*
 _(ej: Ana Pérez, ana@email.com)_`,
     mod_choice: 'Escribe *1* para cambiar cócteles o *2* para cambiar fecha/comuna.',
-    client_data: `*¿Me pasas la fecha y comuna de entrega?*
-_(ej: Providencia, 5 de agosto)_`
+    client_data: `*¿A qué comuna enviamos tu pedido?*
+_(ej: Providencia o Valparaíso)_`,
+    comuna: `*¿A qué comuna enviamos tu pedido?*
+_(ej: Providencia o Valparaíso)_`,
+    fecha: `*¿Para qué fecha quieres la entrega?*
+_(mínimo 2 días de anticipación)_`,
+    nombre: `*¿Me confirmas tu nombre y apellido?*
+_(ej: Ana Pérez)_`,
+    email: `*¿A qué correo enviamos la confirmación de tu pedido?*
+_(ej: ana@email.com)_`,
+    direccion: `*Escríbeme la dirección de entrega.*
+_(ej: Los Alerces 123)_`
   };
 
-  // Barriles intro menú: continue = cotizar/consulta (no “ver carta” de Eventos)
+  // Barriles checkout pedido: el shortQuestion ya pregunta la fase; no duplicar hint
+  if (stateId === 'BARRILES_RECOGIDA_DATOS') {
+    return null;
+  }
+
+  // Barriles entrada: menú de intención (pedido / precios / duda)
+  if (stateId === 'BARRILES_FILTRO_CANAL') {
+    if (session?.barrilesAwaitingDoubt || pendingKey === 'doubt') {
+      return 'Escríbeme tu duda y te conectamos con el equipo.';
+    }
+    // El miss ya lleva MENU_OPTION_MISS_PREFIX; aquí solo el menú a repetir
+    return null;
+  }
+
+  // Barriles post-precios: el shortQuestion ya es el menú sí/no
   if (stateId === 'BARRILES_INTRO_MENU') {
-    return 'Escribe *1* para *cotizar* o *2* si tienes una *consulta*.';
+    return null;
   }
 
   // Barriles productos: el hint debe coincidir con lo que falta (sabores vs confirmar *OK*),

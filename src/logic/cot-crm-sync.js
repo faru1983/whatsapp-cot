@@ -407,10 +407,9 @@ export function syncCrmCtwaAttributionAsync(session) {
  * ¿Esta transición debe marcar Interesado (engaged) en el CRM?
  *
  * Eventos: recién al confirmar datos → elegir formato (ya hay invitados + resumen OK).
- * Barriles: al elegir 1️⃣ Cotizar en el intro (BARRILES_INTRO_MENU → RECOGIDA_PRODUCTOS), o al
- * nombrar un sabor concreto en la entrada (BARRILES_FILTRO_CANAL → RECOGIDA_PRODUCTOS directo,
- * sin pasar por el menú) — nombrar un cóctel de la carta ya es intención de compra clara.
- * Mirar el pitch sin nombrar sabor, o quedarse en el menú intro, sigue siendo Curioso.
+ * Barriles: al elegir 1️⃣ Pedido (o sí tras precios) → RECOGIDA_PRODUCTOS, o al nombrar
+ * un sabor concreto desde la entrada (atajo) — eso ya es intención de compra clara.
+ * Solo ver precios o dejar una duda sigue siendo Curioso.
  *
  * @param {string} from
  * @param {string} to
@@ -420,7 +419,7 @@ function shouldEngageCrmOnTransition(from, to) {
   if (!from || !to || from === to) return false;
   // Eventos: Interesado con el snapshot completo al pasar a formato
   if (from === 'EVENTOS_CONFIRMAR_DATOS' && to === 'EVENTOS_ELECCION_FORMATO') return true;
-  // Barriles: Interesado al elegir cotizar, o al nombrar sabor directo desde la entrada
+  // Barriles: Interesado al elegir pedir (FILTRO o post-precios) / atajo sabor
   if (to === 'BARRILES_RECOGIDA_PRODUCTOS'
       && (from === 'BARRILES_INTRO_MENU' || from === 'BARRILES_FILTRO_CANAL')) return true;
   return false;
@@ -433,8 +432,8 @@ function shouldEngageCrmOnTransition(from, to) {
  * - Curioso: primer mensaje / menú (syncCrmCurious; con intent si ya hay carril).
  * - Intent CRM: al elegir Barriles/Eventos (mismo stage Curioso, syncCrmIntent).
  * - Interesado Eventos: CONFIRMAR_DATOS → ELECCION_FORMATO (datos ya confirmados).
- * - Interesado Barriles: INTRO_MENU → RECOGIDA_PRODUCTOS (eligió cotizar).
- * - No Interesado: pitch, menú intro sin cotizar, o solo avanzar recogida Eventos.
+ * - Interesado Barriles: FILTRO/INTRO → RECOGIDA_PRODUCTOS (elige pedido o atajo sabor).
+ * - No Interesado: solo ver precios, duda/SOS, o solo avanzar recogida Eventos.
  *
  * @param {object} session
  * @param {string} fromState
@@ -456,9 +455,9 @@ export function notifyCrmOnBotStateChange(session, fromState, toState) {
     trigger: from === 'EVENTOS_CONFIRMAR_DATOS'
       ? 'eventos_datos_confirmados'
       : from === 'BARRILES_INTRO_MENU'
-        ? 'barriles_elige_cotizar'
+        ? 'barriles_elige_pedido_post_precios'
         : from === 'BARRILES_FILTRO_CANAL'
-          ? 'barriles_nombra_sabor'
+          ? 'barriles_elige_pedido_o_sabor'
           : 'flow_entry_exit',
   };
 

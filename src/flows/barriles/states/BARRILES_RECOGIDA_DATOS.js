@@ -1,41 +1,95 @@
 // ==============================================================================
-// OBJETIVO: Paso BARRILES_RECOGIDA_DATOS — completar/corregir fecha y comuna.
-// Red de seguridad: la entrada ya pide estos datos; aquí solo si faltan o se corrigen.
+// OBJETIVO: Checkout de PEDIDO Barriles — datos uno por uno (no cotización).
+// Orden: comuna → fecha → nombre/apellido → email → dirección → confirmar compra.
 // ==============================================================================
 import { defineState } from '../../../logic/compile-state.js';
-import { parseClientName, parseDate, findLocationByFuzzyMatch } from '../../../logic/utils.js';
+import { findLocationByFuzzyMatch, parseDate } from '../../../logic/utils.js';
 import { withAssistantFooter } from '../../../logic/flow-rails.js';
-import { exampleConcreteDateHint, normalizeBotDateText } from '../../../logic/cot-event-quote.js';
+import {
+  normalizeBotDateText,
+  evaluateDeliveryLeadTime
+} from '../../../logic/cot-event-quote.js';
+import {
+  ensureClientDataBucket,
+  ensureContactBucket,
+  applyContactFromMessage,
+  applyAddressFromMessage,
+  resolveBarrilesPedidoPhase,
+  formatBarrilesShippingNote,
+  askBarrilesPedidoPhase,
+  buildBarrilesPedidoIntro,
+  tryApplyBarrilesPedidoPriorCorrection,
+  parseEmailFromText,
+  getEmailTypoSuggestion,
+  looksLikeStreetAddress,
+  getMissingDeliveryAddress
+} from '../../../logic/cot-barriles-contact.js';
+import { getBarrilesPurchaseSummary } from '../../../views/templates.js';
+
+const AI_PROMPT = `[SISTEMA - ESTADO: PEDIDO BARRILES (datos uno a uno)]
+El cliente está armando un *pedido* de Barriles Desechables (no una cotización).
+Fases: comuna → fecha → nombre/apellido → email → dirección → confirmación.
+1. Pide SOLO el dato de la fase actual. No inventes tarifas de despacho.
+2. RM: despacho con precio de datos.json. Otras regiones: Blue Express / por confirmar.
+3. Fecha: mínimo 2 días; si es antes, avisa que hay que confirmar disponibilidad.
+4. Si corrige un dato anterior (ej. fecha mientras pedimos nombre), acéptalo y vuelve a pedir la fase actual.
+5. Al final, el resumen pide *OK* o corregir un dato.`;
 
 /**
- * deliveryExample: Fecha concreta cercana + comuna (evita "este sábado").
- * Estilo canónico: _(ej: …)_ bajo la pregunta.
+ * shortQuestionForPhase: Re-pregunta corta según la fase pendiente.
  *
+ * @param {object} session
  * @returns {string}
  */
-function deliveryExample() {
-  return `_(ej: ${exampleConcreteDateHint()} en Providencia)_`;
+function shortQuestionForPhase(session) {
+  const phase = session.barrilesPedidoPhase || resolveBarrilesPedidoPhase(session);
+  return withAssistantFooter(askBarrilesPedidoPhase(phase, session));
 }
 
-const AI_PROMPT = `[SISTEMA - ESTADO: DATOS DE DESPACHO]
-Faltan fecha y/o comuna para Barriles Desechables (o el cliente quiere corregirlas).
-1. Dudas: transferencias OK; regiones por encomienda. NUNCA inventes tarifas.
-2. Cierra pidiendo lo que falte (fecha y/o comuna) con día concreto (ej. "5 de agosto"). NO menciones extras.`;
+/**
+ * goConfirm: Pasa a CONFIRMAR_COMPRA con el resumen del pedido.
+ *
+ * @param {object} session
+ * @returns {object}
+ */
+function goConfirm(session) {
+  session.barrilesPedidoPhase = 'confirm';
+  return {
+    success: true,
+    nextState: 'BARRILES_CONFIRMAR_COMPRA',
+    customReplies: getBarrilesPurchaseSummary(session),
+    flowProgress: true
+  };
+}
+
+/**
+ * advanceAfterSave: Recalcula fase y pregunta lo siguiente (o confirma).
+ *
+ * @param {object} session
+ * @param {string} [prefix] - Texto previo (ej. nota de despacho / aviso fecha)
+ * @returns {object}
+ */
+function advanceAfterSave(session, prefix = '') {
+  const phase = resolveBarrilesPedidoPhase(session);
+  session.barrilesPedidoPhase = phase;
+  if (phase === 'confirm') return goConfirm(session);
+  const ask = askBarrilesPedidoPhase(phase, session);
+  return {
+    success: true,
+    nextState: 'BARRILES_RECOGIDA_DATOS',
+    customReply: prefix ? `${prefix}\n\n${ask}` : ask,
+    flowProgress: true
+  };
+}
 
 export const BARRILES_RECOGIDA_DATOS = defineState({
   id: 'BARRILES_RECOGIDA_DATOS',
-  promptQuestion: () => [
-    `Para armar la cotización con despacho:
-
-*¿Me pasas la fecha y comuna de entrega?*
-${deliveryExample()}`
-  ],
-  shortQuestion: () => withAssistantFooter(`*¿Me pasas la fecha y comuna de entrega?*
-${deliveryExample()}`),
+  texts: (session) => [buildBarrilesPedidoIntro(session)],
+  shortQuestion: (session) => shortQuestionForPhase(session),
   aiPrompt: AI_PROMPT,
 
   async validateAndProcess(messageText, session) {
-    // Sesión vieja / corruptas: sin carrito no podemos pedir despacho
+    // Sesión sin carrito → volver a productos
     if (!session.orderBuilder || session.orderBuilder.type !== 'desechable') {
       session.orderBuilder = {
         type: 'desechable',
@@ -49,64 +103,175 @@ ${deliveryExample()}`),
         customReply: `Primero elijamos los cócteles 🙂
 
 *¿Qué sabor y cuántos barriles quieres?*
-_(ej: 1 mojito)_
-
-_(o escribe *lista* para ver la carta)_`
+_(ej: 1 mojito)_`
       };
     }
-    if (!session.orderBuilder.clientData) {
-      session.orderBuilder.clientData = { name: null, date: null, location: null };
-    }
 
-    let hasNewInfo = false;
-    let parsedName = parseClientName(messageText) || session.orderBuilder.clientData.name;
-    const rawDate = parseDate(messageText);
-    const parsedDate = rawDate
-      ? (normalizeBotDateText(rawDate) || rawDate)
-      : session.orderBuilder.clientData.date;
-    const locationSearch = findLocationByFuzzyMatch(messageText);
+    ensureClientDataBucket(session);
+    ensureContactBucket(session);
 
-    if (parseClientName(messageText)) hasNewInfo = true;
-    if (rawDate) hasNewInfo = true;
-    if (locationSearch) {
-      session.orderBuilder.clientData.location = locationSearch.name;
-      session.orderBuilder.clientData.locationData = locationSearch;
-      hasNewInfo = true;
-    }
-    if (parsedName) session.orderBuilder.clientData.name = parsedName;
-    if (parsedDate) session.orderBuilder.clientData.date = parsedDate;
+    const phase = session.barrilesPedidoPhase || resolveBarrilesPedidoPhase(session);
+    session.barrilesPedidoPhase = phase;
+    const trimmed = String(messageText || '').trim();
 
-    const hasAllData = session.orderBuilder.clientData.date && session.orderBuilder.clientData.location;
-    const hasProducts = Object.keys(session.orderBuilder.products || {}).length > 0;
-
-    if (!hasAllData) {
-      if (!hasNewInfo) {
-        return { success: false };
-      }
-      const missing = [];
-      if (!session.orderBuilder.clientData.date) missing.push('✓ Fecha de entrega');
-      if (!session.orderBuilder.clientData.location) missing.push('✓ Comuna/Ciudad');
+    // Corrección del paso anterior (ej. "me equivoqué, es para el 13 de agosto"
+    // mientras pedimos nombre): actualiza ese dato y re-pide la fase actual.
+    const priorFix = tryApplyBarrilesPedidoPriorCorrection(trimmed, session, phase);
+    if (priorFix) {
       return {
         success: true,
         nextState: 'BARRILES_RECOGIDA_DATOS',
-        customReply: `Perfecto, recibí parte de tu información. Me falta:\n\n${missing.join('\n')}\n\n*¿Me pasas lo que falta?*
-${deliveryExample()}`
+        customReply: `${priorFix.ack}\n\n${askBarrilesPedidoPhase(phase, session)}`,
+        flowProgress: true
       };
     }
 
-    // Datos completos: si ya hay cócteles → cotización; si no → catálogo
-    if (hasProducts) {
-      return { success: true, nextState: 'BARRILES_REVISION_COTIZACION' };
+    // ------------------------------------------------------------------
+    // COMUNA
+    // ------------------------------------------------------------------
+    if (phase === 'comuna') {
+      const locationSearch = findLocationByFuzzyMatch(trimmed);
+      if (!locationSearch) {
+        return {
+          success: true,
+          nextState: 'BARRILES_RECOGIDA_DATOS',
+          customReply: `No reconocí esa comuna 😅
+
+${askBarrilesPedidoPhase('comuna', session)}`,
+          flowProgress: true
+        };
+      }
+      session.orderBuilder.clientData.location = locationSearch.name;
+      session.orderBuilder.clientData.locationData = locationSearch;
+      session.location = locationSearch.name;
+      const note = formatBarrilesShippingNote(locationSearch);
+      return advanceAfterSave(session, `Perfecto.\n${note}`);
     }
+
+    // ------------------------------------------------------------------
+    // FECHA (mínimo 2 días; si es menos → aviso de disponibilidad)
+    // ------------------------------------------------------------------
+    if (phase === 'fecha') {
+      const rawDate = parseDate(trimmed);
+      if (!rawDate) {
+        return {
+          success: true,
+          nextState: 'BARRILES_RECOGIDA_DATOS',
+          customReply: `Necesito un día concreto 🙂
+
+${askBarrilesPedidoPhase('fecha', session)}`,
+          flowProgress: true
+        };
+      }
+      const normalized = normalizeBotDateText(rawDate) || rawDate;
+      const lead = evaluateDeliveryLeadTime(normalized, 2);
+      if (!lead.ok) {
+        const why = lead.reason === 'past'
+          ? 'Esa fecha ya pasó.'
+          : 'No pude leer bien la fecha.';
+        return {
+          success: true,
+          nextState: 'BARRILES_RECOGIDA_DATOS',
+          customReply: `${why}
+
+${askBarrilesPedidoPhase('fecha', session)}`,
+          flowProgress: true
+        };
+      }
+      session.orderBuilder.clientData.date = normalized;
+      session.date = normalized;
+      session.barrilesDateNeedsAvailabilityConfirm = Boolean(lead.tooSoon);
+      const aviso = lead.tooSoon
+        ? `Anoté *${normalized}*. Como es con menos de *2 días* de anticipación, debemos *confirmar disponibilidad* 🙏`
+        : `Anoté entrega para *${normalized}* ✅`;
+      return advanceAfterSave(session, aviso);
+    }
+
+    // ------------------------------------------------------------------
+    // NOMBRE Y APELLIDO
+    // ------------------------------------------------------------------
+    if (phase === 'nombre') {
+      applyContactFromMessage(trimmed, session);
+      const c = session.contact || {};
+      if (!String(c.firstName || '').trim() || !String(c.lastName || '').trim()) {
+        return {
+          success: true,
+          nextState: 'BARRILES_RECOGIDA_DATOS',
+          customReply: `Necesito *nombre y apellido* 🙂
+
+${askBarrilesPedidoPhase('nombre', session)}`,
+          flowProgress: true
+        };
+      }
+      return advanceAfterSave(session);
+    }
+
+    // ------------------------------------------------------------------
+    // EMAIL
+    // ------------------------------------------------------------------
+    if (phase === 'email') {
+      const typo = getEmailTypoSuggestion(trimmed);
+      if (typo) {
+        return {
+          success: true,
+          nextState: 'BARRILES_RECOGIDA_DATOS',
+          customReply: `Ese correo parece tener un typo (¿quisiste decir *${typo.suggestion}*?).
+
+${askBarrilesPedidoPhase('email', session)}`,
+          flowProgress: true
+        };
+      }
+      const email = parseEmailFromText(trimmed);
+      if (!email) {
+        return {
+          success: true,
+          nextState: 'BARRILES_RECOGIDA_DATOS',
+          customReply: `Necesito un email válido 🙂
+
+${askBarrilesPedidoPhase('email', session)}`,
+          flowProgress: true
+        };
+      }
+      session.contact.email = email;
+      return advanceAfterSave(session);
+    }
+
+    // ------------------------------------------------------------------
+    // DIRECCIÓN (requerida por la API de compra)
+    // ------------------------------------------------------------------
+    if (phase === 'direccion') {
+      applyAddressFromMessage(trimmed, session);
+      if (getMissingDeliveryAddress(session)) {
+        // Si no parecía dirección, igual intentamos guardar el texto si es razonable
+        if (looksLikeStreetAddress(trimmed) || trimmed.length >= 5) {
+          session.contact.address = trimmed;
+        }
+      }
+      if (getMissingDeliveryAddress(session)) {
+        return {
+          success: true,
+          nextState: 'BARRILES_RECOGIDA_DATOS',
+          customReply: `Necesito la *dirección completa* para el despacho 🙂
+
+${askBarrilesPedidoPhase('direccion', session)}`,
+          flowProgress: true
+        };
+      }
+      return goConfirm(session);
+    }
+
+    // Fase confirm o datos ya completos → resumen
+    if (resolveBarrilesPedidoPhase(session) === 'confirm') {
+      return goConfirm(session);
+    }
+
+    // Fallback: re-sincronizar fase
+    session.barrilesPedidoPhase = resolveBarrilesPedidoPhase(session);
     return {
       success: true,
-      nextState: 'BARRILES_RECOGIDA_PRODUCTOS',
-      customReply: `Listo 🙂
-
-*¿Qué sabor y cuántos barriles quieres?*
-_(ej: 1 mojito y 1 sangría)_
-
-_(o escribe *lista* para ver la carta)_`
+      nextState: 'BARRILES_RECOGIDA_DATOS',
+      customReply: askBarrilesPedidoPhase(session.barrilesPedidoPhase, session),
+      flowProgress: true
     };
   }
 });

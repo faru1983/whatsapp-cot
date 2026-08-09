@@ -1672,18 +1672,20 @@ export function asksAvailableCocktailsList(messageText) {
 		}
 	}
 
-	const hasCatalogCue = /\b(coctel|cocteles|bebida|bebidas|tragos?|opciones|sabores?|variedades?)\b/.test(norm);
-	const hasAskCue = /\b(que|cual|cuales|cuantos|cuantas|tienen|tienes|hay|ofrecen|sirven|venden|disponible|manejan|tienen)\b/.test(norm)
+	const hasCatalogCue = /\b(coctel|cocteles|bebida|bebidas|tragos?|opciones|sabores?|variedades?|lista|catalogo|menu|disponibles?)\b/.test(norm);
+	const hasAskCue = /\b(que|cual|cuales|cuantos|cuantas|tienen|tienes|hay|ofrecen|sirven|venden|disponible|disponibles|manejan|mostrar|muestrame|pasame|dame)\b/.test(norm)
 		|| /\?/.test(raw);
 
 	if (hasCatalogCue && hasAskCue) return true;
 
-	// Corto y directo: "cuales tienes", "que hay", "cuales son"
-	if (/^(cu[aá]les?|qu[eé])\s+(tienen|tienes|hay|ofrecen|sirven|venden)\b/.test(norm)) return true;
+	// Corto y directo: "cuales tienes", "que hay", "cuales son", "lista", "disponibles"
+	if (/^(cu[aá]les?|qu[eé])\s+(tienen|tienes|hay|ofrecen|sirven|venden|disponible|disponibles)\b/.test(norm)) return true;
 	if (/^(cu[aá]les?|qu[eé])\s+(son\s+)?(los|las)\b/.test(norm)
 		&& !/\b(personas|invitados|formatos?|servicios?|precios?|fechas?|horas?|dias?|d[ií]as)\b/.test(norm)) {
 		return true;
 	}
+	if (/^(la\s+)?lista\b/.test(norm) || /^disponibles?\b/.test(norm)) return true;
+	if (/\bcual\s+es\s+la\s+lista\b/.test(norm)) return true;
 
 	return false;
 }
@@ -1941,16 +1943,38 @@ function getLevenshteinDistance(a, b) {
 	return tmp[alen][blen];
 }
 
+/**
+ * Tokens genéricos de categoría: NO son un cóctel concreto.
+ * Si el cliente dice solo "mocktails" / "spritz", no debemos mapear al primer
+ * "Mojito Mocktail" o "Aperol Spritz" del catálogo (rompe la carta de Mocktails).
+ */
+const GENERIC_CATALOG_QUERY_TOKENS = new Set(['mocktail', 'mocktails', 'spritz', 'sour']);
+
+/**
+ * findClosestCatalogMatch: Mapea un nombre (a menudo mal escrito) al catálogo oficial.
+ * Cubre typos e incompletos: "ramazzoti"/"ramazoti" → Ramazzotti Spritz,
+ * "margarita" → Tequila Margarita, "monito" → Mojito.
+ *
+ * @param {string} name - Texto que escribió el cliente (o name de la IA)
+ * @param {string[]} catalogNames - Nombres oficiales
+ * @returns {string|null} Nombre exacto del catálogo o null
+ */
 export function findClosestCatalogMatch(name, catalogNames) {
 	if (!name) return null;
 
 	const cleanName = (str) => normalizeString(str)
+		.replace(/[¿?¡!.,;:…'"()]+/g, ' ')
 		.replace(/\b(clasico|clasica|tradicional|original|sabores|sabor)\b/gi, '')
 		.replace(/\s+/g, ' ')
 		.trim();
 
-	const normName = normalizeString(name);
+	const normName = cleanName(name) || normalizeString(name).replace(/[¿?¡!.,;:…'"()]+/g, '').trim();
 	const cleanedNormName = cleanName(name);
+
+	// Categoría suelta ("mocktails", "spritz") ≠ un ítem del catálogo
+	if (GENERIC_CATALOG_QUERY_TOKENS.has(cleanedNormName) || GENERIC_CATALOG_QUERY_TOKENS.has(normName)) {
+		return null;
+	}
 
 	// 1) Match exacto con o sin palabras descriptivas de relleno
 	let bestMatch = catalogNames.find((c) => {
@@ -1966,19 +1990,28 @@ export function findClosestCatalogMatch(name, catalogNames) {
 	});
 	if (bestMatch) return bestMatch;
 
-	// 3) Levenshtein sobre la cadena limpia
+	// 3) Levenshtein: nombre completo Y tokens distintivos (≥4 letras).
+	// Sin tokens, "ramazzoti" no alcanza a "ramazzotti spritz" (demasiado largo).
 	let minDistance = Infinity;
 	let closest = null;
 	const target = cleanedNormName || normName;
+	if (!target || target.length < 3) return null;
 
 	for (const catalogName of catalogNames) {
 		const normCatalog = cleanName(catalogName) || normalizeString(catalogName);
-		const dist = getLevenshteinDistance(target, normCatalog);
+		const candidates = [
+			normCatalog,
+			...normCatalog.split(/\s+/).filter((w) => w.length >= 4)
+		];
 
-		const threshold = Math.max(2, Math.floor(normCatalog.length * 0.3));
-		if (dist <= threshold && dist < minDistance) {
-			minDistance = dist;
-			closest = catalogName;
+		for (const candidate of candidates) {
+			const dist = getLevenshteinDistance(target, candidate);
+			// Más tolerancia en tokens cortos/medios (typos típicos de WhatsApp)
+			const threshold = Math.max(2, Math.floor(candidate.length * 0.35));
+			if (dist <= threshold && dist < minDistance) {
+				minDistance = dist;
+				closest = catalogName;
+			}
 		}
 	}
 

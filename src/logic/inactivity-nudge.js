@@ -186,10 +186,13 @@ export function evaluateNudgeEligibility(session, nudgeConfig, nowMs = Date.now(
  */
 function resumeHeadline(stateId, pendingKey) {
   if (stateId === 'BARRILES_FILTRO_CANAL') {
-    return '¿Seguimos con tus *Barriles Desechables*? Dime qué cóctel te tienta 🍸';
+    if (pendingKey === 'doubt') {
+      return '¿Seguimos? Escríbeme tu *duda* y te conectamos con el equipo 🍸';
+    }
+    return '¿Seguimos con tus *Barriles Desechables*? Elige *pedido*, *precios* o *duda* 🍸';
   }
   if (stateId === 'BARRILES_INTRO_MENU') {
-    return '¿Seguimos con tus *Barriles Desechables*? Puedes *cotizar* o dejarnos una *consulta* 🍸';
+    return '¿Seguimos con tus *Barriles Desechables*? ¿Quieres *hacer un pedido*? 🍸';
   }
 
   if (stateId === 'EVENTOS_RECOGIDA_DATOS') {
@@ -228,27 +231,43 @@ function nudgePendingAsk(stateId, session, pendingKey) {
     return 'Escribe *1* *Eventos*, *2* *Barriles* o *3* *Humano* para seguir.';
   }
 
-  // Barriles intro: sabor pendiente
-  if (stateId === 'BARRILES_FILTRO_CANAL' || pendingKey === 'flavor') {
-    return '👉 *Escribe el nombre del cóctel que te interesa y te enviaré el catálogo completo.*';
+  // Barriles entrada: menú de intención o espera de duda
+  if (stateId === 'BARRILES_FILTRO_CANAL') {
+    if (pendingKey === 'doubt' || session?.barrilesAwaitingDoubt) {
+      return 'Escríbeme tu duda y te conectamos con el equipo.';
+    }
+    return 'Escribe *1* *Pedido*, *2* *Precios* o *3* *Duda* para seguir.';
   }
   if (stateId === 'BARRILES_INTRO_MENU') {
-    return 'Escribe *1* para *cotizar* o *2* si tienes una *consulta*.';
+    return 'Escribe *1* si quieres *hacer un pedido* o *2* si *no, gracias*.';
+  }
+  if (pendingKey === 'flavor') {
+    return '👉 *¿Qué cóctel(es) del catálogo te interesan?*';
   }
   if (stateId === 'EVENTOS_INTRO_MENU' || pendingKey === 'continue') {
     return 'Escribe *1* cuando quieras ver la carta y precios.';
   }
 
-  // Barriles: fecha/comuna (parcial o ambas) en recogida de datos
-  if (stateId === 'BARRILES_RECOGIDA_DATOS' || pendingKey === 'delivery' || pendingKey === 'client_data') {
+  // Barriles checkout pedido: una fase a la vez
+  if (stateId === 'BARRILES_RECOGIDA_DATOS' || pendingKey === 'delivery' || pendingKey === 'client_data'
+    || ['comuna', 'fecha', 'nombre', 'email', 'direccion'].includes(pendingKey)) {
+    const phase = session?.barrilesPedidoPhase || pendingKey;
+    if (phase === 'fecha' || pendingKey === 'fecha') {
+      return '*¿Para qué fecha quieres la entrega?*';
+    }
+    if (phase === 'nombre' || pendingKey === 'nombre') {
+      return '*¿Me confirmas tu nombre y apellido?*';
+    }
+    if (phase === 'email' || pendingKey === 'email') {
+      return '*¿A qué correo enviamos la confirmación de tu pedido?*';
+    }
+    if (phase === 'direccion' || pendingKey === 'direccion') {
+      return '*Escríbeme la dirección de entrega.*';
+    }
     const cd = session?.orderBuilder?.clientData;
-    if (cd?.location && !cd?.date) {
-      return '*¿Cuál es la fecha de entrega?*';
-    }
-    if (cd?.date && !cd?.location) {
-      return '*¿Cuál es la comuna de entrega?*';
-    }
-    return '*¿Me pasas la fecha y comuna de entrega?*';
+    if (cd?.location && !cd?.date) return '*¿Para qué fecha quieres la entrega?*';
+    if (cd?.date && !cd?.location) return '*¿A qué comuna enviamos tu pedido?*';
+    return '*¿A qué comuna enviamos tu pedido?*';
   }
 
   return '*¿Me ayudas con el dato que faltaba para seguir?*';

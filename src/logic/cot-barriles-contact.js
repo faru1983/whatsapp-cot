@@ -1,6 +1,6 @@
 // ==============================================================================
-// OBJETIVO: Helpers compartidos del tramo contacto → confirmación → API (Barriles).
-// Los usan BARRILES_DATOS_CONTACTO y BARRILES_CONFIRMAR_COMPRA.
+// OBJETIVO: Helpers del checkout de pedido Barriles → confirmación → API.
+// Los usan BARRILES_RECOGIDA_DATOS, BARRILES_CONFIRMAR_COMPRA (y contacto legacy).
 // ==============================================================================
 import { withAssistantFooter } from './flow-rails.js';
 import {
@@ -8,13 +8,33 @@ import {
   applyContactFromMessage,
   applyAddressFromMessage,
   getMissingPersonContactFields,
-  getMissingDeliveryAddress
+  getMissingDeliveryAddress,
+  parseEmailFromText,
+  getEmailTypoSuggestion,
+  looksLikeStreetAddress,
+  isPrimarilyDateMessage
 } from './cot-contact.js';
-import { toIsoDateFromBotText, normalizeBotDateText, exampleConcreteDateHint } from './cot-event-quote.js';
+import {
+  toIsoDateFromBotText,
+  normalizeBotDateText,
+  exampleConcreteDateHint,
+  evaluateDeliveryLeadTime
+} from './cot-event-quote.js';
 import { submitBarrilesSaleFromSession } from './cot-barriles-sale.js';
 import { canSubmitCotApiWrite, isCotApiMockMode } from './cot-api.js';
 import { formatPrice, preciosData, parseDate, findLocationByFuzzyMatch } from './utils.js';
 import { buildAdminBarrilesOrderBody, getBarrilesSaleCreatedReply } from '../views/templates.js';
+
+export {
+  ensureContactBucket,
+  applyContactFromMessage,
+  applyAddressFromMessage,
+  parseEmailFromText,
+  getEmailTypoSuggestion,
+  looksLikeStreetAddress,
+  getMissingDeliveryAddress,
+  evaluateDeliveryLeadTime
+};
 
 /**
  * ensureClientDataBucket: Asegura orderBuilder.clientData (fecha/comuna en Barriles).
@@ -421,4 +441,227 @@ export function wantsToChangeBarrilesOrder(messageText) {
   return /\b(c[oó]ctel(?:es)?|sabor(?:es)?|agregar|quitar|eliminar|modificar\s+(el\s+)?pedido|cambiar\s+(el\s+)?pedido|cambiar\s+(los\s+)?c[oó]cteles|agregar\s+barriles?|quitar\s+barriles?)\b/i.test(
     text
   );
+}
+
+// ==============================================================================
+// CHECKOUT PEDIDO (comuna → fecha → nombre → email → dirección → confirmar)
+// ==============================================================================
+
+/** Fases ordenadas del pedido Barriles (una pregunta a la vez). */
+export const BARRILES_PEDIDO_PHASES = ['comuna', 'fecha', 'nombre', 'email', 'direccion'];
+
+/**
+ * resolveBarrilesPedidoPhase: Qué dato falta ahora en el checkout de pedido.
+ *
+ * @param {object} session
+ * @returns {'comuna'|'fecha'|'nombre'|'email'|'direccion'|'confirm'}
+ */
+export function resolveBarrilesPedidoPhase(session) {
+  ensureClientDataBucket(session);
+  ensureContactBucket(session);
+  const cd = session.orderBuilder.clientData;
+  const c = session.contact || {};
+
+  if (!cd.location) return 'comuna';
+  if (!toIsoDateFromBotText(cd.date)) return 'fecha';
+  if (!String(c.firstName || '').trim() || !String(c.lastName || '').trim()) return 'nombre';
+  if (!String(c.email || '').trim()) return 'email';
+  if (getMissingDeliveryAddress(session)) return 'direccion';
+  return 'confirm';
+}
+
+/**
+ * formatBarrilesShippingNote: Texto de despacho según comuna (RM con precio / región por confirmar).
+ *
+ * @param {object} locationData - Resultado de findLocationByFuzzyMatch
+ * @returns {string}
+ */
+export function formatBarrilesShippingNote(locationData) {
+  const name = String(locationData?.name || '').trim() || 'esa comuna';
+  if (locationData?.isRM) {
+    const cost = locationData?.deliveryCost?.desechable;
+    if (cost != null && Number(cost) > 0) {
+      return `📍 *${name}* (Región Metropolitana)\nDespacho: *${formatPrice(Number(cost))}*.`;
+    }
+    return `📍 *${name}* (Región Metropolitana)\nDespacho: valor por confirmar.`;
+  }
+  return `📍 *${name}* (otras regiones)\nDespacho por *Blue Express* u otra encomienda: valor *por confirmar*.`;
+}
+
+/**
+ * askBarrilesPedidoPhase: Pregunta corta de la fase actual (tono pedido, no cotización).
+ *
+ * @param {string} phase
+ * @param {object} [session]
+ * @returns {string}
+ */
+export function askBarrilesPedidoPhase(phase, session = {}) {
+  const exampleDay = exampleConcreteDateHint();
+  const comuna = getDeliveryLocationText(session);
+
+  if (phase === 'comuna') {
+    return `*¿A qué comuna enviamos tu pedido?*
+_(ej: Providencia o Valparaíso)_`;
+  }
+  if (phase === 'fecha') {
+    return `*¿Para qué fecha quieres la entrega?*
+_(ej: ${exampleDay} — mínimo 2 días de anticipación)_`;
+  }
+  if (phase === 'nombre') {
+    return `*¿Me confirmas tu nombre y apellido?*
+_(ej: Ana Pérez)_`;
+  }
+  if (phase === 'email') {
+    return `*¿A qué correo enviamos la confirmación de tu pedido?*
+_(ej: ana@email.com)_`;
+  }
+  if (phase === 'direccion') {
+    return `*Escríbeme la dirección de entrega${comuna ? ` en *${comuna}*` : ''}.*
+_(ej: Los Alerces 123, Depto 456)_`;
+  }
+  return 'Revisemos los datos de tu pedido…';
+}
+
+/**
+ * looksLikeBarrilesPedidoCorrectionIntent: ¿El cliente dice que se equivocó / quiere cambiar un dato?
+ * Cubre variantes: "me equivoqué", "mejor…", "cambia la fecha", "en realidad es…".
+ *
+ * @param {string} text
+ * @returns {boolean}
+ */
+export function looksLikeBarrilesPedidoCorrectionIntent(text) {
+  return /\b(me\s+equivoc|equivocad[oa]|mejor\b|cambia(r|mos)?|correg(ir|e|imos)?|no\s+era|en\s+realidad|era\s+para|es\s+para\b|quise\s+decir|actualiz(a|ar)|otro\s+d[ií]a|otra\s+fecha|otra\s+comuna)\b/i.test(
+    String(text || '')
+  );
+}
+
+/**
+ * tryApplyBarrilesPedidoPriorCorrection: Si el mensaje corrige un dato YA pedido
+ * (paso anterior), lo actualiza y deja al cliente en la fase actual.
+ * Ej.: en fase nombre, "me equivoqué, es para el 13 de agosto" → actualiza fecha
+ * y vuelve a pedir nombre (no trata el mensaje como apellido).
+ *
+ * @param {string} messageText
+ * @param {object} session
+ * @param {string} currentPhase - Fase en la que estamos ahora
+ * @returns {{ field: string, ack: string }|null}
+ */
+export function tryApplyBarrilesPedidoPriorCorrection(messageText, session, currentPhase) {
+  const phase = String(currentPhase || '');
+  const phaseIdx = BARRILES_PEDIDO_PHASES.indexOf(phase);
+  // Sin fase previa corregible (aún en comuna) o fase desconocida
+  if (phaseIdx <= 0) return null;
+
+  ensureClientDataBucket(session);
+  ensureContactBucket(session);
+  const trimmed = String(messageText || '').trim();
+  if (!trimmed) return null;
+
+  const hasCorrIntent = looksLikeBarrilesPedidoCorrectionIntent(trimmed);
+  const cd = session.orderBuilder.clientData;
+
+  // --- Fecha (ya la pedimos si phaseIdx > índice de 'fecha') ---
+  if (phaseIdx > BARRILES_PEDIDO_PHASES.indexOf('fecha')) {
+    const rawDate = parseDate(trimmed);
+    const looksDate = Boolean(rawDate)
+      && (
+        hasCorrIntent
+        || isPrimarilyDateMessage(trimmed)
+        || /^(para\s+(el|la)|el|la)\s+/i.test(trimmed)
+        || /\b(lunes|martes|mi[eé]rcoles|jueves|viernes|s[aá]bado|domingo)\b/i.test(trimmed)
+      );
+    if (looksDate && rawDate) {
+      const normalized = normalizeBotDateText(rawDate) || rawDate;
+      const lead = evaluateDeliveryLeadTime(normalized, 2);
+      if (!lead.ok) {
+        const why = lead.reason === 'past' ? 'Esa fecha ya pasó.' : 'No pude leer bien la fecha.';
+        return {
+          field: 'fecha',
+          ack: `${why} Mantengo *${cd.date || 'la fecha anterior'}*.`
+        };
+      }
+      cd.date = normalized;
+      session.date = normalized;
+      session.barrilesDateNeedsAvailabilityConfirm = Boolean(lead.tooSoon);
+      const aviso = lead.tooSoon
+        ? `Listo, corregí la entrega a *${normalized}*. Como es con poca anticipación, debemos *confirmar disponibilidad* 🙏`
+        : `Listo, corregí la entrega a *${normalized}* ✅`;
+      return { field: 'fecha', ack: aviso };
+    }
+  }
+
+  // --- Comuna (ya pedida si no estamos en comuna) ---
+  if (phaseIdx > BARRILES_PEDIDO_PHASES.indexOf('comuna')) {
+    const locationSearch = findLocationByFuzzyMatch(trimmed);
+    // Evitar pisar: un email o dirección larga no es cambio de comuna
+    const hasEmail = Boolean(parseEmailFromText(trimmed));
+    const looksAddr = looksLikeStreetAddress(trimmed) && /\d/.test(trimmed);
+    const looksComunaMsg = Boolean(locationSearch)
+      && !hasEmail
+      && !looksAddr
+      && (
+        hasCorrIntent
+        || /^(en\s+)?[A-Za-záéíóúÁÉÍÓÚñÑ\s]{3,40}$/.test(trimmed)
+      );
+    // Si fuzzy encontró comuna oficial (Las Condes, Providencia…), es corrección.
+    // Nombres de persona ("Ana Pérez") no matchean el catálogo de comunas.
+    if (looksComunaMsg && locationSearch) {
+      cd.location = locationSearch.name;
+      cd.locationData = locationSearch;
+      session.location = locationSearch.name;
+      const note = formatBarrilesShippingNote(locationSearch);
+      return { field: 'comuna', ack: `Listo, corregí la comuna.\n${note}` };
+    }
+  }
+
+  // --- Email (si ya pasamos esa fase) ---
+  if (phaseIdx > BARRILES_PEDIDO_PHASES.indexOf('email')) {
+    const email = parseEmailFromText(trimmed);
+    if (email && (hasCorrIntent || /^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(trimmed))) {
+      session.contact.email = email;
+      return { field: 'email', ack: `Listo, corregí el correo a *${email}* ✅` };
+    }
+  }
+
+  // --- Nombre (si ya pasamos esa fase y el mensaje parece persona, no fecha/comuna) ---
+  if (phaseIdx > BARRILES_PEDIDO_PHASES.indexOf('nombre')) {
+    if (!isPrimarilyDateMessage(trimmed) && !findLocationByFuzzyMatch(trimmed)) {
+      const before = `${session.contact?.firstName || ''}|${session.contact?.lastName || ''}`;
+      applyContactFromMessage(trimmed, session);
+      const c = session.contact || {};
+      const after = `${c.firstName || ''}|${c.lastName || ''}`;
+      if (
+        after !== before
+        && String(c.firstName || '').trim()
+        && String(c.lastName || '').trim()
+        && (hasCorrIntent || /^\s*[A-Za-záéíóúÁÉÍÓÚñÑ]+(\s+[A-Za-záéíóúÁÉÍÓÚñÑ]+)+\s*$/.test(trimmed))
+      ) {
+        return {
+          field: 'nombre',
+          ack: `Listo, corregí el nombre a *${c.firstName} ${c.lastName}* ✅`
+        };
+      }
+    }
+  }
+
+  return null;
+}
+
+/**
+ * buildBarrilesPedidoIntro: Aviso de pedido + primera pregunta (comuna o la que falte).
+ *
+ * @param {object} session
+ * @returns {string}
+ */
+export function buildBarrilesPedidoIntro(session) {
+  const phase = resolveBarrilesPedidoPhase(session);
+  session.barrilesPedidoPhase = phase;
+  if (phase === 'confirm') {
+    return 'Perfecto, ya tenemos lo necesario para armar tu pedido 🙂';
+  }
+  return `Perfecto, armemos tu *pedido* 🍹
+
+Te iré pidiendo los datos uno por uno.
+
+${askBarrilesPedidoPhase(phase, session)}`;
 }

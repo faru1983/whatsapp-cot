@@ -142,7 +142,18 @@ Ejemplo 4 (Múltiple pedido): {"analisis": "Pidió 2 mojitos y 1 mojito sabores.
 Ejemplo 5 (Avance): {"analisis": "Dijo que no quiere agregar más nada.", "productos": [], "dudas": [], "quiere_avanzar": true}
 
 IMPORTANTE: Si el usuario solo dice "seguimos", "listo", "solo estos" o similar, productos DEBE ser [] (nunca copies el carrito del mensaje anterior del bot).
-Si no pide nada o pide cosas que no existen, devuelve arrays vacíos.
+
+REGLA CRÍTICA DE ORTOGRAFÍA / NOMBRES INCOMPLETOS:
+- El cliente suele escribir mal, acortar o deformar el nombre. Si el sonido/escritura se parece CLARAMENTE a UN solo ítem del catálogo, mapéalo a ese nombre oficial en "productos" (quantity 1 si no indica otra).
+- Ejemplos de typos → nombre oficial:
+  * "ramazzoti", "ramazoti", "ramazotti", "mamazoti", "maracazoti" → "Ramazzotti Spritz"
+  * "margarita", "tequila margarita" → "Tequila Margarita"
+  * "monito", "mojto" → "Mojito"
+  * "aperol", "aperol spritz" → "Aperol Spritz"
+  * "sangria", "sangría" → "Sangría"
+- Si hay VARIOS candidatos igual de plausibles, usa "dudas" con esas opciones. Si NO se parece a ninguno (ej. "negroni", "daiquiri"), productos=[] y dudas=[].
+- Prefiere corregir un typo a declarar que no existe.
+
 REGLA CRÍTICA: Si el mensaje es SOLO cortesía ("gracias", "gracias por la información", "perfecto gracias") SIN nombrar cóctel, productos=[] y quiere_avanzar=false. NUNCA inventes un producto desde el ejemplo del bot.
 REGLA CRÍTICA: En los campos "name" y "opciones", debes usar EXACTAMENTE el nombre que aparece en el catálogo. Copia y pega letra por letra. Prohibido cambiar el orden de las palabras.
 Catálogo válido estricto:
@@ -258,7 +269,11 @@ Ejemplo 3: {"analisis":"Pidió 2 10L mojito y pisco sour clásico 10L.","product
 Ejemplo 4: {"analisis":"Pidió pisco sour clásico 10L y solicitó mojito sabores 10L.","productos":[{"name":"Pisco Sour","quantity":1,"litrage":"10L"}],"dudas":[{"mencionado":"mojito sabores 10L","opciones":["Mojito Maracuyá","Mojito Frambuesa","Mojito Mango"]}],"quiere_avanzar":false}
 Ejemplo 5: {"analisis":"Dijo que solo esos.","productos":[],"dudas":[],"quiere_avanzar":true}
 
-Si no pide nada o pide cosas que no existen, devuelve arrays vacíos.
+REGLA CRÍTICA DE ORTOGRAFÍA / NOMBRES INCOMPLETOS:
+- Corrige typos y nombres cortos al ítem MÁS CERCANO del catálogo cuando haya un único match claro.
+- Ejemplos: "ramazzoti"/"ramazoti"/"mamazoti" → "Ramazzotti Spritz"; "margarita" → "Tequila Margarita"; "monito" → "Mojito"; "aperol" → "Aperol Spritz".
+- Si no se parece a ninguno (ej. "negroni"), productos=[] y dudas=[]. Prefiere corregir typo a decir que no existe.
+
 REGLA CRÍTICA: Si el mensaje es SOLO cortesía o acuse de recibo ("gracias", "gracias por la información", "perfecto", "ok gracias", "entendí") SIN nombrar cóctel ni litraje, productos=[] y quiere_avanzar=false. NUNCA inventes un cóctel desde el ejemplo del bot.
 REGLA CRÍTICA: En "name" y "opciones" usa EXACTAMENTE el nombre del catálogo. Copia y pega letra por letra.
 Catálogo válido estricto:

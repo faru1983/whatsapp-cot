@@ -7,6 +7,7 @@ import {
   getMocktailFamilyOptions,
   getAllMocktailNames
 } from '../logic/utils.js';
+import { OrderBuilder } from '../logic/order-builder.js';
 import { formatMenuBlock, MENU_WRITE_CTA } from '../logic/flow-rails.js';
 
 // ==============================================================================
@@ -549,38 +550,108 @@ _(ej: email ana@nuevo.com)_`
 }
 
 /**
- * getBarrilesPurchaseSummary: Confirmación liviana antes de crear la compra web.
- * Contacto + entrega (sin re-listar todo el pedido ya aprobado).
+ * titleCaseWords: Capitaliza cada palabra (para mostrar nombre en el resumen).
+ *
+ * @param {string} text
+ * @returns {string}
+ */
+function titleCaseWords(text) {
+  return String(text || '')
+    .trim()
+    .split(/\s+/)
+    .filter(Boolean)
+    .map((w) => w.charAt(0).toUpperCase() + w.slice(1).toLowerCase())
+    .join(' ');
+}
+
+/**
+ * getBarrilesPurchaseSummary: Carrito final del pedido antes de crear la compra web.
+ * Datos de contacto/entrega + productos + costos (subtotal, despacho, total).
  *
  * @param {object} session
- * @returns {string[]}
+ * @returns {string[]} [resumen carrito, pregunta OK / modificar]
  */
 export function getBarrilesPurchaseSummary(session) {
   const c = session.contact || {};
   const cd = session.orderBuilder?.clientData || {};
-  const fullName = `${c.firstName || ''} ${c.lastName || ''}`.trim() || '—';
+  const products = session.orderBuilder?.products || {};
+  const extras = session.orderBuilder?.extras || {};
+  const fullName = titleCaseWords(`${c.firstName || ''} ${c.lastName || ''}`.trim()) || '—';
   const phone = c.phone || session.clientPhoneE164 || '';
+  const locData = cd.locationData;
+  const comuna = cd.location || session.location || '—';
+  const fecha = cd.date || session.date || '—';
 
-  const lines = [
-    `📋 *Datos para tu compra:*`,
-    ``,
-    `👤 *${fullName}*`,
-    `✉️ ${c.email || '—'}`
-  ];
+  // Recalculamos totales con OrderBuilder (misma fuente que la cotización)
+  const orderBuilder = new OrderBuilder('desechable', preciosData);
+  orderBuilder.products = products;
+  orderBuilder.extras = extras;
+  const deliveryCost = locData?.isRM && locData?.deliveryCost?.desechable != null
+    ? Number(locData.deliveryCost.desechable)
+    : null;
+  const quote = orderBuilder.calculateQuote(deliveryCost);
+  if (session.orderBuilder) session.orderBuilder.quote = quote;
 
-  if (phone) lines.push(`📱 ${phone}`);
-  lines.push(
-    `📅 ${cd.date || session.date || '—'}`,
-    `📍 ${cd.location || session.location || '—'}`,
-    `🏠 ${c.address || '—'}`
-  );
+  const email = c.email || '—';
+  const address = String(c.address || '').trim() || '—';
+  const whoLine = phone ? `*${fullName}*, ${phone}` : `*${fullName}*`;
+  const addressLine = address !== '—' ? `${address}, ${comuna}` : comuna;
+
+  let text = `🛒 *Resumen de tu pedido*\n`;
+  text += `====================\n\n`;
+
+  text += `👤 *Datos:*\n`;
+  text += `${whoLine}\n`;
+  text += `_${email}_\n`;
+  text += `Entrega: *${fecha}*\n`;
+  text += `${addressLine}\n`;
+
+  text += `\n--------------------\n\n`;
+
+  text += `🍹 *Producto*\n`;
+  if (quote.details?.length) {
+    for (const detail of quote.details) {
+      const itemLabel = detail.isExtra
+        ? `${detail.quantity}x ${detail.name}`
+        : `${detail.quantity}x ${detail.name} ${detail.litrage || '5L'}`;
+      text += `- ${itemLabel}: *${formatPrice(detail.lineTotal)}*\n`;
+    }
+  } else {
+    text += `- _(sin cócteles en el carrito)_\n`;
+  }
+
+  if (quote.totalLiters > 0) {
+    text += `\n_≈ ${quote.totalLiters}L · ${quote.totalDrinks} tragos de 200ml_\n`;
+  }
+
+  // Totales como parte del pedido (sin título "Costos")
+  text += `\n--------------------\n`;
+  text += `Subtotal: ${formatPrice(quote.subtotal)}\n`;
+  if (deliveryCost != null && deliveryCost > 0) {
+    text += `Despacho: ${formatPrice(deliveryCost)}\n`;
+    text += `====================\n`;
+    text += `*TOTAL: ${formatPrice(quote.total)}*`;
+  } else if (locData && !locData.isRM) {
+    text += `Despacho: _por confirmar_ (Blue Express)\n`;
+    text += `====================\n`;
+    text += `*TOTAL: ${formatPrice(quote.subtotal)}*\n`;
+    text += `_(+ despacho a confirmar)_`;
+  } else {
+    text += `Despacho: _por confirmar_\n`;
+    text += `====================\n`;
+    text += `*TOTAL: ${formatPrice(quote.subtotal)}*`;
+  }
+
+  if (session.barrilesDateNeedsAvailabilityConfirm) {
+    text += `\n\n⚠️ _Fecha con poca anticipación: confirmaremos disponibilidad._`;
+  }
 
   return [
-    lines.join('\n'),
-    `*¿Todo bien?*
+    text.trim(),
+    `*¿Todo bien con tu pedido?*
 
-Escribe *OK* para crear tu compra, o corrige el dato que falte.
-_(ej: dirección Los Alerces 99)_`
+Escribe *OK* para generarlo, o dime qué quieres *modificar*.
+_(ej: cambia la fecha, agrega 1 sangría, la comuna es Providencia)_`
   ];
 }
 

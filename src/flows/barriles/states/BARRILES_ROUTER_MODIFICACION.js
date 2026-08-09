@@ -5,6 +5,11 @@ import { defineState } from '../../../logic/compile-state.js';
 import { resolveDecisionIntent } from '../../../logic/decision-intent.js';
 import { rulesMenuUnoDos } from '../../../logic/keyword-intent.js';
 import { withAssistantFooter, formatMenuBlock } from '../../../logic/flow-rails.js';
+import {
+  resolveBarrilesPedidoPhase,
+  buildBarrilesPedidoIntro
+} from '../../../logic/cot-barriles-contact.js';
+import { getBarrilesPurchaseSummary } from '../../../views/templates.js';
 
 const MENU_BLOCK = formatMenuBlock(['Cambiar cócteles', 'Actualizar datos']);
 
@@ -44,7 +49,7 @@ ${MENU_BLOCK}`,
       keywordRules: rulesMenuUnoDos({ labelUno: 'PRODUCTOS', labelDos: 'DATOS' }),
       labelHints: {
         PRODUCTOS: 'Opción 1 / cambiar cócteles del pedido.',
-        DATOS: 'Opción 2 / cambiar fecha o comuna.'
+        DATOS: 'Opción 2 / cambiar datos de entrega o contacto del pedido.'
       }
     });
 
@@ -61,16 +66,20 @@ _(ej: agrega 1 mojito o elimina 1 aperol)_`;
     }
 
     if (intent === 'DATOS') {
-      // No borramos los datos: el cliente puede corregir solo uno (fecha o comuna)
+      // Si ya tiene todo → resumen para corregir con OK; si falta algo → checkout por fases
+      const phase = resolveBarrilesPedidoPhase(session);
+      if (phase === 'confirm') {
+        return {
+          success: true,
+          nextState: 'BARRILES_CONFIRMAR_COMPRA',
+          customReplies: getBarrilesPurchaseSummary(session)
+        };
+      }
+      session.barrilesPedidoPhase = phase;
       return {
         success: true,
         nextState: 'BARRILES_RECOGIDA_DATOS',
-        customReply: `Claro. Hoy tienes:
-📅 Fecha: *${session.orderBuilder.clientData?.date || 'Por confirmar'}*
-📍 Comuna: *${session.orderBuilder.clientData?.location || 'Por confirmar'}*
-
-*¿Qué dato quieres actualizar?*
-_(ej: es en Ñuñoa o para el viernes)_`
+        customReply: buildBarrilesPedidoIntro(session)
       };
     }
 
