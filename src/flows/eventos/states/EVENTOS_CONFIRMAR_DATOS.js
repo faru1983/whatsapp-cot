@@ -10,6 +10,7 @@ import { rulesConfirmarOCorregirDatos } from '../../../logic/keyword-intent.js';
 import { applyEventDataFromMessage } from '../../../logic/eventos-helpers.js';
 import { img } from '../../../logic/media.js';
 import { withAssistantFooter, formatMenuBlock } from '../../../logic/flow-rails.js';
+import { eventosIntroMenuQuestion } from '../../../logic/eventos-intro.js';
 
 const MENU_BLOCK = formatMenuBlock(['Confirmar', 'Corregir']);
 
@@ -20,12 +21,11 @@ ${MENU_BLOCK}
 _(ej: son 80 invitados)_`);
 
 const AI_PROMPT = `[SISTEMA - ESTADO: CONFIRMAR DATOS DEL EVENTO]
-El cliente ya tiene al menos la cantidad de invitados y recibió un resumen (celebración/fecha/comuna pueden decir "Por confirmar").
-Debe escribir *1* Confirmar, *2* Corregir, o el dato nuevo (ej. "son 80 invitados", "es en Providencia").
-1. Responde dudas breves sin inventar precios.
-2. Si corrige un dato, confirma el cambio y vuelve a pedir confirmación.
-3. NUNCA pases a elegir formato Dispensador/Muro hasta que confirme (opción 1 / ok).
-4. No insistas en datos opcionales que dejó en "Por confirmar".`;
+Paso de compatibilidad. El cliente tiene invitados (y quizá formato ya elegido).
+1. Si corrige un dato (invitados, comuna, fecha), confirma y vuelve a pedir OK.
+2. Si confirma y YA tiene formato (Dispensador/Muro), sigue al menú cotizar/duda — NO vuelvas a pedir formato.
+3. Si confirma y AÚN NO tiene formato, ahí sí ofrece Dispensador/Muro.
+4. No inventes precios.`;
 
 export const EVENTOS_CONFIRMAR_DATOS = defineState({
   id: 'EVENTOS_CONFIRMAR_DATOS',
@@ -69,8 +69,21 @@ export const EVENTOS_CONFIRMAR_DATOS = defineState({
     });
 
     if (intent === 'CONFIRMAR') {
+      // Red de seguridad: si ya eligió formato (happy path), no reiniciar a ELECCION_FORMATO
+      if (session.eventoFormato) {
+        return {
+          success: true,
+          nextState: 'EVENTOS_INTRO_MENU',
+          customReplies: [
+            `Perfecto ✅ Seguimos con tu *${session.eventoFormato}*.`,
+            eventosIntroMenuQuestion()
+          ],
+          flowProgress: true
+        };
+      }
+
       const instalacionMuro = formatPrice(preciosData.instalacion_muro || 50000);
-      // Una sola burbuja: foto + caption con recomendación y menú 1️⃣/2️⃣
+      // Legacy: datos antes que formato → menú Dispensador/Muro
       const caption = getEventFormatRecommendation(session.guests, instalacionMuro);
       return {
         success: true,

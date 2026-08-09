@@ -58,7 +58,8 @@ import {
   stripDeliveryQuestionForCart,
   matchCocktailNamesInText,
   registerEventosProductOrderMiss,
-  formatEventosUnmatchedFlavorNote
+  formatEventosUnmatchedFlavorNote,
+  tryApplyEventosIntroPriorCorrection
 } from '../../../logic/eventos-helpers.js';
 import { withAssistantFooter, formatMenuBlock } from '../../../logic/flow-rails.js';
 import { matchesMenuOption } from '../../../logic/keyword-intent.js';
@@ -68,11 +69,12 @@ const ASK_OK_AFTER_CART = `*¿Todo bien con el pedido?*
 _(ej: escribe *ok* para el resumen, o "20L Mojito" / *quita el aperol*)_`;
 
 const AI_PROMPT = `[SISTEMA - ESTADO: PREGUNTAS SOBRE EL MENÚ O LOGÍSTICA DE EVENTOS]
-El cliente está revisando la recomendación para su evento pero tiene dudas en lugar de elegir los cócteles.
+El cliente está armando el pedido de cócteles (Dispensador o Muro).
 1. Responde su duda de forma breve y amigable.
 2. REGLA DE LOGÍSTICA: La instalación y logística de eventos la coordina el equipo, y para el Dispensador es gratis, y para el Muro cuesta $50.000. NUNCA inventes tarifas de envío adicionales.
 3. NUNCA cotices ni calcules precios finales todavía.
-4. Si aún no eligió cócteles: pide sabor + litraje. Solo si ya tiene pedido, sugiere escribir *ok* para el resumen.`;
+4. Si corrige invitados o tipo (ej. "son 80 invitados") sin pedir cócteles, confirma el cambio y vuelve a pedir sabor + litraje o *ok*.
+5. Si aún no eligió cócteles: pide sabor + litraje. Solo si ya tiene pedido, sugiere escribir *ok* para el resumen.`;
 
 /**
  * shortQuestionForSession: Sin carrito → pedir cócteles; con carrito → guiar con *ok*.
@@ -217,6 +219,24 @@ export const EVENTOS_ELECCION_MENU = defineState({
 
     const catalogNames = Object.keys(preciosData.cocteles || {});
     const defaultLitrage = formatKey === 'muro' ? '10L' : '5L';
+
+    // Corrección de invitados/tipo sin pedido de cócteles (no roba "10L mojito"
+    // ni el menú pendiente "¿son N barriles?")
+    if (
+      !session.pendingBarrelQuantity
+      && !hasDrinkSelection(messageText)
+      && !hasProductOrderSignal(messageText)
+    ) {
+      const priorFix = tryApplyEventosIntroPriorCorrection(messageText, session);
+      if (priorFix) {
+        return {
+          success: true,
+          nextState: 'EVENTOS_ELECCION_MENU',
+          customReply: `${priorFix.ack}\n\n${shortQuestionForSession(session)}`,
+          flowProgress: true
+        };
+      }
+    }
 
     // Respuesta al menú "¿son N barriles?" que hicimos en el turno anterior
     const pendingBarrels = session.pendingBarrelQuantity;

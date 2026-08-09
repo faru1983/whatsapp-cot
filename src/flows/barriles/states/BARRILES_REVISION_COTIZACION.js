@@ -7,8 +7,9 @@ import { preciosData } from '../../../logic/utils.js';
 import { OrderBuilder } from '../../../logic/order-builder.js';
 import { resolveDecisionIntent } from '../../../logic/decision-intent.js';
 import { rulesConfirmarOModificar } from '../../../logic/keyword-intent.js';
-import { getQuotationTemplate, getBarrilesContactIntroAsk } from '../../../views/templates.js';
+import { getQuotationTemplate } from '../../../views/templates.js';
 import { withAssistantFooter, formatMenuBlock } from '../../../logic/flow-rails.js';
+import { buildBarrilesPedidoIntro } from '../../../logic/cot-barriles-contact.js';
 
 const MENU_BLOCK = formatMenuBlock(['Generar compra', 'Modificar']);
 
@@ -61,12 +62,13 @@ _(ej: 1 mojito y 1 sangría)_`
       }
     });
 
-    // Cliente quiere avanzar a la compra web → pedimos datos de contacto
+    // Cliente quiere avanzar → checkout uno a uno (mismo happy path que tras el carrito)
     if (intent === 'CONFIRMAR') {
       return {
         success: true,
-        nextState: 'BARRILES_DATOS_CONTACTO',
-        customReply: getBarrilesContactIntroAsk()
+        nextState: 'BARRILES_RECOGIDA_DATOS',
+        customReply: buildBarrilesPedidoIntro(session),
+        flowProgress: true
       };
     }
 

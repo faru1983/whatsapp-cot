@@ -208,6 +208,19 @@ console.log('\n-- replyTiming (.env REPLY_DELAY_*) --');
   assert(/instalaci[oó]n del \*muro\*/i.test(bMuro), `fase B muro recuerda instalación con costo`);
 }
 
+// Corrección mid-flow intro Eventos (invitados / tipo) sin romper menú 1️⃣/2️⃣
+{
+  const { tryApplyEventosIntroPriorCorrection } = await import('../src/logic/eventos-helpers.js');
+  const s = { guests: 50, celebrationType: 'Cumpleaños' };
+  const g = tryApplyEventosIntroPriorCorrection('son 80 invitados', s);
+  assert(g?.field === 'invitados' && s.guests === 80, `corrige invitados en intro`);
+  assert(/80/.test(g.ack), `ack menciona 80`);
+  assert(tryApplyEventosIntroPriorCorrection('1', { guests: 80 }) == null, `menú 1 no es corrección`);
+  assert(tryApplyEventosIntroPriorCorrection('ok', { guests: 80 }) == null, `ok no es corrección`);
+  const t = tryApplyEventosIntroPriorCorrection('es un matrimonio', { guests: 80, celebrationType: 'Cumpleaños' });
+  assert(t?.field === 'celebracion' && t.ack.includes('Matrimonio'), `corrige tipo a Matrimonio`);
+}
+
 // Comunas: "no" NUNCA debe matchear Ñuñoa (substring "no" ⊂ "nunoa")
 const { findLocationByFuzzyMatch, parseDate, isValidFreeformLocationCapture } = await import('../src/logic/utils.js');
 assert(findLocationByFuzzyMatch('no') == null, `"no" no es comuna`);
@@ -1737,6 +1750,11 @@ try {
       input: '50',
       expectState: 'EVENTOS_INTRO_MENU',
       expectIncludes: ['50', 'cotización', 'duda', 'Para orientarte', 'Rendimientos aproximados', 'Recuerda que el pedido mínimo']
+    },
+    {
+      input: 'son 80 invitados',
+      expectState: 'EVENTOS_INTRO_MENU',
+      expectIncludes: ['80', 'corregí', 'Para orientarte', 'cotización']
     }
   ]);
 
@@ -2487,6 +2505,40 @@ try {
     const r4 = await st.validateAndProcess('10L', session);
     const t4 = replyToText(r4.customReplies || r4.customReply);
     assert(/10L Sangr[ií]a/.test(t4), `tras elegir tamaño, agrega Sangría 10L`);
+  }
+
+  console.log('\n-- Legacy safety: CONFIRMAR_DATOS con formato → INTRO (no reinicia formato) --');
+  resetSession(SESSION_ID);
+  {
+    const session = getSession(SESSION_ID);
+    session.currentState = 'EVENTOS_CONFIRMAR_DATOS';
+    session.userIntent = 'EVENTOS';
+    session.eventoFormato = 'Dispensador Portátil';
+    session.guests = 50;
+    session.celebrationType = 'Cumpleaños';
+    const st = statesMap.EVENTOS_CONFIRMAR_DATOS;
+    const r = await st.validateAndProcess('ok', session);
+    assert(r.nextState === 'EVENTOS_INTRO_MENU', `legacy confirmar con formato → INTRO_MENU`);
+    assert(/Dispensador/i.test(replyToText(r.customReplies || r.customReply)), `menciona formato ya elegido`);
+    assert(!/eventos_ambas/i.test(replyToText(r.customReplies || r.customReply)), `no vuelve a pedir Dispensador/Muro`);
+  }
+
+  console.log('\n-- Legacy safety: REVISION Barriles → RECOGIDA_DATOS (pedido uno a uno) --');
+  resetSession(SESSION_ID);
+  {
+    const session = getSession(SESSION_ID);
+    session.currentState = 'BARRILES_REVISION_COTIZACION';
+    session.userIntent = 'BARRILES';
+    session.orderBuilder = {
+      type: 'desechable',
+      products: { Mojito: 1 },
+      extras: {},
+      clientData: { date: '15/08/2026', location: 'Providencia', locationData: { name: 'Providencia', isRM: true } }
+    };
+    const st = statesMap.BARRILES_REVISION_COTIZACION;
+    const r = await st.validateAndProcess('1', session);
+    assert(r.nextState === 'BARRILES_RECOGIDA_DATOS', `revisión confirmar → checkout pedido`);
+    assert(/pedido|comuna|nombre|correo|direcci/i.test(String(r.customReply || '')), `pide dato del pedido`);
   }
 
   console.log('\n-- Eventos bot ajeno no extrae comuna falsa --');

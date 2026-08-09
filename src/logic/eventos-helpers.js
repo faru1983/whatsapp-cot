@@ -1098,6 +1098,74 @@ export function applyEventDataFromMessage(messageText, session) {
 }
 
 /**
+ * looksLikeEventosIntroCorrectionIntent: ¿Quiere corregir tipo o invitados?
+ * Misma familia que contacto ("me equivoqué", "son 80", "es un matrimonio").
+ *
+ * @param {string} text
+ * @returns {boolean}
+ */
+export function looksLikeEventosIntroCorrectionIntent(text) {
+  return /\b(me\s+equivoq|equivocad[oa]|perd[oó]n|disculp[ae]?|mejor\b|cambia(r|mos)?|correg(ir|e|imos)?|no\s+era|en\s+realidad|quise\s+decir|actualiz(a|ar)|son\s+\d+|ser[aá]n\s+\d+|van\s+a\s+ser\s+\d+|es\s+(un|una)\b)\b/i.test(
+    String(text || '')
+  );
+}
+
+/**
+ * tryApplyEventosIntroPriorCorrection: Corrige invitados o tipo ya anotados
+ * (p. ej. en INTRO_MENU / ELECCION_MENU) sin robar el menú 1️⃣/2️⃣.
+ *
+ * @param {string} messageText
+ * @param {object} session
+ * @returns {{ field: 'invitados'|'celebracion', ack: string }|null}
+ */
+export function tryApplyEventosIntroPriorCorrection(messageText, session) {
+  const trimmed = String(messageText || '').trim();
+  if (!trimmed) return null;
+
+  // No interceptar elección de menú ni confirmaciones cortas
+  if (/^(1️⃣|2️⃣|1|2)$/.test(trimmed)) return null;
+  if (/^(ok|dale|listo|si|sí|no)$/i.test(trimmed)) return null;
+
+  const corrIntent = looksLikeEventosIntroCorrectionIntent(trimmed);
+
+  // --- Invitados: "80 invitados", "son 80", "me equivoqué, serán 100" ---
+  const guests = extractGuestsFromMessage(trimmed);
+  const explicitGuests = /\b\d+\s*(personas|invitados|pax|inv)\b/i.test(trimmed)
+    || /\bson\s+\d+\b/i.test(trimmed)
+    || /\b(ser[aá]n|van\s+a\s+ser)\s+\d+\b/i.test(trimmed);
+  if (guests != null && guests > 0 && (explicitGuests || corrIntent)) {
+    const before = Number(session.guests) || null;
+    if (before !== guests) {
+      session.guests = guests;
+      return {
+        field: 'invitados',
+        ack: `Listo, corregí a *${guests}* invitados ✅`
+      };
+    }
+  }
+
+  // --- Tipo de evento: solo con señal clara (no “evento” suelto del parser genérico) ---
+  const celebration = parseCelebrationType(trimmed);
+  const typeOnly = /^(cumplea[nñ]os|matrimonio|bautizo|empresa|corporativ\w*|baby\s*shower|despedida)$/i.test(trimmed);
+  const saysEsUn = /\bes\s+(un|una)\s+/i.test(trimmed);
+  if (
+    celebration
+    && celebration !== session.celebrationType
+    && celebration !== 'Celebración'
+    && (corrIntent || saysEsUn || typeOnly)
+  ) {
+    session.celebrationType = celebration;
+    session.eventosCelebrationSkipped = false;
+    return {
+      field: 'celebracion',
+      ack: `Listo, corregí el tipo a *${celebration}* ✅`
+    };
+  }
+
+  return null;
+}
+
+/**
  * getEventFormatKey: "Muro de Coctelería" → "muro"; otro → "dispensador".
  *
  * @param {string} eventoFormato
