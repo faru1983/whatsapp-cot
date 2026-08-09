@@ -1176,11 +1176,11 @@ export function formatEventCartSummary(products, formatKey) {
 }
 
 /**
- * formatEventCartTotalsLine: Subtotal; debajo litros + cócteles (+ por persona si hay invitados).
- * Usa totalDrinks de OrderBuilder (tabla rendimientos_barriles / 5 por litro).
+ * formatEventCartTotalsLine: Subtotal; debajo resumen corto de litros/cócteles/por persona.
+ * El mínimo del formato ya se dijo antes: no se repite aquí.
  *
  * @param {{ subtotal: number, totalLiters?: number, totalDrinks?: number }} quote
- * @param {{ minLiters?: number, guests?: number|null }} [opts]
+ * @param {{ guests?: number|null }} [opts]
  * @returns {string}
  */
 export function formatEventCartTotalsLine(quote, opts = {}) {
@@ -1189,19 +1189,19 @@ export function formatEventCartTotalsLine(quote, opts = {}) {
   const approxDrinks = Number.isFinite(drinks) && drinks > 0
     ? drinks
     : liters * 5;
-  const minPart = opts.minLiters != null ? ` (mín. ${opts.minLiters}L)` : '';
 
-  let litersLine = `*Litros:* ${liters}L${minPart} | ≈ *${approxDrinks}* cócteles`;
+  // Una sola línea en cursiva: fácil de leer en el móvil
+  let litersLine = `_${liters}L | ${approxDrinks} cócteles`;
 
-  // Tragos por persona cuando ya tenemos invitados (fase intro)
   const guests = Number(opts.guests);
   if (guests > 0 && approxDrinks > 0) {
     const perPerson = approxDrinks / guests;
     const perPersonStr = Number.isInteger(perPerson)
       ? String(perPerson)
       : perPerson.toFixed(1);
-    litersLine += ` (≈ *${perPersonStr}* por persona)`;
+    litersLine += ` | ${perPersonStr} x persona`;
   }
+  litersLine += `_`;
 
   return `*Subtotal:* ${formatPrice(quote?.subtotal || 0)}
 ${litersLine}`;

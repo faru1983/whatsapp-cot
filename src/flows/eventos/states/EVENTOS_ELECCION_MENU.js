@@ -162,7 +162,7 @@ function applyProductsToCart(session, products, opts = {}) {
 }
 
 /**
- * buildCartReply: Arma el mensaje de carrito (lista + subtotal + qué sigue).
+ * buildCartReply: Arma el carrito (burbuja 1) + pregunta de confirmación (burbuja 2).
  * Lo comparten todas las ramas que agregan cócteles, para no repetir el formato.
  *
  * @param {object} params
@@ -173,7 +173,7 @@ function applyProductsToCart(session, products, opts = {}) {
  * @param {Array<{name: string, litrage: string}>} [params.invalidLitrages] - Líneas que no se pudieron agregar
  * @param {string[]} [params.allowedLitrages] - Tamaños válidos, para explicar los rechazos
  * @param {string} [params.unmatchedNote] - Aviso de sabores fuera de carta
- * @returns {{ reply: string, totalLiters: number }}
+ * @returns {{ reply: string, followUp: string, totalLiters: number }}
  */
 function buildCartReply({ session, formatKey, minLiters, header, invalidLitrages = [], allowedLitrages = [], unmatchedNote = '' }) {
   const orderBuilder = new OrderBuilder(formatKey, preciosData);
@@ -181,9 +181,10 @@ function buildCartReply({ session, formatKey, minLiters, header, invalidLitrages
   const quote = orderBuilder.calculateQuote();
   const totalLiters = orderBuilder.getTotalLiters();
 
+  // Burbuja 1: lista + subtotal + litros (sin la pregunta)
   let reply = `${header}\n\n`;
   reply += formatEventCartSummary(session.orderBuilder.products, formatKey);
-  reply += `\n${formatEventCartTotalsLine(quote, { minLiters, guests: session.guests })}\n`;
+  reply += `\n${formatEventCartTotalsLine(quote, { guests: session.guests })}\n`;
 
   if (invalidLitrages.length > 0) {
     reply += `\n⚠️ No pude agregar:\n`;
@@ -194,11 +195,12 @@ function buildCartReply({ session, formatKey, minLiters, header, invalidLitrages
 
   if (unmatchedNote) reply += unmatchedNote;
 
-  reply += totalLiters >= minLiters
-    ? `\n${ASK_OK_AFTER_CART} 🍸`
-    : `\nAún faltan litros para el mínimo (*${minLiters}L*). ¿Qué más agregamos? 🍸`;
+  // Burbuja 2: confirmar *ok* o pedir más litros si falta el mínimo
+  const followUp = totalLiters >= minLiters
+    ? `${ASK_OK_AFTER_CART} 🍸`
+    : `Aún faltan litros para el mínimo (*${minLiters}L*). ¿Qué más agregamos? 🍸`;
 
-  return { reply, totalLiters };
+  return { reply, followUp, totalLiters };
 }
 
 export const EVENTOS_ELECCION_MENU = defineState({
@@ -235,10 +237,14 @@ export const EVENTOS_ELECCION_MENU = defineState({
         );
         if (parsedProducts.length > 0) {
           applyProductsToCart(session, parsedProducts, { messageText: `${pendingBarrels.quantity} barriles` });
-          const { reply } = buildCartReply({
+          const { reply, followUp } = buildCartReply({
             session, formatKey, minLiters, header: `🍹 Listo, lo anoté así:`
           });
-          return { success: true, nextState: 'EVENTOS_ELECCION_MENU', customReply: reply };
+          return {
+            success: true,
+            nextState: 'EVENTOS_ELECCION_MENU',
+            customReplies: [reply, followUp]
+          };
         }
       }
 
@@ -321,10 +327,14 @@ _(ej: Mojito ${allowedLitrages[0]})_`
       if (parsedProducts.length > 0) {
         session.pendingEventCocktails = null;
         applyProductsToCart(session, parsedProducts, { messageText });
-        const { reply } = buildCartReply({
+        const { reply, followUp } = buildCartReply({
           session, formatKey, minLiters, header: `🍹 Listo, anoté con *${litrageOnly}*:`
         });
-        return { success: true, nextState: 'EVENTOS_ELECCION_MENU', customReply: reply };
+        return {
+          success: true,
+          nextState: 'EVENTOS_ELECCION_MENU',
+          customReplies: [reply, followUp]
+        };
       }
       if (invalidLitrages.length > 0) {
         return {
@@ -396,7 +406,7 @@ _(ej: quita el mojito o 5L Aperol)_`
       if (litrage && newQty <= 0) reply += ` (${litrage})`;
       reply += `. Ahora tu pedido incluye:\n\n`;
       reply += formatEventCartSummary(session.orderBuilder.products, formatKey) || '_Vacío_\n';
-      reply += `\n${formatEventCartTotalsLine(quote, { minLiters, guests: session.guests })}\n\n`;
+      reply += `\n${formatEventCartTotalsLine(quote, { guests: session.guests })}\n\n`;
       if (Object.keys(session.orderBuilder.products).length === 0) {
         reply += ASK_COCKTAILS;
       } else if (totalLiters >= minLiters) {
@@ -646,17 +656,17 @@ _(ej: 5L Mojito)_ 🍸`;
         ? `✅ Listo, actualicé tu pedido:`
         : `🍹 Te confirmo los cócteles seleccionados:`;
       const unmatchedNote = formatEventosUnmatchedFlavorNote(findUnmatchedFlavorSegments(messageText));
-      const { reply } = buildCartReply({
+      const { reply, followUp } = buildCartReply({
         session, formatKey, minLiters, header, invalidLitrages, allowedLitrages, unmatchedNote
       });
-      // Multi-intent: cócteles + duda de despacho → carrito + cobertura
+      // Multi-intent: cócteles + duda de despacho → carrito + cobertura (en la 1ª burbuja)
       const withDispatch = hasDispatchQ
         ? `${reply}\n\n${REPLY_DISPATCH_SIDEBAR_EVENTOS}`
         : reply;
       return {
         success: true,
         nextState: 'EVENTOS_ELECCION_MENU',
-        customReply: withDispatch,
+        customReplies: [withDispatch, followUp],
         flowProgress: true
       };
     }

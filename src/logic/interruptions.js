@@ -18,6 +18,7 @@ import {
   isOnlyBrowsing,
   wantsInstagramOrSocial
 } from './utils.js';
+import { eventFormatFromPrice } from './eventos-intro.js';
 
 // ==============================================================================
 // 1. SALUDO / RUIDO / ENTUSIASMO (no es decisión de menú)
@@ -288,7 +289,9 @@ Puedes ver la carta en https://www.cocktailsontap.cl/eventos — si seguimos por
       ? 'Si prefieres continuar por aquí, primero elige el formato.'
       : 'Si prefieres continuar por aquí, te oriento con el formato que ya elegiste.';
 
-    return `Los precios dependen del servicio (*Dispensador* o *Muro*): hay barriles desde *5L* / *10L* según el formato que elijas.
+    return `Los precios dependen del servicio (*Dispensador* o *Muro*):
+• *Dispensador Portátil* desde *${formatPrice(eventFormatFromPrice('dispensador'))}* (pedido mín. 10L)
+• *Muro de Coctelería* desde *${formatPrice(eventFormatFromPrice('muro'))}* (pedido mín. 30L)
 Puedes ver rangos en https://www.cocktailsontap.cl/eventos
 
 ${continueHint}`;

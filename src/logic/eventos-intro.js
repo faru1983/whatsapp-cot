@@ -17,19 +17,23 @@ export const FORMATO_DISPENSADOR = 'Dispensador Portátil';
 export const FORMATO_MURO = 'Muro de Coctelería';
 
 /**
- * Precio de marketing “servicio desde” (pedido mín. del formato).
- * No usamos el 5L/mocktail más barato del JSON: el copy comercial es $239.990.
+ * Precios de marketing “servicio desde” (pedido mínimo comercial del formato).
+ * Dispensador: desde $109.990 · Muro: desde $239.990.
+ * No usamos el 5L/mocktail más barato del JSON.
  */
-export const EVENT_SERVICE_FROM_PRICE = 239990;
+export const EVENT_DISPENSADOR_FROM_PRICE = 109990;
+export const EVENT_MURO_FROM_PRICE = 239990;
+/** Alias legacy (precio “desde” del Muro). Preferir eventFormatFromPrice(formatKey). */
+export const EVENT_SERVICE_FROM_PRICE = EVENT_MURO_FROM_PRICE;
 
 /**
- * eventFormatFromPrice: Precio “servicio desde” del pitch de entrada.
+ * eventFormatFromPrice: Precio “servicio desde” del pitch de entrada por formato.
  *
- * @param {'dispensador'|'muro'} [_formatKey] - Reservado por si un día difieren
+ * @param {'dispensador'|'muro'} [formatKey='dispensador']
  * @returns {number} Precio en pesos
  */
-export function eventFormatFromPrice(_formatKey) {
-  return EVENT_SERVICE_FROM_PRICE;
+export function eventFormatFromPrice(formatKey = 'dispensador') {
+  return formatKey === 'muro' ? EVENT_MURO_FROM_PRICE : EVENT_DISPENSADOR_FROM_PRICE;
 }
 
 /** Alias legacy del mismo precio de marketing. */
@@ -133,7 +137,8 @@ Para orientarte, ${askCelebrationCopy()}`;
 }
 
 /**
- * buildFormatPhaseBText: Caption fase B (incluido + pedir invitados).
+ * buildFormatPhaseBText: Texto fase B (incluido + pedir invitados).
+ * Integra el ack del tipo con el recordatorio de instalación (sin “Perfecto” + “¡Genial!”).
  *
  * @param {'dispensador'|'muro'} formatKey
  * @param {object} [session] - Para ack del tipo de evento
@@ -141,19 +146,22 @@ Para orientarte, ${askCelebrationCopy()}`;
  */
 export function buildFormatPhaseBText(formatKey, session = null) {
   const isMuro = formatKey === 'muro';
-  const nombre = isMuro ? 'Muro de Coctelería' : 'Dispensador Portátil';
-  const installLine = isMuro
-    ? `¡Genial! 🍸 Nuestro *${nombre}* se instala con un costo de *${instalacionMuroFormatted()}* y pagas por los cócteles que elijas.`
-    : `¡Genial! 🍸 Nuestro *${nombre}* se instala *gratis* y solo pagas por los cócteles que elijas.`;
+  const nombreCorto = isMuro ? 'muro' : 'dispensador';
+  // En fase A ya dijimos gratis / costo: aquí solo recordamos, en una sola frase con el ack.
+  const installReminder = isMuro
+    ? `te recuerdo que la instalación del *${nombreCorto}* tiene un costo de *${instalacionMuroFormatted()}* y solo pagas por los cócteles que elijas.`
+    : `te recuerdo que la instalación del *${nombreCorto}* es *gratis* y solo pagas por los cócteles que elijas.`;
 
-  let ack = '';
+  let lead = '';
   if (session?.celebrationType) {
-    ack = `Perfecto, anoté *${session.celebrationType}*.\n\n`;
+    lead = `Genial, anoté *${session.celebrationType}*: ${installReminder}`;
   } else if (session?.eventosCelebrationSkipped) {
-    ack = `Sin problema, el tipo lo dejamos por confirmar.\n\n`;
+    lead = `Sin problema, el tipo lo dejamos por confirmar. ${installReminder.charAt(0).toUpperCase()}${installReminder.slice(1)}`;
+  } else {
+    lead = `Genial 🍸 ${installReminder.charAt(0).toUpperCase()}${installReminder.slice(1)}`;
   }
 
-  return `${ack}${installLine}
+  return `${lead}
 
 ✨ Además, todo esto está incluido sin costo adicional:
 🧊 Hielo · 🍊 Garnish · 🥂 Vasos/copas · 🧰 Accesorios de bar
@@ -181,7 +189,8 @@ export function buildFormatPhaseAReplies(formatKeyOrLabel) {
 }
 
 /**
- * buildFormatPhaseBReplies: Burbuja imagen + caption fase B.
+ * buildFormatPhaseBReplies: Imagen primero + texto después (2 burbujas, sin caption).
+ * Misma pauta que fase A: media sola, luego el copy.
  *
  * @param {'dispensador'|'muro'|string} formatKeyOrLabel
  * @param {object} [session]
@@ -191,7 +200,10 @@ export function buildFormatPhaseBReplies(formatKeyOrLabel, session = null) {
   const formatKey = (formatKeyOrLabel === 'muro' || formatKeyOrLabel === 'dispensador')
     ? formatKeyOrLabel
     : getEventFormatKey(formatKeyOrLabel);
-  return [img(eventFormatPhaseBAssetFile(formatKey), buildFormatPhaseBText(formatKey, session))];
+  return [
+    img(eventFormatPhaseBAssetFile(formatKey)),
+    buildFormatPhaseBText(formatKey, session)
+  ];
 }
 
 /**
@@ -202,11 +214,13 @@ export function buildFormatPhaseBReplies(formatKeyOrLabel, session = null) {
  */
 export function getEventFormatChoiceCaption() {
   const instalacion = instalacionMuroFormatted();
+  const desdeDisp = formatPrice(eventFormatFromPrice('dispensador'));
+  const desdeMuro = formatPrice(eventFormatFromPrice('muro'));
   return `En *Servicio para Eventos* puedes elegir el formato que mejor calza con tu celebración:
 
-1️⃣ *Dispensador Portátil* — ideal para eventos de *cualquier tamaño*. Instalación gratis, pedido mín. 10L
+1️⃣ *Dispensador Portátil* — ideal para eventos de *cualquier tamaño*. Instalación gratis, pedido mín. 10L, desde *${desdeDisp}*
 
-2️⃣ *Muro de Coctelería* — ideal para eventos *grandes o masivos*. Instalación ${instalacion}, pedido mín. 30L
+2️⃣ *Muro de Coctelería* — ideal para eventos *grandes o masivos*. Instalación ${instalacion}, pedido mín. 30L, desde *${desdeMuro}*
 
 ${MENU_WRITE_CTA}
 

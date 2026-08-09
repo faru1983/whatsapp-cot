@@ -10,6 +10,7 @@ import {
 } from '../logic/utils.js';
 import { OrderBuilder } from '../logic/order-builder.js';
 import { formatMenuBlock, MENU_WRITE_CTA } from '../logic/flow-rails.js';
+import { eventFormatFromPrice } from '../logic/eventos-intro.js';
 
 // ==============================================================================
 // OBJETIVO: Textos compartidos (cotización, dudas, alertas admin, pitches eventos).
@@ -413,7 +414,8 @@ export function getEventFormatPitch(formatKey) {
 
 /**
  * getEventLitersSuggestion: Explica cuántos litros pedir según invitados.
- * Incluye rendimientos del formato (datos.json) y litros ≈ cócteles (vaso ~200ml).
+ * Rendimientos del formato (datos.json) en lista clara + referencia 3/5 por persona.
+ * El mínimo ya se dijo en fase A; aquí solo se recuerda.
  *
  * @param {number} guests - Cantidad de invitados
  * @param {'dispensador'|'muro'} formatKey - Formato (define mínimo y litrajes)
@@ -434,26 +436,26 @@ export function getEventLitersSuggestion(guests, formatKey) {
   const fiesta = Math.ceil((n * 5 * 0.2) / 5) * 5;
   const minLiters = formatKey === 'muro' ? 30 : 10;
   const litrajes = formatKey === 'muro' ? ['10L', '20L', '30L'] : ['5L', '10L'];
-  // Lista por litraje (más legible que “5L ≈ 25 · 10L ≈ 50” en una sola línea)
+  // Una línea por barril: fácil de escanear en el móvil
   const rendLines = litrajes
     .map((l) => {
       const liters = parseInt(l, 10);
       const cocktails = rendimientos[l] ?? cocktailsForLiters(liters);
-      return `• *${l}* → ≈ *${cocktails}* cócteles`;
+      return `- Barril *${l}* → *${cocktails}* cócteles de 200ml`;
     })
     .join('\n');
 
-  return `📦 *Rendimiento aproximado de los barriles*
-_(cada cóctel ≈ vaso/copa con hielo de 200ml)_
+  const guestsLabel = n ? `*${n} invitados*` : '*tus invitados*';
 
+  return `*Rendimientos aproximados:*
 ${rendLines}
 
-Para orientarte con *${n || 'tus'} invitados*, una buena referencia de consumo es:
+Para orientarte con ${guestsLabel}, una buena referencia de consumo es:
 
 🍹 *${tranquilo}L* (~${cocktailsForLiters(tranquilo)} cócteles) — evento más tranquilo (~3 por persona)
 🎉 *${fiesta}L* (~${cocktailsForLiters(fiesta)} cócteles) — si quieren fiesta (~5 por persona)
 
-El pedido mínimo de este formato es *${minLiters}L* y puedes combinar sabores hasta llegar a esa cantidad (o la que prefieras).`;
+Recuerda que el pedido mínimo es *${minLiters}L* y puedes combinar sabores hasta llegar a esa cantidad (o la que prefieras).`;
 }
 
 /**
@@ -747,11 +749,13 @@ _(ej: cambia la fecha, agrega 1 sangría, la comuna es Providencia)_`
 export function getEventFormatRecommendation(_guests, instalacionMuroStr) {
   const instalacion = instalacionMuroStr
     || formatPrice(preciosData.instalacion_muro || 50000);
+  const desdeDisp = formatPrice(eventFormatFromPrice('dispensador'));
+  const desdeMuro = formatPrice(eventFormatFromPrice('muro'));
   return `En *Servicio para Eventos* puedes elegir el formato que mejor calza con tu celebración:
 
-1️⃣ *Dispensador Portátil* — ideal para eventos de *cualquier tamaño*. Instalación gratis, pedido mín. 10L
+1️⃣ *Dispensador Portátil* — ideal para eventos de *cualquier tamaño*. Instalación gratis, pedido mín. 10L, desde *${desdeDisp}*
 
-2️⃣ *Muro de Coctelería* — ideal para eventos *grandes o masivos*. Instalación ${instalacion}, pedido mín. 30L
+2️⃣ *Muro de Coctelería* — ideal para eventos *grandes o masivos*. Instalación ${instalacion}, pedido mín. 30L, desde *${desdeMuro}*
 
 ${MENU_WRITE_CTA}
 

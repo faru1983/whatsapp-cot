@@ -154,6 +154,7 @@ console.log('\n-- replyTiming (.env REPLY_DELAY_*) --');
   assert(/cocktailsontap\.cl\/eventos/i.test(tipFmt), `tip formato linkea /eventos`);
   assert(!/desechable/i.test(tipFmt), `tip formato NO mezcla Barriles Desechables`);
   assert(/elige el formato|elige.*formato/i.test(tipFmt), `tip formato pide elegir formato`);
+  assert(/109\.990/.test(tipFmt) && /239\.990/.test(tipFmt), `tip formato diferencia desde Dispensador/Muro`);
 
   const tipConFormato = buildContextualPriceOrCatalogTip(
     { userIntent: 'EVENTOS', eventoFormato: 'Dispensador Portátil' },
@@ -170,6 +171,41 @@ console.log('\n-- replyTiming (.env REPLY_DELAY_*) --');
   );
   assert(/31\.990|desechable/i.test(tipBar), `tip barriles menciona desechable/precio base`);
   assert(!/Dispensador|Muro/i.test(tipBar), `tip barriles no pivotea a eventos`);
+}
+
+// Precios “desde” Eventos: Dispensador ≠ Muro
+{
+  const {
+    eventFormatFromPrice,
+    getEventFormatChoiceCaption,
+    buildFormatPhaseAText
+  } = await import('../src/logic/eventos-intro.js');
+  assert(eventFormatFromPrice('dispensador') === 109990, `desde Dispensador = 109990`);
+  assert(eventFormatFromPrice('muro') === 239990, `desde Muro = 239990`);
+  const choice = getEventFormatChoiceCaption();
+  assert(/desde \*\$109\.990\*/.test(choice), `menú formato menciona desde Dispensador`);
+  assert(/desde \*\$239\.990\*/.test(choice), `menú formato menciona desde Muro`);
+  assert(/Servicio desde \*\$109\.990\*/.test(buildFormatPhaseAText('dispensador')), `pitch A Dispensador desde 109.990`);
+  assert(/Servicio desde \*\$239\.990\*/.test(buildFormatPhaseAText('muro')), `pitch A Muro desde 239.990`);
+}
+
+// Fase B: 2 burbujas (imagen sin caption + texto) y copy sin “Perfecto”+“¡Genial!”
+{
+  const {
+    buildFormatPhaseBReplies,
+    buildFormatPhaseBText
+  } = await import('../src/logic/eventos-intro.js');
+  const phaseB = buildFormatPhaseBReplies('dispensador', { celebrationType: 'Cumpleaños' });
+  assert(Array.isArray(phaseB) && phaseB.length === 2, `fase B → 2 burbujas`);
+  assert(isImagePart(phaseB[0]) && !phaseB[0].caption, `fase B burbuja 1 = imagen sin caption`);
+  assert(typeof phaseB[1] === 'string', `fase B burbuja 2 = texto`);
+  const bText = buildFormatPhaseBText('dispensador', { celebrationType: 'Cumpleaños' });
+  assert(/Genial, anoté \*Cumpleaños\*/i.test(bText), `fase B integra ack del tipo`);
+  assert(/instalaci[oó]n del \*dispensador\* es \*gratis\*/i.test(bText), `fase B recuerda instalación gratis`);
+  assert(!/Perfecto, anoté/i.test(bText), `fase B sin “Perfecto, anoté” suelto`);
+  assert(!/¡Genial!/i.test(bText), `fase B sin segundo “¡Genial!”`);
+  const bMuro = buildFormatPhaseBText('muro', { celebrationType: 'Matrimonio' });
+  assert(/instalaci[oó]n del \*muro\*/i.test(bMuro), `fase B muro recuerda instalación con costo`);
 }
 
 // Comunas: "no" NUNCA debe matchear Ñuñoa (substring "no" ⊂ "nunoa")
@@ -1688,12 +1724,19 @@ try {
     {
       input: 'matrimonio',
       expectState: 'EVENTOS_RECOGIDA_DATOS',
-      expectIncludes: ['Matrimonio', 'invitados', 'incluido']
+      expectIncludes: [
+        '[IMG:dispensador_portatil.webp]',
+        'Genial, anoté *Matrimonio*',
+        'instalación del *dispensador* es *gratis*',
+        'invitados',
+        'incluido'
+      ],
+      expectNotIncludes: ['Perfecto, anoté', '¡Genial!']
     },
     {
       input: '50',
       expectState: 'EVENTOS_INTRO_MENU',
-      expectIncludes: ['50', 'cotización', 'duda', 'Para orientarte', 'Rendimiento']
+      expectIncludes: ['50', 'cotización', 'duda', 'Para orientarte', 'Rendimientos aproximados', 'Recuerda que el pedido mínimo']
     }
   ]);
 
@@ -1754,10 +1797,11 @@ try {
         '80',
         'cotización',
         'duda',
-        'Rendimiento',
+        'Rendimientos aproximados',
         'Para orientarte',
-        '*5L* → ≈ *25*',
-        '*10L* → ≈ *50*'
+        'Barril *5L* → *25* cócteles de 200ml',
+        'Barril *10L* → *50* cócteles de 200ml',
+        'Recuerda que el pedido mínimo es *10L*'
       ]
     },
     {
@@ -2043,7 +2087,7 @@ try {
     const st = statesMap.EVENTOS_ELECCION_MENU;
     const r = await st.validateAndProcess('10L Mojito y piña colada', session);
     assert(r.success === true, 'mixto → success');
-    const t = String(r.customReply || '');
+    const t = replyToText(r.customReplies || r.customReply);
     assert(/Mojito/i.test(t), 'agrega el cóctel del catálogo');
     assert(/piña colada/i.test(t) && /aún no/i.test(t), 'avisa el sabor fuera de carta');
     assert(Object.keys(session.orderBuilder.products).some((k) => k.startsWith('Mojito')), 'Mojito en carrito');
@@ -2088,12 +2132,12 @@ try {
 
     const st = statesMap.EVENTOS_ELECCION_MENU;
     const r1 = await st.validateAndProcess('Monito aperol', session);
-    const t1 = typeof r1.customReply === 'string' ? r1.customReply : '';
+    const t1 = replyToText(r1.customReplies || r1.customReply);
     assert(t1.includes('Mojito') && /Aperol/i.test(t1), `Monito aperol agrega ambos cócteles`);
     assert(!t1.includes('no está disponible'), `Monito aperol no error de litraje`);
 
     const r2 = await st.validateAndProcess('Y porque sale otro valor', session);
-    const t2 = typeof r2.customReply === 'string' ? r2.customReply : '';
+    const t2 = replyToText(r2.customReplies || r2.customReply);
     assert(t2.includes('Tu pedido actual'), `duda de precio explica carrito`);
     assert(!t2.includes('litraje no está disponible'), `duda de precio no error de litraje`);
   }
@@ -2110,16 +2154,16 @@ try {
 
     const st = statesMap.EVENTOS_ELECCION_MENU;
     const r1 = await st.validateAndProcess('5L Mojito y 15L Sangria', session);
-    const t1 = typeof r1.customReply === 'string' ? r1.customReply : '';
+    const t1 = replyToText(r1.customReplies || r1.customReply);
+    assert(Array.isArray(r1.customReplies) && r1.customReplies.length === 2, `carrito → 2 burbujas (pedido + pregunta)`);
     assert(/5L Mojito/.test(t1), `Mojito queda en 5L (formato litros)`);
     assert(t1.includes('Sangría') || t1.includes('Sangria'), `incluye Sangría`);
     assert(/15L Sangr[ií]a \(10L \+ 5L\)/.test(t1), `15L Sangría se muestra como 10L+5L`);
     assert(!/10L Mojito/.test(t1), `no duplica Mojito al partir la Sangría`);
-    const totalMatch = t1.match(/\*Litros:\*\s*(\d+)L/i);
-    assert(totalMatch && Number(totalMatch[1]) === 20, `total 5+15 = 20L`);
-    assert(/≈\s*\*100\*\s*cócteles/i.test(t1), `20L muestra ≈ 100 cócteles`);
-    assert(/\*Subtotal:\*.*\n\*Litros:\*/s.test(t1), `litros va debajo del subtotal`);
-    assert(/≈\s*\*2\*\s*por persona/i.test(t1), `100 cócteles / 50 invitados → 2 por persona`);
+    assert(/_20L \| 100 cócteles \| 2 x persona_/i.test(t1), `resumen litros simple 20L / 100 / 2 x persona`);
+    assert(/\*Subtotal:\*.*\n_20L/s.test(t1), `litros va debajo del subtotal`);
+    assert(/Todo bien con el pedido/i.test(String(r1.customReplies[1])), `pregunta en 2ª burbuja`);
+    assert(!/Todo bien con el pedido/i.test(String(r1.customReplies[0])), `pregunta no va en 1ª burbuja`);
   }
 
   console.log('\n-- Eventos: "Quitar" solo pide qué eliminar (no avanza) --');
@@ -2354,7 +2398,7 @@ try {
     assert(session.orderBuilder.products['Mojito::10L'], 'no toca el Mojito con alcohol ya en el carrito');
 
     const r2 = await st.validateAndProcess('10L Mojito Mocktail', session);
-    const t2 = typeof r2.customReply === 'string' ? r2.customReply : '';
+    const t2 = replyToText(r2.customReplies || r2.customReply);
     assert(/Mojito Mocktail/.test(t2) && /10L/.test(t2), 'confirmar el nombre exacto lo agrega al carrito (con litraje)');
     assert(session.orderBuilder.products['Mojito Mocktail::10L'], 'Mojito Mocktail queda en el carrito');
   }
@@ -2378,16 +2422,15 @@ try {
 
     const st = statesMap.EVENTOS_ELECCION_MENU;
     const r1 = await st.validateAndProcess('20 L mojito. 10 L aperol', session);
-    const t1 = typeof r1.customReply === 'string' ? r1.customReply : '';
+    const t1 = replyToText(r1.customReplies || r1.customReply);
     assert(/20L Mojito \(2×10L\)/.test(t1), `deja Mojito en 20L (no 40L)`);
     assert(/10L Aperol/.test(t1), `deja Aperol en 10L (no 30L)`);
     assert(!/40L Mojito/.test(t1) && !/30L Aperol/.test(t1), `no suma encima del carrito`);
-    const liters = t1.match(/\*Litros:\*\s*(\d+)L/i);
-    assert(liters && Number(liters[1]) === 30, `total tras reemplazo = 30L`);
+    assert(/_30L \| 150 cócteles/i.test(t1), `total tras reemplazo = 30L`);
 
     // Agregar explícito sí suma
     const r2 = await st.validateAndProcess('agrega 5L sangria', session);
-    const t2 = typeof r2.customReply === 'string' ? r2.customReply : '';
+    const t2 = replyToText(r2.customReplies || r2.customReply);
     assert(/5L Sangr[ií]a/.test(t2), `agrega Sangría nueva`);
     assert(/20L Mojito/.test(t2), `conserva Mojito al agregar otro`);
   }
@@ -2404,13 +2447,13 @@ try {
 
     const st = statesMap.EVENTOS_ELECCION_MENU;
     const r1 = await st.validateAndProcess('mojito 5L', session);
-    const t1 = typeof r1.customReply === 'string' ? r1.customReply : '';
+    const t1 = replyToText(r1.customReplies || r1.customReply);
     assert(/5L Mojito/.test(t1), `mojito 5L entra como 5 litros`);
 
     // El último mensaje del bot lista el carrito; eso no debe leerse como menú de opciones
     session.history = { turns: [{ role: 'model', text: t1 }] };
     const r2 = await st.validateAndProcess('5 sangria', session);
-    const t2 = typeof r2.customReply === 'string' ? r2.customReply : '';
+    const t2 = replyToText(r2.customReplies || r2.customReply);
     assert(/5L Sangr[ií]a/.test(t2), `5 sangria agrega Sangría como 5 litros`);
     assert(/5L Mojito/.test(t2), `conserva el Mojito`);
     assert(!/10L Mojito/.test(t2), `5 sangria no vuelve a sumar el Mojito del carrito`);
@@ -2433,7 +2476,7 @@ try {
 
     // 1️⃣ = sí, son barriles del tamaño por defecto
     const r2 = await st.validateAndProcess('1', session);
-    const t2 = typeof r2.customReply === 'string' ? r2.customReply : '';
+    const t2 = replyToText(r2.customReplies || r2.customReply);
     assert(/10L Mojito \(2×5L\)/.test(t2), `opción 1 anota 2 barriles de 5L (=10L)`);
 
     // 2️⃣ = prefiere indicar el tamaño, y luego lo responde
@@ -2442,7 +2485,7 @@ try {
     const t3 = typeof r3.customReply === 'string' ? r3.customReply : '';
     assert(/tama[nñ]o de barril/i.test(t3), `opción 2 pide el tamaño`);
     const r4 = await st.validateAndProcess('10L', session);
-    const t4 = typeof r4.customReply === 'string' ? r4.customReply : '';
+    const t4 = replyToText(r4.customReplies || r4.customReply);
     assert(/10L Sangr[ií]a/.test(t4), `tras elegir tamaño, agrega Sangría 10L`);
   }
 
@@ -2943,7 +2986,7 @@ try {
     session.orderBuilder = { type: 'dispensador', products: {}, extras: {} };
     const st = statesMap.EVENTOS_ELECCION_MENU;
     const r = await st.validateAndProcess('5L Mojito, ¿hacen despacho a Maipú?', session);
-    const t = String(r.customReply || '');
+    const t = replyToText(r.customReplies || r.customReply);
     assert(/Mojito/i.test(t), 'suma Mojito en eventos multi-intent');
     assert(/cobertura|Metropolitana|Valpara[ií]so|evalu/i.test(t), 'responde despacho en eventos multi-intent');
   }
