@@ -117,6 +117,7 @@ const {
   isOnlyAdvanceProductsOrder,
   wantsAdvanceProductsOrder,
   asksCocktailPriceOrCatalog,
+  asksYieldOrRendimiento,
   buildContextualPriceOrCatalogTip,
   resolveFlowLane
 } = await import('../src/logic/interruptions.js');
@@ -130,6 +131,8 @@ assert(!isOnlyAdvanceProductsOrder('aka'), `"aka" no es advance`);
 
 // Precio contextual: no mezclar Barriles↔Eventos según el carril
 assert(asksCocktailPriceOrCatalog('Valor de los cocteles'), `detecta valor de cócteles`);
+assert(asksYieldOrRendimiento('Hasta cuantos vasos da ?'), `detecta pregunta de vasos/rendimiento`);
+assert(asksCocktailPriceOrCatalog('Hasta cuantos vasos da ?'), `vasos cuenta como tip contextual`);
 assert(!asksCocktailPriceOrCatalog('cuánto cuesta el despacho a Providencia'), `despacho ≠ tip de cócteles`);
 assert(resolveFlowLane({ userIntent: 'EVENTOS' }, 'EVENTOS_ELECCION_FORMATO') === 'EVENTOS', `carril eventos`);
 
@@ -155,6 +158,25 @@ console.log('\n-- replyTiming (.env REPLY_DELAY_*) --');
   assert(!/desechable/i.test(tipFmt), `tip formato NO mezcla Barriles Desechables`);
   assert(/elige el formato|elige.*formato/i.test(tipFmt), `tip formato pide elegir formato`);
   assert(/109\.990/.test(tipFmt) && /239\.990/.test(tipFmt), `tip formato diferencia desde Dispensador/Muro`);
+
+  const tipYieldDisp = buildContextualPriceOrCatalogTip(
+    { userIntent: 'EVENTOS', eventoFormato: 'Dispensador Portátil' },
+    'EVENTOS_RECOGIDA_DATOS',
+    'Hasta cuantos vasos da ?'
+  );
+  assert(/Dispensador Portátil/i.test(tipYieldDisp), `rendimiento Dispensador nombra el formato`);
+  assert(/5L/.test(tipYieldDisp) && /10L/.test(tipYieldDisp), `rendimiento Dispensador 5L y 10L`);
+  assert(/25/.test(tipYieldDisp) && /50/.test(tipYieldDisp), `rendimiento Dispensador 25 y 50 cócteles`);
+  assert(!/desechable/i.test(tipYieldDisp), `rendimiento Dispensador NO mezcla Desechable`);
+
+  const tipYieldMuro = buildContextualPriceOrCatalogTip(
+    { userIntent: 'EVENTOS', eventoFormato: 'Muro de Coctelería' },
+    'EVENTOS_RECOGIDA_DATOS',
+    'cuántos vasos rinde'
+  );
+  assert(/Muro/i.test(tipYieldMuro), `rendimiento Muro nombra el formato`);
+  assert(/10L/.test(tipYieldMuro) && /20L/.test(tipYieldMuro) && /30L/.test(tipYieldMuro), `rendimiento Muro 10/20/30L`);
+  assert(!/desechable/i.test(tipYieldMuro), `rendimiento Muro NO mezcla Desechable`);
 
   const tipConFormato = buildContextualPriceOrCatalogTip(
     { userIntent: 'EVENTOS', eventoFormato: 'Dispensador Portátil' },
@@ -2541,6 +2563,23 @@ try {
     assert(/pedido|comuna|nombre|correo|direcci/i.test(String(r.customReply || '')), `pide dato del pedido`);
   }
 
+  console.log('\n-- Eventos: rendimiento vasos en Dispensador (no Desechable) --');
+  resetSession(SESSION_ID);
+  {
+    const session = getSession(SESSION_ID);
+    session.currentState = 'EVENTOS_RECOGIDA_DATOS';
+    session.userIntent = 'EVENTOS';
+    session.eventoFormato = 'Dispensador Portátil';
+    const st = statesMap.EVENTOS_RECOGIDA_DATOS;
+    const r = await st.validateAndProcess('Hasta cuantos vasos da ?', session);
+    const t = replyToText(r.customReplies || r.customReply);
+    assert(r.nextState === 'EVENTOS_RECOGIDA_DATOS', `sigue en recogida`);
+    assert(/Dispensador/i.test(t), `tip nombra Dispensador`);
+    assert(/5L/.test(t) && /10L/.test(t), `tip muestra 5L y 10L`);
+    assert(!/desechable/i.test(t), `tip NO habla de Desechable`);
+    assert(/tipo de evento|invitados/i.test(t), `re-pregunta dato pendiente`);
+  }
+
   console.log('\n-- Eventos bot ajeno no extrae comuna falsa --');
   resetSession(SESSION_ID);
   {
@@ -3282,9 +3321,9 @@ try {
   console.error('  FAIL: excepción en simulación:', err);
 }
 
-console.log('\n-- CRM Interesado: Eventos al cotizar; Barriles al cotizar --');
+console.log('\n-- CRM Interesado: Eventos al pedir cócteles; Barriles al cotizar --');
 {
-  const { notifyCrmOnBotStateChange } = await import('../src/logic/cot-crm-sync.js');
+  const { notifyCrmOnBotStateChange, notifyCrmEngageTrigger } = await import('../src/logic/cot-crm-sync.js');
 
   const s1 = { userIntent: 'EVENTOS', guests: 50, waLabelClientePotencialApplied: false };
   assert(
@@ -3292,10 +3331,16 @@ console.log('\n-- CRM Interesado: Eventos al cotizar; Barriles al cotizar --');
     'Eventos: salir de recogida NO marca Interesado'
   );
 
-  const s2 = { userIntent: 'EVENTOS', guests: 50, celebrationType: 'Matrimonio', waLabelClientePotencialApplied: false };
+  const sIntro = { userIntent: 'EVENTOS', guests: 50, celebrationType: 'Matrimonio', waLabelClientePotencialApplied: false };
   assert(
-    notifyCrmOnBotStateChange(s2, 'EVENTOS_INTRO_MENU', 'EVENTOS_ELECCION_MENU') === true,
-    'Eventos: intro→cotizar SÍ marca Interesado / Cliente potencial'
+    notifyCrmOnBotStateChange(sIntro, 'EVENTOS_INTRO_MENU', 'EVENTOS_ELECCION_MENU') === false,
+    'Eventos: intro→cotizar (solo ve carta) NO marca Interesado'
+  );
+
+  const sCart = { userIntent: 'EVENTOS', guests: 50, waLabelClientePotencialApplied: false };
+  assert(
+    notifyCrmEngageTrigger(sCart, 'eventos_elige_cocteles') === true,
+    'Eventos: primer cóctel SÍ marca Interesado / Cliente potencial'
   );
 
   const sPitch = { userIntent: 'BARRILES', waLabelClientePotencialApplied: false };

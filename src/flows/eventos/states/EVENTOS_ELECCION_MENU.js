@@ -77,6 +77,31 @@ El cliente está armando el pedido de cócteles (Dispensador o Muro).
 5. Si aún no eligió cócteles: pide sabor + litraje. Solo si ya tiene pedido, sugiere escribir *ok* para el resumen.`;
 
 /**
+ * eventCartLineCount: Cuántas líneas de cóctel hay en el carrito Eventos.
+ *
+ * @param {object} session
+ * @returns {number}
+ */
+function eventCartLineCount(session) {
+  return Object.keys(session.orderBuilder?.products || {}).length;
+}
+
+/**
+ * withFirstCocktailCrmEngage: Si el carrito pasó de vacío a tener ítems, marca Interesado.
+ *
+ * @param {number} linesBefore
+ * @param {object} session
+ * @param {object} result - Resultado validateAndProcess
+ * @returns {object}
+ */
+function withFirstCocktailCrmEngage(linesBefore, session, result) {
+  if (linesBefore === 0 && eventCartLineCount(session) > 0) {
+    return { ...result, crmEngage: 'eventos_elige_cocteles' };
+  }
+  return result;
+}
+
+/**
  * shortQuestionForSession: Sin carrito → pedir cócteles; con carrito → guiar con *ok*.
  *
  * @param {object} session
@@ -219,6 +244,8 @@ export const EVENTOS_ELECCION_MENU = defineState({
 
     const catalogNames = Object.keys(preciosData.cocteles || {});
     const defaultLitrage = formatKey === 'muro' ? '10L' : '5L';
+    // Para CRM Interesado: primer cóctel del carrito (no al solo ver la carta)
+    const linesBefore = eventCartLineCount(session);
 
     // Corrección de invitados/tipo sin pedido de cócteles (no roba "10L mojito"
     // ni el menú pendiente "¿son N barriles?")
@@ -260,11 +287,11 @@ export const EVENTOS_ELECCION_MENU = defineState({
           const { reply, followUp } = buildCartReply({
             session, formatKey, minLiters, header: `🍹 Listo, lo anoté así:`
           });
-          return {
+          return withFirstCocktailCrmEngage(linesBefore, session, {
             success: true,
             nextState: 'EVENTOS_ELECCION_MENU',
             customReplies: [reply, followUp]
-          };
+          });
         }
       }
 
@@ -350,11 +377,11 @@ _(ej: Mojito ${allowedLitrages[0]})_`
         const { reply, followUp } = buildCartReply({
           session, formatKey, minLiters, header: `🍹 Listo, anoté con *${litrageOnly}*:`
         });
-        return {
+        return withFirstCocktailCrmEngage(linesBefore, session, {
           success: true,
           nextState: 'EVENTOS_ELECCION_MENU',
           customReplies: [reply, followUp]
-        };
+        });
       }
       if (invalidLitrages.length > 0) {
         return {
@@ -636,18 +663,18 @@ _(ej: 5L Mojito)_ 🍸`;
       if (familyFromOpts) {
         const opciones = getCatalogFamilyFlavorOptions(familyFromOpts, catalogNames);
         if (opciones.length >= 2) {
-          return {
+          return withFirstCocktailCrmEngage(linesBefore, session, {
             success: true,
             nextState: 'EVENTOS_ELECCION_MENU',
             customReply: getFlavorListReply(familyFromOpts, opciones, { withLitersHint: true })
-          };
+          });
         }
       }
-      return {
+      return withFirstCocktailCrmEngage(linesBefore, session, {
         success: true,
         nextState: 'EVENTOS_ELECCION_MENU',
         customReply: getDoubtClarificationTemplate(duda.mencionado, duda.opciones)
-      };
+      });
     }
 
     if (parsedProducts.length > 0) {
@@ -665,11 +692,12 @@ _(ej: 5L Mojito)_ 🍸`;
       // "10L mojito seguimos" → si cumple mínimo, cotiza; si no, pide más litros
       if (wantsAdvance && cartBuilder.getTotalLiters() >= minLiters && invalidLitrages.length === 0) {
         session.eventosContactPhase = null;
-        return {
+        // Transición a contacto: CRM también se dispara por shouldEngageCrmOnTransition
+        return withFirstCocktailCrmEngage(linesBefore, session, {
           success: true,
           nextState: 'EVENTOS_DATOS_CONTACTO',
           flowProgress: true
-        };
+        });
       }
 
       const header = replacing
@@ -683,12 +711,12 @@ _(ej: 5L Mojito)_ 🍸`;
       const withDispatch = hasDispatchQ
         ? `${reply}\n\n${REPLY_DISPATCH_SIDEBAR_EVENTOS}`
         : reply;
-      return {
+      return withFirstCocktailCrmEngage(linesBefore, session, {
         success: true,
         nextState: 'EVENTOS_ELECCION_MENU',
         customReplies: [withDispatch, followUp],
         flowProgress: true
-      };
+      });
     }
 
     // Solo litrajes inválidos (sin productos válidos) → guardar pendientes y guiar

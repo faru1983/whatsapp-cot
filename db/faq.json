@@ -32,8 +32,8 @@
     "respuesta": "Nuestro WhatsApp es: +569-29672978"
   },
   {
-    "pregunta": "¿Cuánto rinden los barriles? ¿Cuántos tragos / cócteles salen? (Rendimiento)",
-    "respuesta": "Responde SOLO según el contexto del chat (ver CONTEXTO DE SESIÓN). Calculando vaso/copa con hielo ≈ 200ml.\n- Si el cliente está en Barriles Desechables: un barril de 5L rinde aprox. 25 cócteles. No menciones 10L/20L/30L ni formatos de evento.\n- Si está en Eventos (Dispensador): 5L ≈ 25 tragos | 10L ≈ 50 tragos. No menciones 20L/30L ni barriles desechables salvo que pregunte.\n- Si está en Eventos (Muro): 10L ≈ 50 | 20L ≈ 100 | 30L ≈ 150 tragos. No menciones 5L ni desechables salvo que pregunte.\n- Si aún no eligió formato: di que el rendimiento depende del tamaño (5L≈25, 10L≈50, etc.) y pregunta si cotiza desechable o evento."
+    "pregunta": "¿Cuánto rinden los barriles? ¿Cuántos tragos / cócteles / vasos / copas salen? ¿Hasta cuántos vasos da? (Rendimiento)",
+    "respuesta": "Responde SOLO según el contexto del chat (ver CONTEXTO DE SESIÓN). Calculando vaso/copa con hielo ≈ 200ml.\n- Si el cliente está en Barriles Desechables: un barril de 5L rinde aprox. 25 cócteles. No menciones 10L/20L/30L ni formatos de evento.\n- Si está en Eventos (Dispensador Portátil): 5L ≈ 25 cócteles | 10L ≈ 50 cócteles. No menciones 20L/30L ni barriles desechables salvo que pregunte.\n- Si está en Eventos (Muro de Coctelería): 10L ≈ 50 | 20L ≈ 100 | 30L ≈ 150 cócteles. No menciones 5L ni desechables salvo que pregunte.\n- Si Eventos sin formato aún: di Dispensador (5L/10L) y Muro (10L/20L/30L); NUNCA digas solo desechable.\n- Si no está definido: resumen breve y pregunta si cotiza desechable o evento."
   },
   {
     "pregunta": "¿Cuánto duran los barriles? ¿Qué duración tienen? ¿Cuánto tiempo se conservan? ¿Caducidad / vencimiento / vida útil? ¿Se pueden guardar en el refri? ¿Si sobra se puede volver a guardar?",

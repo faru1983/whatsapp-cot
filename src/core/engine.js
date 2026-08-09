@@ -44,7 +44,7 @@ import {
 import { clearNudgeFlag } from '../logic/inactivity-nudge.js';
 import { waitBeforeFirstReply, waitBetweenBubbles } from '../logic/reply-timing.js';
 import { jidToE164 } from '../logic/cot-event-quote.js';
-import { syncCrmCuriousAsync, syncCrmNameAsync, syncCrmIntentAsync, notifyCrmOnBotStateChange } from '../logic/cot-crm-sync.js';
+import { syncCrmCuriousAsync, syncCrmNameAsync, syncCrmIntentAsync, notifyCrmOnBotStateChange, notifyCrmEngageTrigger } from '../logic/cot-crm-sync.js';
 import {
   getCotApiWriteMode,
   setCotApiWriteMode,
@@ -735,6 +735,19 @@ async function processMessageUnlocked(sessionId, messageText, options = {}) {
            });
          }
        }
+    }
+
+    // Eventos: Interesado al primer pedido de cócteles (puede quedar en el mismo estado)
+    if (processResult.crmEngage) {
+      if (notifyCrmEngageTrigger(session, processResult.crmEngage)) {
+        session.waLabelClientePotencialApplied = true;
+        if (applyBusinessLabel) {
+          void Promise.resolve(applyBusinessLabel('clientePotencial')).catch((err) => {
+            console.warn('No se pudo aplicar etiqueta Cliente potencial:', err?.message || err);
+            session.waLabelClientePotencialApplied = false;
+          });
+        }
+      }
     }
     
     if (processResult.mute) {

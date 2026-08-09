@@ -405,7 +405,8 @@ export function syncCrmCtwaAttributionAsync(session) {
 
 /**
  * shouldEngageCrmOnTransition: ¿Esta transición del bot = momento Interesado?
- * Eventos: recién al elegir cotizar en INTRO_MENU (ya hay formato + tipo + invitados).
+ * Eventos: NO al solo elegir “cotizar” (ver carta); se marca al primer pedido de cócteles
+ *   vía notifyCrmEngageTrigger (crmEngage en ELECCION_MENU).
  * Barriles: al elegir pedir (FILTRO o post-precios) o atajo sabor → RECOGIDA_PRODUCTOS.
  * Solo ver precios o dejar una duda sigue siendo Curioso.
  *
@@ -415,12 +416,38 @@ export function syncCrmCtwaAttributionAsync(session) {
  */
 function shouldEngageCrmOnTransition(from, to) {
   if (!from || !to || from === to) return false;
-  // Eventos: Interesado al elegir “quiero cotizar” (carta / pedido)
-  if (from === 'EVENTOS_INTRO_MENU' && to === 'EVENTOS_ELECCION_MENU') return true;
   // Barriles: Interesado al elegir pedir (FILTRO o post-precios) / atajo sabor
   if (to === 'BARRILES_RECOGIDA_PRODUCTOS'
       && (from === 'BARRILES_INTRO_MENU' || from === 'BARRILES_FILTRO_CANAL')) return true;
+  // Eventos: red de seguridad si avanzó a contacto con carrito (sin haber disparado en el 1er cóctel)
+  if (from === 'EVENTOS_ELECCION_MENU' && to === 'EVENTOS_DATOS_CONTACTO') return true;
   return false;
+}
+
+/**
+ * notifyCrmEngageTrigger: Marca Interesado por un trigger explícito del estado
+ * (ej. primer cóctel agregado en Eventos), sin cambiar de paso.
+ *
+ * @param {object} session
+ * @param {string} [trigger='eventos_elige_cocteles']
+ * @returns {boolean} true si este turno debe etiquetar "Cliente potencial"
+ */
+export function notifyCrmEngageTrigger(session, trigger = 'eventos_elige_cocteles') {
+  if (!session) return false;
+
+  const engageMeta = {
+    choice: session.userIntent || 'EVENTOS',
+    fromState: session.currentState || '',
+    toState: session.currentState || '',
+    trigger: String(trigger || 'eventos_elige_cocteles')
+  };
+
+  if (!session.crmEngagedSynced) {
+    syncCrmEngagedAsync(session, 'intent_selected', engageMeta);
+  }
+
+  if (session.waLabelClientePotencialApplied) return false;
+  return true;
 }
 
 /**
@@ -429,9 +456,9 @@ function shouldEngageCrmOnTransition(from, to) {
  * Reglas:
  * - Curioso: primer mensaje / menú (syncCrmCurious; con intent si ya hay carril).
  * - Intent CRM: al elegir Barriles/Eventos (mismo stage Curioso, syncCrmIntent).
- * - Interesado Eventos: INTRO_MENU → ELECCION_MENU (elige cotizar).
+ * - Interesado Eventos: primer pedido de cócteles en ELECCION_MENU (notifyCrmEngageTrigger).
  * - Interesado Barriles: FILTRO/INTRO → RECOGIDA_PRODUCTOS (elige pedido o atajo sabor).
- * - No Interesado: solo ver precios, duda/SOS, o solo avanzar recogida Eventos.
+ * - No Interesado: solo ver precios, elegir “cotizar” sin pedir aún, duda/SOS.
  *
  * @param {object} session
  * @param {string} fromState
@@ -450,12 +477,12 @@ export function notifyCrmOnBotStateChange(session, fromState, toState) {
     choice: session.userIntent || to,
     fromState: from,
     toState: to,
-    trigger: from === 'EVENTOS_INTRO_MENU'
-      ? 'eventos_elige_cotizar'
-      : from === 'BARRILES_INTRO_MENU'
-        ? 'barriles_elige_pedido_post_precios'
-        : from === 'BARRILES_FILTRO_CANAL'
-          ? 'barriles_elige_pedido_o_sabor'
+    trigger: from === 'BARRILES_INTRO_MENU'
+      ? 'barriles_elige_pedido_post_precios'
+      : from === 'BARRILES_FILTRO_CANAL'
+        ? 'barriles_elige_pedido_o_sabor'
+        : from === 'EVENTOS_ELECCION_MENU'
+          ? 'eventos_avanza_a_contacto'
           : 'flow_entry_exit',
   };
 

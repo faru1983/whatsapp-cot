@@ -143,14 +143,13 @@ export function asksPriceOrCatalog(messageText) {
 }
 
 /**
- * asksCocktailPriceOrCatalog: ¿Pide precios/carta de cócteles (no despacho ni ingredientes)?
- * Sirve para tip contextual sin pisar FAQ de envío/cobertura.
+ * asksCocktailPriceOrCatalog: ¿Pide precios/carta/rendimiento de cócteles (no despacho ni ingredientes)?
+ * Incluye “¿hasta cuántos vasos da?” para tip contextual por carril (Barriles vs Eventos).
  *
  * @param {string} messageText
  * @returns {boolean}
  */
 export function asksCocktailPriceOrCatalog(messageText) {
-  if (!asksPriceOrCatalog(messageText)) return false;
   const lower = String(messageText || '').toLowerCase();
   // Despacho / cobertura → FAQ o helpers de cobertura
   if (/\b(despacho|env[ií]o|encomienda|cobertura|flete|tarifa\s+de\s+env|costo\s+de\s+env)\b/i.test(lower)) {
@@ -160,7 +159,55 @@ export function asksCocktailPriceOrCatalog(messageText) {
   if (/\b(ingrediente|de\s+qu[eé]\s+est[aá]|qu[eé]\s+lleva|contiene|receta)\b/i.test(lower)) {
     return false;
   }
-  return true;
+  if (asksPriceOrCatalog(messageText)) return true;
+  // Rendimiento / vasos / tragos (frecuente en Eventos con formato ya elegido)
+  return asksYieldOrRendimiento(messageText);
+}
+
+/**
+ * asksYieldOrRendimiento: ¿Pregunta cuántos vasos/tragos/cócteles rinde un barril?
+ * Ej.: "hasta cuantos vasos da", "cuánto rinde", "cuántos cócteles salen".
+ *
+ * @param {string} messageText
+ * @returns {boolean}
+ */
+export function asksYieldOrRendimiento(messageText) {
+  const t = String(messageText || '').trim();
+  if (!t) return false;
+  return /\b(rinde|rinden|rendimiento|vasos?|tragos?|copas?)\b/i.test(t)
+    || /\b(cu[aá]ntos?|hasta\s+cu[aá]ntos?)\s+(vasos?|tragos?|c[oó]cteles?|copas?)\b/i.test(t)
+    || /\b(c[oó]cteles?|tragos?|vasos?)\s+(salen|da|dan|rinde|rinden)\b/i.test(t);
+}
+
+/**
+ * formatEventYieldTip: Rendimientos del formato Eventos (Dispensador 5/10L o Muro 10/20/30L).
+ * Nunca menciona Barriles Desechables.
+ *
+ * @param {'dispensador'|'muro'|string} formatKeyOrLabel
+ * @param {string} [formatoLabel] - Nombre comercial para el copy
+ * @returns {string}
+ */
+export function formatEventYieldTip(formatKeyOrLabel, formatoLabel = '') {
+  const isMuro = formatKeyOrLabel === 'muro' || /muro/i.test(String(formatKeyOrLabel));
+  const nombre = formatoLabel
+    || (isMuro ? 'Muro de Coctelería' : 'Dispensador Portátil');
+  const rend = preciosData.rendimientos_barriles || {};
+  const cocktails = (liters) => {
+    const fromTable = rend[`${liters}L`];
+    return fromTable != null ? fromTable : liters * 5;
+  };
+  const litrajes = isMuro ? [10, 20, 30] : [5, 10];
+  const lines = litrajes
+    .map((l) => `- Barril *${l}L* → *${cocktails(l)}* cócteles de 200ml`)
+    .join('\n');
+  const minL = isMuro ? 30 : 10;
+  return `En *${nombre}* los rendimientos aproximados son:
+
+*Rendimientos aproximados:*
+${lines}
+
+_(cada cóctel ≈ vaso/copa con hielo de 200ml)_
+Pedido mínimo: *${minL}L*.`;
 }
 
 /** Regex: el mensaje entero es solo “seguir / listo / ok / no” (sin sabores al lado). */
@@ -262,9 +309,14 @@ export function resolveFlowLane(session = {}, stateId = '') {
 export function buildContextualPriceOrCatalogTip(session = {}, stateId = '', messageText = '') {
   const lane = resolveFlowLane(session, stateId);
   const sid = String(stateId || session.currentState || '');
+  const wantsYield = asksYieldOrRendimiento(messageText);
 
   // --- Barriles Desechables ---
   if (lane === 'BARRILES') {
+    if (wantsYield) {
+      return `Un *Barril Desechable* de *5L* rinde aproximadamente *25* cócteles de 200ml.
+Catálogo: www.cocktailsontap.cl/barriles`;
+    }
     const cocktail = findMentionedCocktail(messageText);
     const priceLine = cocktail ? formatDesechablePriceReply(cocktail) : null;
     if (priceLine) return priceLine;
@@ -277,8 +329,17 @@ Catálogo: www.cocktailsontap.cl/barriles`;
     const formato = session.eventoFormato;
     if (formato) {
       const isMuro = /muro/i.test(String(formato));
+      const formatKey = isMuro ? 'muro' : 'dispensador';
       const minL = isMuro ? 30 : 10;
       const sizes = isMuro ? '10L, 20L o 30L' : '5L o 10L';
+
+      // “¿cuántos vasos da?” → rendimiento del formato (nunca Desechable)
+      if (wantsYield) {
+        return `${formatEventYieldTip(formatKey, formato)}
+
+Si seguimos por aquí, te oriento con el siguiente dato del evento.`;
+      }
+
       return `Los precios dependen del cóctel y el litraje del *${formato}* (barriles ${sizes}; pedido mín. *${minL}L*).
 Puedes ver la carta en https://www.cocktailsontap.cl/eventos — si seguimos por aquí, te la muestro al continuar.`;
     }
@@ -289,6 +350,16 @@ Puedes ver la carta en https://www.cocktailsontap.cl/eventos — si seguimos por
       ? 'Si prefieres continuar por aquí, primero elige el formato.'
       : 'Si prefieres continuar por aquí, te oriento con el formato que ya elegiste.';
 
+    if (wantsYield) {
+      return `El rendimiento depende del formato:
+• *Dispensador Portátil*: 5L ≈ 25 cócteles · 10L ≈ 50 cócteles (vaso 200ml)
+• *Muro de Coctelería*: 10L ≈ 50 · 20L ≈ 100 · 30L ≈ 150 cócteles
+
+Puedes ver más en https://www.cocktailsontap.cl/eventos
+
+${continueHint}`;
+    }
+
     return `Los precios dependen del servicio (*Dispensador* o *Muro*):
 • *Dispensador Portátil* desde *${formatPrice(eventFormatFromPrice('dispensador'))}* (pedido mín. 10L)
 • *Muro de Coctelería* desde *${formatPrice(eventFormatFromPrice('muro'))}* (pedido mín. 30L)
@@ -298,6 +369,13 @@ ${continueHint}`;
   }
 
   // --- Router / sin intención ---
+  if (wantsYield) {
+    return `El rendimiento depende del servicio:
+• *Barriles Desechables* 5L ≈ 25 cócteles
+• *Eventos* (Dispensador / Muro): según litraje 5L–30L
+
+Catálogo: https://www.cocktailsontap.cl/cotizar`;
+  }
   return `Los precios dependen del servicio: *Barriles Desechables* (5L) o *Eventos* (Dispensador / Muro).
 Catálogo: https://www.cocktailsontap.cl/cotizar`;
 }

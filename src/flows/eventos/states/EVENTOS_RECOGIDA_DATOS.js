@@ -7,6 +7,7 @@ import { defineState } from '../../../logic/compile-state.js';
 import { getBrowseOnlyGoodbye, getEventLitersSuggestion } from '../../../views/templates.js';
 import {
   asksPriceOrCatalog,
+  asksYieldOrRendimiento,
   buildContextualPriceOrCatalogTip,
   wantsBrowseOnlyClose
 } from '../../../logic/interruptions.js';
@@ -61,10 +62,11 @@ Si el cliente NO tiene evento y solo quiere precios/info a futuro → invitar a 
 1. Responde dudas breves y amigables.
 2. REGLA DE COBERTURA: RM = todas las comunas. Fuera de RM = evaluar según tamaño del evento y fecha; seguir cotizando para que el equipo confirme viaje. NUNCA digas cobertura fija en La Serena/Coquimbo.
 3. REGLA DE LOGÍSTICA: Instalación Dispensador gratis, Muro $50.000. NUNCA inventes tarifas de envío.
-4. NUNCA cotices ni calcules precios finales todavía.
-5. Puedes mencionar www.cocktailsontap.cl/eventos si pregunta precios; no lo presentes como menú obligatorio.
-6. Si faltan invitados, pídelos (un aproximado sirve). Si no tiene evento y solo quiere precios/info a futuro, invítalo a cotizar en la web.
-7. Al final, re-pregunta solo el dato pendiente (tipo o invitados).`;
+4. RENDIMIENTO / VASOS: responde SOLO según el formato elegido. Dispensador: 5L≈25 y 10L≈50 cócteles (vaso 200ml). Muro: 10L≈50, 20L≈100, 30L≈150. PROHIBIDO hablar de Barriles Desechables.
+5. NUNCA cotices ni calcules precios finales todavía.
+6. Puedes mencionar www.cocktailsontap.cl/eventos si pregunta precios; no lo presentes como menú obligatorio.
+7. Si faltan invitados, pídelos (un aproximado sirve). Si no tiene evento y solo quiere precios/info a futuro, invítalo a cotizar en la web.
+8. Al final, re-pregunta solo el dato pendiente (tipo o invitados).`;
 
 /**
  * hasGuests: ¿Ya hay cantidad de invitados en sesión?
@@ -291,11 +293,14 @@ export const EVENTOS_RECOGIDA_DATOS = defineState({
       session.celebrationType = 'Empresa';
     }
 
-    // Precios sin invitados: tip + dato pendiente
-    const isAskingForPriceWithoutData = asksPriceOrCatalog(messageText)
+    // Precios o rendimiento sin invitados: tip contextual del formato + dato pendiente
+    // (ej. "hasta cuantos vasos da?" en Dispensador → 5L/10L, nunca Desechable)
+    const isAskingPriceOrYieldWithoutData = (
+      asksPriceOrCatalog(messageText) || asksYieldOrRendimiento(messageText)
+    )
       && !hasGuests(session)
       && !guestsJustParsed;
-    if (isAskingForPriceWithoutData) {
+    if (isAskingPriceOrYieldWithoutData) {
       if (wantsEventInfoOnly(messageText)) {
         return goInfoOnlyWeb();
       }
