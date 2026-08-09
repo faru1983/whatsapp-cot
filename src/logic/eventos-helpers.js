@@ -17,7 +17,6 @@ import {
 import { isLikelyThirdPartyBotReply } from './interruptions.js';
 import { OrderBuilder } from './order-builder.js';
 import { img } from './media.js';
-import { getEventLitersSuggestion } from '../views/templates.js';
 import { normalizeBotDateText } from './cot-event-quote.js';
 
 /** Ejemplo canónico (litros primero) — intro menú + re-preguntas. */
@@ -1177,11 +1176,11 @@ export function formatEventCartSummary(products, formatKey) {
 }
 
 /**
- * formatEventCartTotalsLine: Subtotal + litros (+ mínimo) + cócteles ≈.
+ * formatEventCartTotalsLine: Subtotal; debajo litros + cócteles (+ por persona si hay invitados).
  * Usa totalDrinks de OrderBuilder (tabla rendimientos_barriles / 5 por litro).
  *
  * @param {{ subtotal: number, totalLiters?: number, totalDrinks?: number }} quote
- * @param {{ minLiters?: number }} [opts]
+ * @param {{ minLiters?: number, guests?: number|null }} [opts]
  * @returns {string}
  */
 export function formatEventCartTotalsLine(quote, opts = {}) {
@@ -1191,7 +1190,21 @@ export function formatEventCartTotalsLine(quote, opts = {}) {
     ? drinks
     : liters * 5;
   const minPart = opts.minLiters != null ? ` (mín. ${opts.minLiters}L)` : '';
-  return `*Subtotal:* ${formatPrice(quote?.subtotal || 0)} | *Litros:* ${liters}L${minPart} | ≈ *${approxDrinks}* cócteles`;
+
+  let litersLine = `*Litros:* ${liters}L${minPart} | ≈ *${approxDrinks}* cócteles`;
+
+  // Tragos por persona cuando ya tenemos invitados (fase intro)
+  const guests = Number(opts.guests);
+  if (guests > 0 && approxDrinks > 0) {
+    const perPerson = approxDrinks / guests;
+    const perPersonStr = Number.isInteger(perPerson)
+      ? String(perPerson)
+      : perPerson.toFixed(1);
+    litersLine += ` (≈ *${perPersonStr}* por persona)`;
+  }
+
+  return `*Subtotal:* ${formatPrice(quote?.subtotal || 0)}
+${litersLine}`;
 }
 
 /**
@@ -1210,19 +1223,17 @@ export function getEventPriceListImage(formatKey, caption = 'Aquí va la lista d
 }
 
 /**
- * buildMenuEntryReplies: Imagen de precios + hint de litros/rendimiento + pregunta (3 burbujas).
- * Lo usa EVENTOS_INTRO_MENU al confirmar (sí/ok), no al elegir el formato.
+ * buildMenuEntryReplies: Imagen de precios + pregunta de cócteles (2 burbujas).
+ * La orientación de litros/invitados ya se mostró al salir de RECOGIDA_DATOS.
  *
  * @param {object} session
  * @param {string} formatKey
  * @returns {Array<string|{ type: 'image', file: string, caption?: string }>}
  */
 export function buildMenuEntryReplies(session, formatKey) {
-  const litersHint = getEventLitersSuggestion(session.guests, formatKey);
   return [
     getEventPriceListImage(formatKey),
-    litersHint,
-    // Litros primero: orienta al cliente al patrón más común (ej. "5L Mojito y 10L Aperol")
+    // Orientación de litros ya vino tras indicar invitados; acá pedimos sabores
     ASK_EVENT_COCKTAILS
   ];
 }
@@ -1249,4 +1260,93 @@ export function buildEventQuoteFromSession(session) {
 
   const quote = orderBuilder.calculateQuote(deliveryCost);
   return { quote, deliveryCost, formatKey };
+}
+
+// ==============================================================================
+// MISS DE PRODUCTOS (espejo Barriles): sabor fuera de carta / no entendido
+// ==============================================================================
+
+/**
+ * askEventosFlavorsAfterMiss: Re-pregunta tras un miss (con o sin carrito).
+ *
+ * @param {object} [session]
+ * @returns {string}
+ */
+function askEventosFlavorsAfterMiss(session = {}) {
+  const hasCart = session.orderBuilder?.products
+    && Object.keys(session.orderBuilder.products).length > 0;
+  if (hasCart) {
+    return `*¿Todo bien con el pedido?*
+_(ej: escribe *ok* para el resumen, o "20L Mojito" / *quita el aperol*)_`;
+  }
+  return ASK_EVENT_COCKTAILS;
+}
+
+/**
+ * buildEventosProductOrderMissReply: Pedido no entendido en ELECCION_MENU.
+ * La lista de precios ya se envió: recordamos la carta sin fingir “no te entendí” genérico.
+ *
+ * @param {number} [strike=1]
+ * @param {object} [session]
+ * @returns {string}
+ */
+export function buildEventosProductOrderMissReply(strike = 1, session = {}) {
+  if (Number(strike) >= 2) {
+    return `Disculpa, no te entendí 😊 Soy un *asistente virtual*.
+Indícame un cóctel de la *lista* o escribe *HUMANO* para que te asista alguien del equipo.`;
+  }
+  return `Disculpa, no entendí tu pedido 😊
+Recuerda revisar la *lista de sabores* que te envié más arriba.
+
+${askEventosFlavorsAfterMiss(session)}`;
+}
+
+/**
+ * registerEventosProductOrderMiss: Suma strike y arma la respuesta del miss de menú.
+ * El engine respeta `stallHandled` para no duplicar el strike.
+ *
+ * @param {object} session
+ * @param {number} [stallThreshold=2]
+ * @returns {object} Resultado validateAndProcess
+ */
+export function registerEventosProductOrderMiss(session, stallThreshold = 2) {
+  const threshold = Math.max(2, Number(stallThreshold) || 2);
+  session.consecutiveErrors = (session.consecutiveErrors || 0) + 1;
+  const strike = session.consecutiveErrors;
+
+  if (strike > threshold) {
+    return {
+      success: true,
+      stallHandled: true,
+      nextState: 'CERRADO',
+      mute: true,
+      notifyAdmin: {
+        type: 'SOS',
+        title: 'ANTI-LOOP',
+        labelKey: 'asistencia',
+        body: 'Varios pedidos de cóctel no entendidos en Eventos (lista ya enviada).'
+      },
+      customReply: `Te comunico con alguien del equipo para ayudarte con tu pedido. ¡Ya te escriben! 🙌`
+    };
+  }
+
+  return {
+    success: true,
+    stallHandled: true,
+    nextState: 'EVENTOS_ELECCION_MENU',
+    customReply: buildEventosProductOrderMissReply(strike >= threshold ? 2 : 1, session)
+  };
+}
+
+/**
+ * formatEventosUnmatchedFlavorNote: Aviso cuando el mensaje trae un sabor fuera de carta
+ * junto a otros que sí matchearon (espejo Barriles).
+ *
+ * @param {string[]} unmatchedNames
+ * @returns {string}
+ */
+export function formatEventosUnmatchedFlavorNote(unmatchedNames = []) {
+  if (!unmatchedNames.length) return '';
+  const verb = unmatchedNames.length > 1 ? 'están' : 'está';
+  return `\n\n😅 *${unmatchedNames.join(', ')}* aún no ${verb} en la carta. Si quieres, elige otro de la lista de arriba.`;
 }

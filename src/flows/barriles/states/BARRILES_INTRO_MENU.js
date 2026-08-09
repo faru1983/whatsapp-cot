@@ -1,17 +1,19 @@
 // ==============================================================================
 // OBJETIVO: Paso BARRILES_INTRO_MENU — tras ver precios/catálogo, ¿quiere pedir?
-// Menú estricto 1️⃣ Sí / 2️⃣ No (dígito, emoji o palabras de referencia).
+// Menú 1️⃣ Sí / 2️⃣ No: keywords (pedido/compra / gracias / solo eso) → IA si hay duda.
 // Si no elige → success:false → engine: disculpa + menú + strikes.
 // ==============================================================================
 import { defineState } from '../../../logic/compile-state.js';
-import { matchKeywordIntent, rulesMenuUnoDos } from '../../../logic/keyword-intent.js';
+import { resolveDecisionIntent } from '../../../logic/decision-intent.js';
+import { rulesMenuUnoDos } from '../../../logic/keyword-intent.js';
 import { withAssistantFooter } from '../../../logic/flow-rails.js';
 import { getBrowseOnlyGoodbye } from '../../../views/templates.js';
 import {
   barrilesPostPreciosMenuQuestion,
   ensureDesechableCart,
   askBarrilesFlavorsCopy,
-  BARRILES_PEDIDO_SYNONYMS
+  BARRILES_POST_PRECIOS_SI_SYNONYMS,
+  BARRILES_POST_PRECIOS_NO_SYNONYMS
 } from '../../../logic/barriles-intro.js';
 
 const MENU_Q = barrilesPostPreciosMenuQuestion();
@@ -32,17 +34,23 @@ export const BARRILES_INTRO_MENU = defineState({
   async validateAndProcess(messageText, session) {
     ensureDesechableCart(session);
 
-    // Menú estricto: solo keywords (sin NLU ni atajo de sabor en este paso)
-    const intent = matchKeywordIntent(
+    // Keywords primero (pedido/compra vs gracias/solo eso); si hay duda → NLU
+    const intent = await resolveDecisionIntent({
       messageText,
-      rulesMenuUnoDos({
+      session,
+      stepQuestion: SHORT_Q,
+      allowedLabels: ['PEDIDO', 'NO'],
+      keywordRules: rulesMenuUnoDos({
         labelUno: 'PEDIDO',
         labelDos: 'NO',
-        // sí/dale/ok + sinónimos de pedido (compra, orden, etc.)
-        extraUno: new RegExp(`s[ií]|dale|\\bok\\b|seguir|continuar|${BARRILES_PEDIDO_SYNONYMS.source}`, 'i'),
-        extraDos: /no,?\s*gracias|\bno\b|nop|nope|solo\s+miraba|ahora\s+no|opci[oó]n\s*2|^(dos|segunda?)$/i
-      })
-    );
+        extraUno: BARRILES_POST_PRECIOS_SI_SYNONYMS,
+        extraDos: BARRILES_POST_PRECIOS_NO_SYNONYMS
+      }),
+      labelHints: {
+        PEDIDO: 'Opción 1 / quiere hacer un pedido o comprar por WhatsApp (1, 1️⃣, sí, pedir, comprar, orden).',
+        NO: 'Opción 2 / no quiere pedir ahora (2, 2️⃣, no gracias, gracias, solo eso, solo miraba).'
+      }
+    });
 
     // 2️⃣ No → despedida amable + mute (sin SOS; solo estaba mirando precios)
     if (intent === 'NO') {

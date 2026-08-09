@@ -524,13 +524,13 @@ _(ej: Los Alerces 123, Depto 456)_`;
 
 /**
  * looksLikeBarrilesPedidoCorrectionIntent: ¿El cliente dice que se equivocó / quiere cambiar un dato?
- * Cubre variantes: "me equivoqué", "mejor…", "cambia la fecha", "en realidad es…".
+ * Cubre variantes: "me equivoqué", "perdón", "era el…", "mejor…", "en realidad es…".
  *
  * @param {string} text
  * @returns {boolean}
  */
 export function looksLikeBarrilesPedidoCorrectionIntent(text) {
-  return /\b(me\s+equivoc|equivocad[oa]|mejor\b|cambia(r|mos)?|correg(ir|e|imos)?|no\s+era|en\s+realidad|era\s+para|es\s+para\b|quise\s+decir|actualiz(a|ar)|otro\s+d[ií]a|otra\s+fecha|otra\s+comuna)\b/i.test(
+  return /\b(me\s+equivoq|equivocad[oa]|perd[oó]n|disculp[ae]?|mejor\b|cambia(r|mos)?|correg(ir|e|imos)?|no\s+era|en\s+realidad|era\s+(el|la|para)|es\s+(el|la|para)\b|quise\s+decir|actualiz(a|ar)|otro\s+d[ií]a|otra\s+fecha|otra\s+comuna)\b/i.test(
     String(text || '')
   );
 }

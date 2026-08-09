@@ -5,7 +5,8 @@ import {
   formatEventCocktailLitersLine,
   formatBarrelPartsLabel,
   getMocktailFamilyOptions,
-  getAllMocktailNames
+  getAllMocktailNames,
+  findLocationByFuzzyMatch
 } from '../logic/utils.js';
 import { OrderBuilder } from '../logic/order-builder.js';
 import { formatMenuBlock, MENU_WRITE_CTA } from '../logic/flow-rails.js';
@@ -389,8 +390,8 @@ export function composeAdminAlertMessage({ type, title, clientLabel, body }) {
 // ==============================================================================
 
 /**
- * getEventFormatPitch: Caption corto al elegir Dispensador/Muro (va con foto/video).
- * Mantiene la promesa “todo incluido, sin costo adicional” en forma compacta.
+ * getEventFormatPitch: Caption corto al elegir Dispensador/Muro (compat / tests).
+ * El intro nuevo usa buildFormatPhaseBText; este pitch mantiene la promesa “incluido”.
  *
  * @param {'dispensador'|'muro'} formatKey - Formato elegido
  * @returns {string} Pitch de lo incluido en el servicio
@@ -398,18 +399,16 @@ export function composeAdminAlertMessage({ type, title, clientLabel, body }) {
 export function getEventFormatPitch(formatKey) {
   const isMuro = formatKey === 'muro';
   const nombre = isMuro ? 'Muro de Coctelería' : 'Dispensador Portátil';
-  const gancho = isMuro
-    ? 'Barra premium con LED: punto de atracción, cócteles rápidos y gran presentación.'
-    : 'Ideal para todo tipo de eventos: sin electricidad, mantiene el frío y se adapta a tu espacio.';
+  const install = isMuro
+    ? `se instala con un costo de instalación y pagas por los cócteles que elijas`
+    : `se instala *gratis* y solo pagas por los cócteles que elijas`;
 
-  return `¡Excelente elección! 🍸
+  return `¡Genial! 🍸 Nuestro *${nombre}* ${install}.
 
-*${nombre}*: ${gancho}
-
-✨ *Todo esto está incluido, sin costo adicional:*
+✨ Además, todo esto está incluido sin costo adicional:
 🧊 Hielo · 🍊 Garnish · 🥂 Vasos/copas · 🧰 Accesorios de bar
 
-⏰ Instalamos antes del evento y retiramos al día siguiente (sin límite de tiempo ni costos ocultos).`;
+⏰ Instalamos horas antes del evento y retiramos como máximo al día siguiente.`;
 }
 
 /**
@@ -485,18 +484,17 @@ _(ej: son 80 invitados / es en Providencia)_`
 }
 
 /**
- * getEventosContactIntroAsk: Pedido corto de nombre + correo tras aprobar la cotización.
- * Explica por qué (copia formal) sin párrafos largos.
+ * getEventosContactIntroAsk: Intro corto (compat). Preferir buildEventosContactIntro.
  *
  * @returns {string}
  */
 export function getEventosContactIntroAsk() {
   return `Perfecto 🥂
 
-Para enviarte la *copia formal* de tu cotización, necesito tu *nombre* y *correo*.
+Para armar tu *cotización formal* y enviarte una *copia al correo*, te pediré unos datos *uno por uno*.
 
-*¿Me los compartes?*
-_(ej: Ana Pérez, ana@email.com)_`;
+*¿Me confirmas la fecha del evento?*
+_(ej: 15 de mayo o 15/05/2026)_`;
 }
 
 /**
@@ -516,37 +514,120 @@ _(después te pido la dirección de despacho)_`;
 }
 
 /**
- * getEventosEnvioSummary: Confirmación liviana antes de crear la cotización web.
- * Solo muestra contacto (lo recién indicado); el pedido ya se aprobó en COTIZACIÓN.
+ * getEventosQuoteSummary: Resumen final estilo carrito (contacto + cotización) antes de la API.
+ * Espejo de getBarrilesPurchaseSummary para Eventos (Dispensador / Muro).
+ *
+ * @param {object} session
+ * @returns {string[]} [resumen, pregunta OK / corregir]
+ */
+export function getEventosQuoteSummary(session) {
+  const formatKey = session.eventoFormato === 'Muro de Coctelería' ? 'muro' : 'dispensador';
+  const orderBuilder = new OrderBuilder(formatKey, preciosData);
+  orderBuilder.products = session.orderBuilder?.products || {};
+  orderBuilder.extras = session.orderBuilder?.extras || {};
+
+  let deliveryCost = null;
+  let isRM = session.isRM;
+  if (session.location) {
+    const loc = findLocationByFuzzyMatch(session.location);
+    if (loc) {
+      isRM = loc.isRM;
+      if (loc.isRM && loc.deliveryCost?.evento != null) {
+        deliveryCost = loc.deliveryCost.evento;
+      }
+    }
+  }
+
+  const quote = orderBuilder.calculateQuote(deliveryCost);
+  if (session.orderBuilder) session.orderBuilder.quote = quote;
+
+  const c = session.contact || {};
+  const fullName = titleCaseWords(`${c.firstName || ''} ${c.lastName || ''}`.trim()) || '—';
+  const phone = c.phone || session.clientPhoneE164 || '';
+  const email = c.email || '—';
+
+  let text = `✅ *COTIZACIÓN FORMAL*\n`;
+  text += `====================\n\n`;
+
+  text += `👤 *Datos:*\n`;
+  text += phone ? `*${fullName}*, ${phone}\n` : `*${fullName}*\n`;
+  text += `_${email}_\n`;
+  text += `📅 ${session.date || 'Por confirmar'}\n`;
+  text += `📍 ${session.location || 'Por confirmar'}\n`;
+
+  text += `\n--------------------\n\n`;
+  text += `🥂 ${session.celebrationType || 'Evento'} · ${session.eventoFormato || '—'}`;
+  if (session.guests) text += ` · ${session.guests} invitados`;
+  text += `\n\n`;
+
+  text += `🍹 *Pedido*\n`;
+  const cocktailGroups = groupCocktailLinesByName(quote.details || []);
+  for (const group of cocktailGroups) {
+    text += `- ${formatEventCocktailLitersLine(group, { prefix: '', showUnitMath: true })}\n`;
+  }
+  for (const detail of quote.details || []) {
+    if (!detail.isExtra) continue;
+    text += `- ${detail.quantity}x ${detail.name}: ${formatPrice(detail.lineTotal)}\n`;
+  }
+
+  text += `\n--------------------\n`;
+  text += `Subtotal cócteles: ${formatPrice(quote.subtotal)}\n`;
+  if (quote.totalLiters > 0) {
+    let litersLine = `Litros: ${quote.totalLiters}L · ≈ ${quote.totalDrinks} cócteles`;
+    if (session.guests) {
+      const perPerson = quote.totalDrinks / session.guests;
+      const perPersonStr = Number.isInteger(perPerson)
+        ? String(perPerson)
+        : perPerson.toFixed(1);
+      litersLine += ` (≈ ${perPersonStr} por persona)`;
+    }
+    text += `${litersLine}\n`;
+  }
+  if (quote.installation > 0) {
+    text += `Instalación Muro: ${formatPrice(quote.installation)}\n`;
+  } else {
+    text += `Instalación Dispensador: ${formatPrice(0)}\n`;
+  }
+
+  if (deliveryCost != null) {
+    text += `Despacho/Logística (${session.location}): ${formatPrice(deliveryCost)}\n`;
+    text += `====================\n`;
+    text += `*TOTAL: ${formatPrice(quote.total)}*`;
+  } else if (isRM === false) {
+    text += `Despacho/Logística: _por confirmar_ (fuera de RM)\n`;
+    text += `====================\n`;
+    text += `*TOTAL: ${formatPrice(quote.subtotal + (quote.installation || 0))}*\n`;
+    text += `_(+ logística por confirmar)_`;
+  } else {
+    text += `Despacho/Logística: _por confirmar al agendar_\n`;
+    text += `====================\n`;
+    text += `*TOTAL: ${formatPrice(quote.subtotal + (quote.installation || 0))}*`;
+  }
+
+  if (quote.missingPrices?.length > 0) {
+    text += `\n\n⚠️ Sin precio en catálogo:\n`;
+    for (const m of quote.missingPrices) {
+      text += `- ${m.name} (${m.litrage})\n`;
+    }
+  }
+
+  return [
+    text.trim(),
+    `*¿Todo bien con tu cotización?*
+
+Escribe *OK* para crearla y enviarte la copia formal, o dime qué quieres *modificar*.
+_(ej: email ana@nuevo.com, es en Providencia, quita el aperol)_`
+  ];
+}
+
+/**
+ * getEventosEnvioSummary: Alias del resumen formal (compat CONFIRMAR_ENVIO).
  *
  * @param {object} session
  * @returns {string[]}
  */
 export function getEventosEnvioSummary(session) {
-  const c = session.contact || {};
-  const fullName = `${c.firstName || ''} ${c.lastName || ''}`.trim() || '—';
-  const phone = c.phone || session.clientPhoneE164 || '';
-
-  const lines = [
-    `📋 *Datos para enviarte la cotización:*`,
-    ``,
-    `👤 *${fullName}*`,
-    `✉️ ${c.email || '—'}`
-  ];
-
-  if (phone) lines.push(`📱 ${phone}`);
-
-  // Si completó fecha/comuna en este tramo, las mostramos (no el pedido completo otra vez)
-  if (session.date) lines.push(`📅 ${session.date}`);
-  if (session.location) lines.push(`📍 ${session.location}`);
-
-  return [
-    lines.join('\n'),
-    `*¿Todo bien?*
-
-Escribe *OK* para crear tu cotización formal, o corrige el dato que falte.
-_(ej: email ana@nuevo.com)_`
-  ];
+  return getEventosQuoteSummary(session);
 }
 
 /**
@@ -656,24 +737,25 @@ _(ej: cambia la fecha, agrega 1 sangría, la comuna es Providencia)_`
 }
 
 /**
- * getEventFormatRecommendation: Caption único al salir de confirmación de datos.
- * Recomendación + menú 1️⃣/2️⃣ en la misma burbuja (con la foto); sin repreguntar aparte.
+ * getEventFormatRecommendation: Caption de elección Dispensador/Muro (sin invitados).
+ * Compat: firma antigua (guests, instalacion) ignorada; el copy ya no usa N invitados.
  *
- * @param {number} guests - Invitados
- * @param {string} instalacionMuroStr - Precio muro ya formateado (ej. $50.000)
- * @returns {string} Caption completo para la imagen eventos_ambas
+ * @param {number} [_guests]
+ * @param {string} [instalacionMuroStr] - Precio muro ya formateado (opcional)
+ * @returns {string}
  */
-export function getEventFormatRecommendation(guests, instalacionMuroStr) {
-  const recomendacion = guests < 100 ? '*Dispensador Portátil*' : '*Muro de Coctelería*';
-  return `Para *${guests} invitados* te recomendamos nuestro ${recomendacion}.
+export function getEventFormatRecommendation(_guests, instalacionMuroStr) {
+  const instalacion = instalacionMuroStr
+    || formatPrice(preciosData.instalacion_muro || 50000);
+  return `En *Servicio para Eventos* puedes elegir el formato que mejor calza con tu celebración:
 
-Por supuesto, puedes elegir el que prefieras:
+1️⃣ *Dispensador Portátil* — ideal para eventos de *cualquier tamaño*. Instalación gratis, pedido mín. 10L
 
-1️⃣ *Dispensador Portátil* — instalación gratis, pedido mín. 10L
+2️⃣ *Muro de Coctelería* — ideal para eventos *grandes o masivos*. Instalación ${instalacion}, pedido mín. 30L
 
-2️⃣ *Muro de Coctelería* — instalación ${instalacionMuroStr}, pedido mín. 30L
+${MENU_WRITE_CTA}
 
-${MENU_WRITE_CTA}`;
+${formatMenuBlock(['Dispensador', 'Muro'])}`;
 }
 
 // ==============================================================================

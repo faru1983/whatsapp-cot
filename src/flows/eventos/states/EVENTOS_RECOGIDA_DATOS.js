@@ -1,10 +1,10 @@
 // ==============================================================================
-// OBJETIVO: Paso EVENTOS_RECOGIDA_DATOS — entrada Eventos con preguntas en cadena.
-// A) tipo de evento (pregunta abierta + parser/NLU) → B) invitados → C) fecha+comuna (opcionales).
-// Solo invitados es obligatorio; fecha/comuna se pueden saltar con *después*.
+// OBJETIVO: Paso EVENTOS_RECOGIDA_DATOS — intro Eventos con formato ya fijado.
+// Fase A) tipo de evento → B) invitados. Luego → INTRO_MENU (cotizar / duda).
+// Fecha/comuna ya no se piden aquí (quedan opcionales más adelante / Por confirmar).
 // ==============================================================================
 import { defineState } from '../../../logic/compile-state.js';
-import { getEventDataSummary, getBrowseOnlyGoodbye } from '../../../views/templates.js';
+import { getBrowseOnlyGoodbye, getEventLitersSuggestion } from '../../../views/templates.js';
 import {
   asksPriceOrCatalog,
   buildContextualPriceOrCatalogTip,
@@ -21,36 +21,24 @@ import {
   wantsSkipCelebrationType,
   wantsEventInfoOnly,
   wantsUnknownGuestsCount,
-  wantsSkipEventLogistics,
-  wantsUnknownLocationOnly,
   looksLikeCelebrationUncertainty,
-  asksEquipmentOrResaleQuestion
+  asksEquipmentOrResaleQuestion,
+  getEventFormatKey
 } from '../../../logic/eventos-helpers.js';
 import { isLikelyThirdPartyBotReply, isGreetingOrNoise } from '../../../logic/interruptions.js';
 import { withAssistantFooter } from '../../../logic/flow-rails.js';
 import {
   extractCelebrationTypeWithAI,
   classifyEventosInfoOnlyWithAI,
-  extractEventLogisticsWithAI,
   lastBotText
 } from '../../../logic/nlu-intent.js';
-import { findLocationByFuzzyMatch, parseDate } from '../../../logic/utils.js';
-import { normalizeBotDateText } from '../../../logic/cot-event-quote.js';
-
-/** Pregunta A: tipo de evento (abierta). Estilo: *pregunta* + _(ej: …)_ en la línea siguiente. */
-const ASK_CELEBRATION = `*¿Qué tipo de evento estás organizando?*
-_(ej: matrimonio, cumpleaños, empresa, etc.)_`;
-
-/** Pitch + pregunta A al entrar al flujo (sin web como CTA principal). */
-const WELCOME = `*Cocktails on Tap* es una estación de coctelería autoservicio: convierte tu celebración en una experiencia moderna, entretenida y sin filas, con cócteles listos en segundos directo a la copa. 🍸
-
-${ASK_CELEBRATION}`;
-
-/** Pregunta C: fecha y comuna opcionales. */
-const ASK_LOGISTICS = `*¿Me compartes fecha y comuna del evento?*
-_(ej: 15 de mayo, Las Condes)_
-
-_(si aún no las tienes, escribe *después* para seguir)_`;
+import {
+  askCelebrationCopy,
+  askGuestsCopyCanonical,
+  buildFormatPhaseAReplies,
+  buildFormatPhaseBReplies,
+  eventosIntroMenuQuestion
+} from '../../../logic/eventos-intro.js';
 
 /** Cierre suave: sin evento concreto, solo info/precios → web. */
 const REPLY_INFO_ONLY_WEB = `Entiendo: si aún no tienes un evento o celebración definida y solo necesitas información, te invitamos a revisar nuestra web. En *Cotizar* puedes simular distintas opciones y ver precios:
@@ -59,39 +47,24 @@ const REPLY_INFO_ONLY_WEB = `Entiendo: si aún no tienes un evento o celebració
 
 Cuando tengas más claro el evento (invitados, fecha), escríbeme y te ayudo por aquí. 🥂`;
 
-/** Pregunta B canónica (invitados). */
-const ASK_GUESTS = `*¿Cuántos invitados serán aproximadamente?*
-_(ej: 10, 20 invitados o 50 aprox.)_`;
-
 /** Si no sabe invitados: pedir un aproximado (no cerrar). */
 const ASK_GUESTS_APPROX = `Sin problema: un *aproximado* sirve perfecto.
 
 *¿Cuántos invitados calculas más o menos?*
 _(ej: 50 o unas 80)_`;
 
-const AI_PROMPT = `[SISTEMA - ESTADO: DATOS DEL EVENTO (entrada progresiva)]
-Eres el asistente virtual de Cocktails on Tap. El cliente está en Servicio para Eventos.
-Orden: (A) tipo de evento (pregunta abierta + parser/NLU; o skip → Por confirmar), (B) invitados, (C) fecha+comuna opcionales.
+const AI_PROMPT = `[SISTEMA - ESTADO: DATOS DEL EVENTO (formato ya elegido)]
+Eres el asistente virtual de Cocktails on Tap. El cliente YA eligió Dispensador o Muro.
+Orden: (A) tipo de evento (pregunta abierta + parser/NLU; o skip → Por confirmar), (B) invitados.
 Si el cliente NO tiene evento y solo quiere precios/info a futuro → invitar a la web (Cotizar), no insistir con datos.
-0. NO digas "hola" ni te presentes como asistente virtual (el copy de entrada ya es directo).
+0. NO digas "hola" ni te presentes como asistente virtual.
 1. Responde dudas breves y amigables.
-2. REGLA DE COBERTURA: RM = todas las comunas. Fuera de RM = evaluar según tamaño del evento y fecha (experiencia de referencia Valparaíso/Coquimbo); seguir cotizando para que el equipo confirme viaje. NUNCA digas que hay cobertura fija en La Serena/Coquimbo ni des la bienvenida a la ciudad.
+2. REGLA DE COBERTURA: RM = todas las comunas. Fuera de RM = evaluar según tamaño del evento y fecha; seguir cotizando para que el equipo confirme viaje. NUNCA digas cobertura fija en La Serena/Coquimbo.
 3. REGLA DE LOGÍSTICA: Instalación Dispensador gratis, Muro $50.000. NUNCA inventes tarifas de envío.
 4. NUNCA cotices ni calcules precios finales todavía.
 5. Puedes mencionar www.cocktailsontap.cl/eventos si pregunta precios; no lo presentes como menú obligatorio.
 6. Si faltan invitados, pídelos (un aproximado sirve). Si no tiene evento y solo quiere precios/info a futuro, invítalo a cotizar en la web.
-7. Fecha y comuna son opcionales: acepta "después" (u omitir) para seguir.
-8. Al final, re-pregunta solo el dato pendiente (tipo, invitados o fecha/comuna).`;
-
-/**
- * welcomeForSession: Copy de entrada (pregunta A).
- *
- * @param {object} [_session]
- * @returns {string}
- */
-function welcomeForSession(_session) {
-  return WELCOME;
-}
+7. Al final, re-pregunta solo el dato pendiente (tipo o invitados).`;
 
 /**
  * hasGuests: ¿Ya hay cantidad de invitados en sesión?
@@ -104,28 +77,7 @@ function hasGuests(session) {
 }
 
 /**
- * hasLogistics: ¿Hay fecha o comuna anotada?
- *
- * @param {object} session
- * @returns {boolean}
- */
-function hasLogistics(session) {
-  return Boolean(session?.date || session?.location);
-}
-
-/**
- * logisticsDone: ¿Podemos saltar o ya resolvimos la pregunta C?
- *
- * @param {object} session
- * @returns {boolean}
- */
-function logisticsDone(session) {
-  return hasLogistics(session) || Boolean(session?.eventosLogisticsSkipped);
-}
-
-/**
  * needsCelebrationType: ¿Todavía debemos pedir el tipo de evento?
- * Si lo saltó ("no sé" / ninguno), no insistimos: queda "Por confirmar".
  *
  * @param {object} session
  * @returns {boolean}
@@ -135,58 +87,42 @@ function needsCelebrationType(session) {
 }
 
 /**
- * askGuestsCopy: Pregunta B, con ack del tipo o del skip.
+ * formatKeyFromSession: Clave dispensador|muro (fallback dispensador).
  *
  * @param {object} session
- * @returns {string}
+ * @returns {'dispensador'|'muro'}
  */
-function askGuestsCopy(session) {
-  const type = session.celebrationType;
-  let ack = '';
-  if (type) {
-    ack = `Perfecto, anoté *${type}*. 🍸\n`;
-  } else if (session.eventosCelebrationSkipped) {
-    ack = `Sin problema, el tipo lo dejamos por confirmar. 🍸\n`;
+function formatKeyFromSession(session) {
+  return getEventFormatKey(session?.eventoFormato);
+}
+
+/**
+ * welcomeForSession: Si ya hay formato, reenvía intro fase A; si no, pide tipo.
+ *
+ * @param {object} session
+ * @returns {string|Array}
+ */
+function welcomeForSession(session) {
+  if (session?.eventoFormato) {
+    return buildFormatPhaseAReplies(formatKeyFromSession(session));
   }
-  return `${ack}Para recomendarte el mejor formato Dispensador o Muro.
-
-${ASK_GUESTS}`;
+  return askCelebrationCopy();
 }
 
 /**
- * skipCelebrationAndAskGuests: Marca tipo como omitido y pide invitados.
- *
- * @param {object} session
- * @returns {object}
- */
-function skipCelebrationAndAskGuests(session) {
-  session.eventosCelebrationSkipped = true;
-  session.celebrationType = null;
-  return {
-    success: true,
-    nextState: 'EVENTOS_RECOGIDA_DATOS',
-    customReply: askGuestsCopy(session),
-    flowProgress: true
-  };
-}
-
-/**
- * shortQuestionForSession: Re-pregunta según el dato pendiente (A → B → C).
+ * shortQuestionForSession: Re-pregunta según el dato pendiente (A → B).
  *
  * @param {object} session
  * @returns {string}
  */
 function shortQuestionForSession(session) {
   if (needsCelebrationType(session) && !hasGuests(session)) {
-    return withAssistantFooter(ASK_CELEBRATION);
+    return withAssistantFooter(askCelebrationCopy());
   }
   if (!hasGuests(session)) {
-    return withAssistantFooter(ASK_GUESTS);
+    return withAssistantFooter(askGuestsCopyCanonical());
   }
-  if (!logisticsDone(session)) {
-    return withAssistantFooter(ASK_LOGISTICS);
-  }
-  return withAssistantFooter(`*¿Me confirmas los datos del evento para seguir?*`);
+  return withAssistantFooter(eventosIntroMenuQuestion());
 }
 
 /**
@@ -197,45 +133,6 @@ function shortQuestionForSession(session) {
  */
 function messageLooksLikeGuests(messageText) {
   return extractGuestsFromMessage(messageText) !== null;
-}
-
-/**
- * isLogisticsSkip: ¿Quiere omitir fecha/comuna? (alias → helper compartido)
- *
- * @param {string} messageText
- * @returns {boolean}
- */
-function isLogisticsSkip(messageText) {
-  return wantsSkipEventLogistics(messageText);
-}
-
-/**
- * applyLogisticsFromAi: Aplica date/location del NLU a la sesión (sin inventar comuna).
- *
- * @param {object} session
- * @param {{ date?: string|null, location?: string|null }} ai
- * @returns {boolean} true si guardó algo nuevo
- */
-function applyLogisticsFromAi(session, ai) {
-  let changed = false;
-  if (ai?.date && !session.date) {
-    // Misma canonización que parseDate programático (DD/MM/YYYY si es concreta)
-    session.date = normalizeBotDateText(ai.date) || ai.date;
-    changed = true;
-  }
-  if (ai?.location) {
-    const fuzzy = findLocationByFuzzyMatch(ai.location);
-    const locName = fuzzy?.name || ai.location;
-    if (locName && locName !== session.location) {
-      session.location = locName;
-      if (fuzzy) {
-        session.isRM = fuzzy.isRM;
-        session.region = fuzzy.region;
-      }
-      changed = true;
-    }
-  }
-  return changed;
 }
 
 /**
@@ -253,16 +150,63 @@ function goInfoOnlyWeb() {
 }
 
 /**
- * goConfirm: Avanza al resumen con los datos anotados.
+ * goIntroMenu: Tras tipo + invitados → sugerencia de litros + menú cotizar / duda.
  *
  * @param {object} session
  * @returns {object}
  */
-function goConfirm(session) {
+function goIntroMenu(session) {
+  const type = session.celebrationType;
+  const guests = session.guests;
+  let ack = `Perfecto`;
+  if (type) ack += `, *${type}*`;
+  if (guests) ack += ` con *${guests}* invitados`;
+  ack += `. 🍸`;
+
+  // Orientación de consumo según invitados (antes estaba al abrir la carta)
+  const formatKey = formatKeyFromSession(session);
+  const litersHint = getEventLitersSuggestion(session.guests, formatKey);
+
   return {
     success: true,
-    nextState: 'EVENTOS_CONFIRMAR_DATOS',
-    customReplies: getEventDataSummary(session)
+    nextState: 'EVENTOS_INTRO_MENU',
+    customReplies: [
+      `${ack}\n\n${litersHint}`,
+      eventosIntroMenuQuestion()
+    ],
+    flowProgress: true
+  };
+}
+
+/**
+ * skipCelebrationAndAskGuests: Marca tipo omitido y pide invitados (fase B con imagen).
+ *
+ * @param {object} session
+ * @returns {object}
+ */
+function skipCelebrationAndAskGuests(session) {
+  session.eventosCelebrationSkipped = true;
+  session.celebrationType = null;
+  return {
+    success: true,
+    nextState: 'EVENTOS_RECOGIDA_DATOS',
+    customReplies: buildFormatPhaseBReplies(formatKeyFromSession(session), session),
+    flowProgress: true
+  };
+}
+
+/**
+ * askGuestsPhaseB: Pasa a fase B (imagen + incluido + invitados).
+ *
+ * @param {object} session
+ * @returns {object}
+ */
+function askGuestsPhaseB(session) {
+  return {
+    success: true,
+    nextState: 'EVENTOS_RECOGIDA_DATOS',
+    customReplies: buildFormatPhaseBReplies(formatKeyFromSession(session), session),
+    flowProgress: true
   };
 }
 
@@ -280,14 +224,7 @@ export const EVENTOS_RECOGIDA_DATOS = defineState({
       return { success: false };
     }
 
-    // Pregunta C abierta: skip fecha/comuna (si además hay fecha en el texto, no skipear aquí)
-    const awaitingLogistics = hasGuests(session) && !logisticsDone(session);
-    if (awaitingLogistics && isLogisticsSkip(messageText) && !parseDate(messageText)) {
-      session.eventosLogisticsSkipped = true;
-      return goConfirm(session);
-    }
-
-    // Mirón / Instagram → despedida + mute (no aplica al skip de logística)
+    // Mirón / Instagram → despedida + mute
     if (wantsBrowseOnlyClose(messageText)
         && !/^(no|nop|nope|nah)$/i.test(trimmed)) {
       return {
@@ -309,28 +246,19 @@ export const EVENTOS_RECOGIDA_DATOS = defineState({
       };
     }
 
-    // Sin evento real / solo precios o info a futuro → web (simulador Cotizar)
-    // Compra de equipo ≠ info-only (va a FAQ / strike / handoff)
+    // Sin evento real / solo precios o info a futuro → web
     if (!hasGuests(session) && !messageLooksLikeGuests(messageText)
         && !asksEquipmentOrResaleQuestion(messageText)
         && wantsEventInfoOnly(messageText)) {
       return goInfoOnlyWeb();
     }
 
-    // Cobertura (¿llegan a X?): respuesta programática con datos.json (no LLM/FAQ)
-    // No extraemos comuna como dato del evento: preguntar ≠ confirmar el lugar.
+    // Cobertura (¿llegan a X?): respuesta programática
     if (asksCoverageAreaQuestion(messageText) && !messageLooksLikeGuests(messageText)) {
       const coverage = buildEventosCoverageReply(messageText);
-      let pendingAsk = ASK_CELEBRATION;
-      if (!needsCelebrationType(session) && !hasGuests(session)) {
-        pendingAsk = ASK_GUESTS;
-      } else if (hasGuests(session) && !logisticsDone(session)) {
-        pendingAsk = ASK_LOGISTICS;
-      } else if (hasGuests(session) && logisticsDone(session)) {
-        pendingAsk = '*¿Seguimos con tu cotización?*';
-      } else if (needsCelebrationType(session)) {
-        pendingAsk = ASK_CELEBRATION;
-      }
+      const pendingAsk = needsCelebrationType(session) && !hasGuests(session)
+        ? askCelebrationCopy()
+        : askGuestsCopyCanonical();
       return {
         success: true,
         nextState: 'EVENTOS_RECOGIDA_DATOS',
@@ -354,7 +282,7 @@ export const EVENTOS_RECOGIDA_DATOS = defineState({
       return skipCelebrationAndAskGuests(session);
     }
 
-    // Extraemos lo que venga (tipo típico / invitados / fecha / comuna en un dump)
+    // Extraemos lo que venga (tipo / invitados; fecha/comuna se guardan si vienen)
     const hasNewInfo = applyEventDataFromMessage(messageText, session);
     const guestsJustParsed = messageLooksLikeGuests(messageText);
 
@@ -363,7 +291,7 @@ export const EVENTOS_RECOGIDA_DATOS = defineState({
       session.celebrationType = 'Empresa';
     }
 
-    // Precios sin invitados: si es “solo info/sin evento” → web; si no, tip + dato pendiente
+    // Precios sin invitados: tip + dato pendiente
     const isAskingForPriceWithoutData = asksPriceOrCatalog(messageText)
       && !hasGuests(session)
       && !guestsJustParsed;
@@ -373,8 +301,8 @@ export const EVENTOS_RECOGIDA_DATOS = defineState({
       }
       const tip = buildContextualPriceOrCatalogTip(session, 'EVENTOS_RECOGIDA_DATOS', messageText);
       const pending = needsCelebrationType(session)
-        ? ASK_CELEBRATION
-        : ASK_GUESTS;
+        ? askCelebrationCopy()
+        : askGuestsCopyCanonical();
       return {
         success: true,
         nextState: 'EVENTOS_RECOGIDA_DATOS',
@@ -383,7 +311,7 @@ export const EVENTOS_RECOGIDA_DATOS = defineState({
       };
     }
 
-    // Aún no sabe cuántos invitados → pedir aproximado (no cerrar ni FAQ rara)
+    // Aún no sabe cuántos invitados → pedir aproximado
     if (!hasGuests(session) && !guestsJustParsed && wantsUnknownGuestsCount(messageText)) {
       return {
         success: true,
@@ -393,15 +321,16 @@ export const EVENTOS_RECOGIDA_DATOS = defineState({
       };
     }
 
-    // Duda dispensador/muro → copy fijo + dato pendiente
+    // Duda dispensador/muro con formato ya fijo → explicar + dato pendiente
     if (asksEventServiceFormatQuestion(messageText) && !guestsJustParsed) {
+      const formato = session.eventoFormato || 'Dispensador Portátil / Muro';
       const pendingAsk = !hasGuests(session)
-        ? askGuestsCopy(session)
-        : ASK_LOGISTICS;
+        ? (needsCelebrationType(session) ? askCelebrationCopy() : askGuestsCopyCanonical())
+        : eventosIntroMenuQuestion();
       return {
         success: true,
         nextState: 'EVENTOS_RECOGIDA_DATOS',
-        customReply: `En *Servicio para Eventos* los cócteles van en barril y los sirves con nuestra estación (*Dispensador Portátil* o *Muro de Coctelería*): instalación, hielo, vasos y accesorios incluidos. 🍸
+        customReply: `Estamos cotizando el *${formato}*: cócteles en barril con estación, instalación, hielo, vasos y accesorios incluidos. 🍸
 
 Si buscas solo llevar barriles a tu casa, es nuestro servicio de *Barriles Desechables* (5L).
 
@@ -410,98 +339,35 @@ ${pendingAsk}`,
       };
     }
 
-    // Con invitados + logística lista (datos o skip) → resumen
-    if (hasGuests(session) && logisticsDone(session)) {
-      return goConfirm(session);
+    // Con invitados → menú cotizar / duda
+    if (hasGuests(session)) {
+      return goIntroMenu(session);
     }
 
-    // Pregunta C: fecha/comuna (opcionales)
-    if (hasGuests(session) && !logisticsDone(session)) {
-      // Ya pedimos C: interpretar skip, parcial o NLU (no repetir el mismo copy a ciegas)
-      if (session.eventosLogisticsAsked) {
-        // Fecha parcial + "lugar aún no" → avanzar (comuna Por confirmar)
-        if (session.date && wantsUnknownLocationOnly(messageText)) {
-          return goConfirm(session);
-        }
-        if (wantsSkipEventLogistics(messageText) && !session.date && !session.location) {
-          session.eventosLogisticsSkipped = true;
-          return goConfirm(session);
-        }
-        // Si applyEventData ya puso fecha o comuna → confirmar
-        if (session.date || session.location) {
-          return goConfirm(session);
-        }
-
-        const aiLog = await extractEventLogisticsWithAI(messageText, lastBotText(session));
-        if (aiLog?.skip && !aiLog.date && !aiLog.location) {
-          session.eventosLogisticsSkipped = true;
-          return goConfirm(session);
-        }
-        if (aiLog && (aiLog.date || aiLog.location)) {
-          applyLogisticsFromAi(session, aiLog);
-          // Si dio fecha y dejó claro que no sabe lugar → confirmar
-          if (session.date && wantsUnknownLocationOnly(messageText)) {
-            return goConfirm(session);
-          }
-          if (session.date || session.location) {
-            return goConfirm(session);
-          }
-        }
-
-        // No entendimos: re-pregunta corta con pista de skip (no el mismo párrafo largo)
-        return {
-          success: true,
-          nextState: 'EVENTOS_RECOGIDA_DATOS',
-          customReply: `No capté una *fecha* o *comuna* concretas 😊
-
-*¿Me compartes fecha y comuna del evento?*
-_(ej: 15 de mayo, Las Condes — o escribe *después* para seguir sin eso)_`,
-          flowProgress: true
-        };
-      }
-
-      // Primera vez en C → presentar pregunta
-      session.eventosLogisticsAsked = true;
-      const ackParts = [];
-      if (session.celebrationType) ackParts.push(`*${session.celebrationType}*`);
-      ackParts.push(`*${session.guests}* invitados`);
-      return {
-        success: true,
-        nextState: 'EVENTOS_RECOGIDA_DATOS',
-        customReply: `Perfecto, anoté ${ackParts.join(', ')}.
-
-${ASK_LOGISTICS}`,
-        flowProgress: true
-      };
-    }
-
-    // Tipo anotado (texto libre / dump parcial) sin invitados → pregunta B
+    // Tipo anotado sin invitados → fase B
     if (session.celebrationType && !hasGuests(session) && hasNewInfo) {
-      return {
-        success: true,
-        nextState: 'EVENTOS_RECOGIDA_DATOS',
-        customReply: askGuestsCopy(session),
-        flowProgress: true
-      };
+      return askGuestsPhaseB(session);
     }
 
-    // Parcial raro (solo fecha/comuna sin invitados) → pedir invitados
+    // Parcial (solo fecha/comuna sin invitados) → pedir invitados
     if (hasNewInfo && !hasGuests(session)) {
+      if (session.celebrationType || session.eventosCelebrationSkipped) {
+        return askGuestsPhaseB(session);
+      }
+      // Guardó fecha/comuna pero aún falta tipo: seguir en A
       const got = [];
-      if (session.celebrationType) got.push(`celebración: *${session.celebrationType}*`);
       if (session.date) got.push(`fecha: *${session.date}*`);
       if (session.location) got.push(`comuna: *${session.location}*`);
       const ack = got.length > 0 ? `Perfecto, anoté ${got.join(', ')}. ` : `Perfecto. `;
       return {
         success: true,
         nextState: 'EVENTOS_RECOGIDA_DATOS',
-        customReply: `${ack}Para recomendarte el mejor formato (Dispensador o Muro), ¿cuántos *invitados* serán aproximadamente?`,
+        customReply: `${ack}${askCelebrationCopy()}`,
         flowProgress: true
       };
     }
 
-    // Tipo aún vacío: NLU texto libre o skip (“no sé”)
-    // Skip del NLU solo si el mensaje también suena a incertidumbre (no gibberish)
+    // Tipo aún vacío: NLU texto libre o skip
     if (needsCelebrationType(session) && !guestsJustParsed && !isGreetingOrNoise(messageText) && trimmed.length >= 2) {
       const ai = await extractCelebrationTypeWithAI(messageText, lastBotText(session));
       if (ai?.skip && looksLikeCelebrationUncertainty(messageText)) {
@@ -510,18 +376,11 @@ ${ASK_LOGISTICS}`,
       const fromAi = normalizeCelebrationLabel(ai?.celebrationType);
       if (fromAi) {
         session.celebrationType = fromAi;
-        return {
-          success: true,
-          nextState: 'EVENTOS_RECOGIDA_DATOS',
-          customReply: askGuestsCopy(session),
-          flowProgress: true
-        };
+        return askGuestsPhaseB(session);
       }
     }
 
-    // Sin invitados: NLU — ¿solo info/sin evento (web) o no sabe cantidad (aproximado)?
-    // Con strikes activos no soft-close a web (anti-loop / FAQ del engine).
-    // Preguntas de compra de equipo ≠ INFO_ONLY.
+    // Sin invitados: NLU — ¿solo info (web) o no sabe cantidad?
     if (!hasGuests(session) && !guestsJustParsed && !isGreetingOrNoise(messageText)
         && trimmed.length >= 4
         && !(session.consecutiveErrors > 0)

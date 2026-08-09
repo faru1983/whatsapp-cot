@@ -76,6 +76,23 @@ export const BARRILES_PEDIDO_SYNONYMS =
   /hacer\s+((un|una)\s+)?(pedido|compra|orden)|\b(pedido|compra|orden)\b|\bcomprar\b|\border\b|\bcotizar\b|quiero\s+(pedir|comprar|ordenar)|armar\s+((un|una)\s+)?(pedido|compra|orden)|opci[oó]n\s*1|^(uno|primera?)$/i;
 
 /**
+ * BARRILES_POST_PRECIOS_SI_SYNONYMS: Tras ver catálogo, equivale a 1️⃣ (sí, pedir).
+ * Afirmaciones cortas (sí/ok/dale) O sinónimos de pedido/compra.
+ * "ok" solo al mensaje completo — así "ok gracias" no pisa la opción 2️⃣.
+ */
+export const BARRILES_POST_PRECIOS_SI_SYNONYMS = new RegExp(
+  `^(s[ií]|dale|ok|okay|claro|vamos|seguimos|continuar|obvio)[.!]*$|${BARRILES_PEDIDO_SYNONYMS.source}`,
+  'i'
+);
+
+/**
+ * BARRILES_POST_PRECIOS_NO_SYNONYMS: Tras ver catálogo, equivale a 2️⃣ (no / solo miraba).
+ * Cubre "no gracias", "gracias" solo, "solo eso" y cierres suaves similares.
+ */
+export const BARRILES_POST_PRECIOS_NO_SYNONYMS =
+  /no,?\s*gracias|\bno\s+gracias\b|^(gracias|grax|gracias\s+igual)[.!]*$|\bok\s*,?\s*gracias\b|\bperfecto\s+gracias\b|solo\s+(eso|eso\s+por\s+ahora|miraba|estaba\s+mirando)|eso\s+es\s+todo|por\s+ahora\s+(no|eso|nada)|nada\s+m[aá]s|ahora\s+no|\bnop\b|\bnope\b|\bnah\b|solo\s+quer[ií]a\s+ver|solo\s+mirar|opci[oó]n\s*2|^(dos|segunda?)$/i;
+
+/**
  * BARRILES_PRECIOS_SYNONYMS: Palabras/frases que equivalen a la opción 2️⃣ (ver precios).
  * Cubre variantes del mismo patrón: precios, valores, costo, vale/valen, catálogo, etc.
  * Lo usa FILTRO_CANAL para no desalinear sinónimos.
@@ -553,13 +570,25 @@ export function buildBarrilesPedidoReplies() {
 }
 
 /**
+ * buildBarrilesPreciosCatalogCaption: Pie de la imagen al elegir “ver precios”.
+ * Recuerda la web y deja el menú sí/no en la burbuja siguiente.
+ *
+ * @returns {string}
+ */
+export function buildBarrilesPreciosCatalogCaption() {
+  return `👆 Catálogo completo con sabores y precios.
+
+También puedes hacer tu pedido en https://cocktailsontap.cl/barriles`;
+}
+
+/**
  * buildBarrilesPreciosReplies: Opción 2️⃣ (ver precios) → catálogo + ¿quieres pedir?
  *
  * @returns {Array} customReplies para el engine
  */
 export function buildBarrilesPreciosReplies() {
   return [
-    buildBarrilesCatalogImage('👆 Catálogo completo con sabores y precios.'),
+    buildBarrilesCatalogImage(buildBarrilesPreciosCatalogCaption()),
     barrilesPostPreciosMenuQuestion()
   ];
 }
@@ -570,7 +599,7 @@ export function buildBarrilesPreciosReplies() {
  * @returns {string}
  */
 export function buildBarrilesAskDoubtReply() {
-  return `Perfecto. 😊 Escríbeme tu duda y te conectamos con el equipo para responderte.`;
+  return `Perfecto. 😊 Escríbeme tu duda y te respondemos enseguida.`;
 }
 
 /**

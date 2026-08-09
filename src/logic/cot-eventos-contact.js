@@ -3,15 +3,26 @@
 // Los usan EVENTOS_DATOS_CONTACTO y EVENTOS_CONFIRMAR_ENVIO.
 // ==============================================================================
 import { withAssistantFooter } from './flow-rails.js';
-import { ensureContactBucket, applyContactFromMessage } from './cot-contact.js';
+import {
+  ensureContactBucket,
+  applyContactFromMessage,
+  parseEmailFromText,
+  parsePersonNames,
+  isPrimarilyDateMessage
+} from './cot-contact.js';
 import {
   applyEventDataFromMessage,
   extractGuestsFromMessage,
   getEventFormatKey
 } from './eventos-helpers.js';
-import { submitEventQuoteFromSession, toIsoDateFromBotText } from './cot-event-quote.js';
+import {
+  submitEventQuoteFromSession,
+  toIsoDateFromBotText,
+  exampleConcreteDateHint,
+  normalizeBotDateText
+} from './cot-event-quote.js';
 import { canSubmitCotApiWrite, isCotApiMockMode } from './cot-api.js';
-import { formatPrice, preciosData } from './utils.js';
+import { formatPrice, preciosData, parseDate, findLocationByFuzzyMatch } from './utils.js';
 import { buildAdminEventosOrderBody, getEventQuoteCreatedReply } from '../views/templates.js';
 
 /**
@@ -177,6 +188,8 @@ _(ej: Ana Pérez, ana@email.com)_`;
 
 /**
  * applyEventosContactDataFromMessage: Aplica datos de evento + contacto del mensaje.
+ * Usar en CONFIRMAR_ENVIO (correcciones libres). En DATOS_CONTACTO preferir
+ * applyEventosContactPhaseFromMessage para no mezclar comuna → nombre.
  *
  * @param {string} messageText
  * @param {object} session
@@ -210,6 +223,116 @@ export function applyEventosContactDataFromMessage(messageText, session) {
   });
 
   return before !== after;
+}
+
+/**
+ * applyEventosContactPhaseFromMessage: Aplica SOLO el dato de la fase actual.
+ * Evita que "Providencia" se guarde como nombre o que una fecha pise invitados.
+ *
+ * @param {string} messageText
+ * @param {object} session
+ * @param {string} phase - fecha | comuna | invitados | nombre | email
+ * @returns {boolean} true si cambió el dato de esa fase
+ */
+export function applyEventosContactPhaseFromMessage(messageText, session, phase) {
+  ensureContactBucket(session);
+  const trimmed = String(messageText || '').trim();
+  if (!trimmed) return false;
+
+  if (phase === 'fecha') {
+    const before = session.date;
+    const dateSearch = parseDate(trimmed);
+    if (!dateSearch) return false;
+    session.date = normalizeBotDateText(dateSearch) || dateSearch;
+    return session.date !== before;
+  }
+
+  if (phase === 'comuna') {
+    const before = session.location;
+    const locationSearch = findLocationByFuzzyMatch(trimmed);
+    if (locationSearch) {
+      session.location = locationSearch.name;
+      session.isRM = locationSearch.isRM;
+      session.region = locationSearch.region;
+      return session.location !== before;
+    }
+    // Fallback: "en Talca" / comuna fuera de catálogo
+    const locationMatch = trimmed.match(
+      /\b(?:en|comuna(?:\s+de)?)\s+((?:(?:el|la|los|las|lo)\s+)?[A-Za-záéíóúÁÉÍÓÚñÑ0-9]+(?:\s+[A-Za-záéíóúÁÉÍÓÚñÑ0-9]+){0,3})\b/i
+    );
+    if (locationMatch) {
+      const captured = locationMatch[1].trim();
+      if (
+        captured.length >= 3
+        && !/^(enero|febrero|marzo|abril|mayo|junio|julio|agosto|septiembre|octubre|noviembre|diciembre)$/i.test(captured)
+      ) {
+        session.location = captured;
+        session.isRM = false;
+        return session.location !== before;
+      }
+    }
+    // Frase corta sin email/fecha → asumir comuna (fase dedicada)
+    if (
+      !parseEmailFromText(trimmed)
+      && !isPrimarilyDateMessage(trimmed)
+      && /^[A-Za-záéíóúÁÉÍÓÚñÑ0-9\s.]{3,40}$/.test(trimmed)
+    ) {
+      session.location = trimmed.replace(/^(en|comuna)\s+/i, '').trim();
+      session.isRM = Boolean(findLocationByFuzzyMatch(session.location)?.isRM);
+      return session.location !== before;
+    }
+    return false;
+  }
+
+  if (phase === 'invitados') {
+    const before = session.guests;
+    let guests = extractGuestsFromMessage(trimmed);
+    if (!(guests > 0)) {
+      const m = trimmed.match(/^\s*(\d{1,4})\s*$/);
+      if (m) {
+        const n = Number(m[1]);
+        if (n > 0 && n <= 5000) guests = n;
+      }
+    }
+    if (!(guests > 0)) return false;
+    session.guests = guests;
+    return Number(session.guests) !== Number(before);
+  }
+
+  if (phase === 'nombre') {
+    const before = `${session.contact?.firstName || ''}|${session.contact?.lastName || ''}`;
+    const names = parsePersonNames(trimmed);
+    if (!names.firstName) return false;
+
+    if (names.lastName) {
+      // Nombre + apellido en un mensaje
+      session.contact.firstName = names.firstName;
+      session.contact.lastName = names.lastName;
+    } else if (!String(session.contact.firstName || '').trim()) {
+      // Primera palabra → nombre
+      session.contact.firstName = names.firstName;
+    } else if (!String(session.contact.lastName || '').trim()) {
+      // Segunda respuesta → apellido
+      session.contact.lastName = names.firstName;
+    } else {
+      // Ya había nombre completo: reemplazar con el nuevo parse
+      session.contact.firstName = names.firstName;
+      if (names.lastName) session.contact.lastName = names.lastName;
+    }
+
+    const after = `${session.contact?.firstName || ''}|${session.contact?.lastName || ''}`;
+    return after !== before;
+  }
+
+  if (phase === 'email') {
+    const before = session.contact?.email;
+    const email = parseEmailFromText(trimmed);
+    if (!email) return false;
+    session.contact.email = email;
+    return session.contact.email !== before;
+  }
+
+  return false;
 }
 
 /**
@@ -342,4 +465,213 @@ export function wantsToChangeEventosOrder(messageText) {
   return /\b(c[oó]ctel(?:es)?|sabor(?:es)?|men[uú]|agregar|quitar|eliminar|modificar\s+(el\s+)?men[uú]|cambiar\s+(el\s+)?men[uú]|cambiar\s+(los\s+)?c[oó]cteles|litros?)(?=\s|$|[.,!?¿?])/i.test(
     text
   );
+}
+
+// ==============================================================================
+// CHECKOUT FORMAL (fases uno a uno — espejo de Barriles, sin dirección)
+// Orden: fecha → comuna → nombre → email → confirm (resumen cotización)
+// ==============================================================================
+
+/**
+ * Fases del contacto Eventos.
+ * Invitados casi siempre vienen de EVENTOS_RECOGIDA_DATOS; si faltan, se piden aquí
+ * (red de seguridad) entre comuna y nombre.
+ */
+export const EVENTOS_CONTACT_PHASES = ['fecha', 'comuna', 'invitados', 'nombre', 'email'];
+
+/**
+ * resolveEventosContactPhase: Qué dato falta ahora para la cotización formal.
+ *
+ * @param {object} session
+ * @returns {'fecha'|'comuna'|'invitados'|'nombre'|'email'|'confirm'}
+ */
+export function resolveEventosContactPhase(session) {
+  ensureContactBucket(session);
+  const c = session.contact || {};
+
+  if (!toIsoDateFromBotText(session.date)) return 'fecha';
+  if (!session.location) return 'comuna';
+  // Red de seguridad: invitados deberían venir del intro
+  if (!(Number(session.guests) > 0)) return 'invitados';
+  if (!String(c.firstName || '').trim() || !String(c.lastName || '').trim()) return 'nombre';
+  if (!String(c.email || '').trim() || !/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(c.email)) {
+    return 'email';
+  }
+  return 'confirm';
+}
+
+/**
+ * askEventosContactPhase: Pregunta corta de la fase actual.
+ *
+ * @param {string} phase
+ * @param {object} [session]
+ * @returns {string}
+ */
+export function askEventosContactPhase(phase, session = {}) {
+  const exampleDay = exampleConcreteDateHint();
+  const firstName = String(session.contact?.firstName || '').trim();
+
+  if (phase === 'fecha') {
+    const hasPartialDate = Boolean(session.date) && !toIsoDateFromBotText(session.date);
+    const monthOnly = capitalizeMonthHint(session.date);
+    if (hasPartialDate && monthOnly) {
+      const mm = monthNumberHint(monthOnly);
+      return `Me indicaste que el evento es en *${monthOnly}*.
+
+*¿Me confirmas el día tentativo?*
+_(ej: 15 de ${monthOnly.toLowerCase()} o 15/${mm}/2026)_`;
+    }
+    if (hasPartialDate) {
+      return `Anoté *${session.date}*, pero necesito el *día concreto*.
+
+*¿Me confirmas una fecha tentativa?*
+_(ej: ${exampleDay} o 15/05/2026)_`;
+    }
+    return `*¿Me confirmas la fecha del evento?*
+_(ej: ${exampleDay} o 15/05/2026)_`;
+  }
+
+  if (phase === 'comuna') {
+    return `*¿En qué comuna será el evento?*
+_(ej: Providencia o Las Condes)_`;
+  }
+
+  if (phase === 'invitados') {
+    return `*¿Cuántos invitados serán aproximadamente?*
+_(ej: 50)_`;
+  }
+
+  if (phase === 'nombre') {
+    return `*¿Me confirmas tu nombre y apellido?*
+_(ej: Ana Pérez)_`;
+  }
+
+  if (phase === 'email') {
+    return `*¿A qué correo enviamos la copia formal de tu cotización?*
+_(ej: ana@email.com)_`;
+  }
+
+  if (firstName) {
+    return `Gracias *${firstName}*. Revisemos el resumen…`;
+  }
+  return 'Revisemos el resumen de tu cotización…';
+}
+
+/**
+ * buildEventosContactIntro: Aviso de cotización formal + primera pregunta.
+ *
+ * @param {object} session
+ * @returns {string}
+ */
+export function buildEventosContactIntro(session) {
+  const phase = resolveEventosContactPhase(session);
+  session.eventosContactPhase = phase;
+  if (phase === 'confirm') {
+    return 'Perfecto, ya tenemos lo necesario para armar tu cotización formal 🙂';
+  }
+  return `Perfecto 🥂
+
+Para armar tu *cotización formal* y enviarte una *copia al correo*, te pediré unos datos *uno por uno*.
+
+${askEventosContactPhase(phase, session)}`;
+}
+
+/**
+ * looksLikeEventosContactCorrectionIntent: ¿Dice que se equivocó / quiere cambiar un dato?
+ * Misma familia que Barriles: perdón, era el…, me equivoqué, mejor…, etc.
+ *
+ * @param {string} text
+ * @returns {boolean}
+ */
+export function looksLikeEventosContactCorrectionIntent(text) {
+  return /\b(me\s+equivoq|equivocad[oa]|perd[oó]n|disculp[ae]?|mejor\b|cambia(r|mos)?|correg(ir|e|imos)?|no\s+era|en\s+realidad|era\s+(el|la|para)|es\s+(el|la|para)\b|quise\s+decir|actualiz(a|ar)|otro\s+d[ií]a|otra\s+fecha|otra\s+comuna)\b/i.test(
+    String(text || '')
+  );
+}
+
+/**
+ * tryApplyEventosContactPriorCorrection: Corrige un dato ya pedido sin confundir la fase actual.
+ *
+ * @param {string} messageText
+ * @param {object} session
+ * @param {string} currentPhase
+ * @returns {{ field: string, ack: string }|null}
+ */
+export function tryApplyEventosContactPriorCorrection(messageText, session, currentPhase) {
+  const phase = String(currentPhase || '');
+  const phaseIdx = EVENTOS_CONTACT_PHASES.indexOf(phase);
+  if (phaseIdx <= 0) return null;
+
+  ensureContactBucket(session);
+  const trimmed = String(messageText || '').trim();
+  if (!trimmed) return null;
+
+  const hasCorrIntent = looksLikeEventosContactCorrectionIntent(trimmed);
+
+  if (phaseIdx > EVENTOS_CONTACT_PHASES.indexOf('fecha')) {
+    const rawDate = parseDate(trimmed);
+    const looksDate = Boolean(rawDate)
+      && (
+        hasCorrIntent
+        || isPrimarilyDateMessage(trimmed)
+        || /^(para\s+(el|la)|el|la)\s+/i.test(trimmed)
+        || /\b(lunes|martes|mi[eé]rcoles|jueves|viernes|s[aá]bado|domingo)\b/i.test(trimmed)
+      );
+    if (looksDate && rawDate) {
+      const normalized = normalizeBotDateText(rawDate) || rawDate;
+      // Solo aceptar si quedó fecha concreta (no mes suelto)
+      if (!toIsoDateFromBotText(normalized) && !toIsoDateFromBotText(rawDate)) {
+        return null;
+      }
+      session.date = normalized;
+      return { field: 'fecha', ack: `Listo, corregí la fecha a *${normalized}* ✅` };
+    }
+  }
+
+  if (phaseIdx > EVENTOS_CONTACT_PHASES.indexOf('comuna')) {
+    const locationSearch = findLocationByFuzzyMatch(trimmed);
+    const hasEmail = Boolean(parseEmailFromText(trimmed));
+    const looksComunaMsg = Boolean(locationSearch)
+      && !hasEmail
+      && (
+        hasCorrIntent
+        || /^(en\s+)?[A-Za-záéíóúÁÉÍÓÚñÑ\s]{3,40}$/.test(trimmed)
+      );
+    if (looksComunaMsg && locationSearch) {
+      session.location = locationSearch.name;
+      session.isRM = locationSearch.isRM;
+      session.region = locationSearch.region;
+      return { field: 'comuna', ack: `Listo, corregí la comuna a *${locationSearch.name}* ✅` };
+    }
+  }
+
+  if (phaseIdx > EVENTOS_CONTACT_PHASES.indexOf('email')) {
+    const email = parseEmailFromText(trimmed);
+    if (email && (hasCorrIntent || /^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(trimmed))) {
+      session.contact.email = email;
+      return { field: 'email', ack: `Listo, corregí el correo a *${email}* ✅` };
+    }
+  }
+
+  if (phaseIdx > EVENTOS_CONTACT_PHASES.indexOf('nombre')) {
+    if (!isPrimarilyDateMessage(trimmed) && !findLocationByFuzzyMatch(trimmed)) {
+      const before = `${session.contact?.firstName || ''}|${session.contact?.lastName || ''}`;
+      applyContactFromMessage(trimmed, session);
+      const c = session.contact || {};
+      const after = `${c.firstName || ''}|${c.lastName || ''}`;
+      if (
+        after !== before
+        && String(c.firstName || '').trim()
+        && String(c.lastName || '').trim()
+        && (hasCorrIntent || /^\s*[A-Za-záéíóúÁÉÍÓÚñÑ]+(\s+[A-Za-záéíóúÁÉÍÓÚñÑ]+)+\s*$/.test(trimmed))
+      ) {
+        return {
+          field: 'nombre',
+          ack: `Listo, corregí el nombre a *${c.firstName} ${c.lastName}* ✅`
+        };
+      }
+    }
+  }
+
+  return null;
 }

@@ -501,8 +501,9 @@ async function processMessageUnlocked(sessionId, messageText, options = {}) {
       'BARRILES_FILTRO_CANAL',
       'BARRILES_INTRO_MENU',
       'BARRILES_RECOGIDA_PRODUCTOS',
+      'EVENTOS_ELECCION_FORMATO',
       'EVENTOS_RECOGIDA_DATOS',
-      'EVENTOS_CONFIRMAR_DATOS'
+      'EVENTOS_INTRO_MENU'
     ];
     
     if (earlyStates.includes(currentStateId)) {
@@ -555,6 +556,8 @@ async function processMessageUnlocked(sessionId, messageText, options = {}) {
           session.isRM = undefined;
           session.celebrationType = null;
           session.eventoFormato = null;
+          session.eventosAwaitingDoubt = false;
+          session.eventosCelebrationSkipped = false;
           session.orderBuilder = {
             type: 'desechable',
             products: {},
@@ -570,9 +573,14 @@ async function processMessageUnlocked(sessionId, messageText, options = {}) {
           session.isRM = undefined;
           session.celebrationType = null;
           session.eventoFormato = null;
+          session.eventosAwaitingDoubt = false;
+          session.eventosCelebrationSkipped = false;
         }
 
-        session.currentState = switchIntent === 'BARRILES' ? 'BARRILES_FILTRO_CANAL' : 'EVENTOS_RECOGIDA_DATOS';
+        // Eventos sin formato → elegir Dispensador/Muro primero
+        session.currentState = switchIntent === 'BARRILES'
+          ? 'BARRILES_FILTRO_CANAL'
+          : 'EVENTOS_ELECCION_FORMATO';
 
         // Puede ser string o array (info + pregunta en burbujas separadas)
         const newState = statesMap[session.currentState];
@@ -614,19 +622,21 @@ async function processMessageUnlocked(sessionId, messageText, options = {}) {
   // "sí, tenemos" sin decir cuáles ni dejar avanzar el pedido.
   const skipFaqForNonAlcoholic = wantsNonAlcoholicOption(messageText);
 
-  // Barriles productos: "tienes piña colada?" / "cuáles tienes" lo resuelve el estado
+  // Barriles/Eventos productos: "tienes piña colada?" / "cuáles tienes" lo resuelve el estado
   // (fuera de carta o lista compacta); el FAQ no debe adelantarse.
-  const skipFaqForBarrilesProductsAsk = currentStateId === 'BARRILES_RECOGIDA_PRODUCTOS'
-    && (
-      looksLikeUnrecognizedFlavorAttempt(messageText)
-      || asksAvailableCocktailsList(messageText)
-    );
+  const skipFaqForProductsFlavorAsk = (
+    currentStateId === 'BARRILES_RECOGIDA_PRODUCTOS'
+    || currentStateId === 'EVENTOS_ELECCION_MENU'
+  ) && (
+    looksLikeUnrecognizedFlavorAttempt(messageText)
+    || asksAvailableCocktailsList(messageText)
+  );
 
   // Si ya hubo un strike y el paso sigue pendiente, no usamos FAQ: dejamos que el fallback cuente el strike
   if (isQuestion && canPrecheckFaq && !flowAlreadyStalling && faqSidequestAllowed
       && !skipFaqForContextualPrice && !skipFaqForStrictBarrilesMenu
       && !skipFaqForEventosCoverage && !skipFaqForNonAlcoholic
-      && !skipFaqForBarrilesProductsAsk) {
+      && !skipFaqForProductsFlavorAsk) {
     cliLog(`FAQ PRE-CHECK: Detectada posible pregunta en '${messageText}'`);
     const faqData = JSON.parse(fs.readFileSync(FAQ_JSON_PATH, 'utf8'));
     const faqResponse = await responderFAQ(messageText, faqData, {

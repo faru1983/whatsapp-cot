@@ -101,7 +101,7 @@ Cada estado exporta (vía `defineState`):
 
 **Barriles:** `BARRILES_FILTRO_CANAL` (web + comuna/fecha) → `BARRILES_RECOGIDA_PRODUCTOS` → `BARRILES_REVISION_COTIZACION` (si ya hay datos; si no → `BARRILES_RECOGIDA_DATOS` como red de seguridad) → `BARRILES_ROUTER_MODIFICACION` (modificar) o `BARRILES_DATOS_CONTACTO` (generar compra) → `BARRILES_CONFIRMAR_COMPRA` → `POST /api/v1/direct-sales` → `CERRADO`.
 
-**Eventos:** `EVENTOS_RECOGIDA_DATOS` → `EVENTOS_CONFIRMAR_DATOS` → `EVENTOS_ELECCION_FORMATO` → `EVENTOS_INTRO_MENU` → `EVENTOS_ELECCION_MENU` → `EVENTOS_COTIZACION` → `EVENTOS_DATOS_CONTACTO` → `EVENTOS_CONFIRMAR_ENVIO` → `POST /api/v1/quotes` → `CERRADO`.
+**Eventos:** `EVENTOS_ELECCION_FORMATO` (o CTA Meta Dispensador/Muro → formato fijado) → `EVENTOS_RECOGIDA_DATOS` (tipo → invitados) → `EVENTOS_INTRO_MENU` (cotizar / duda→SOS) → `EVENTOS_ELECCION_MENU` → `EVENTOS_COTIZACION` → `EVENTOS_DATOS_CONTACTO` → `EVENTOS_CONFIRMAR_ENVIO` → `POST /api/v1/quotes` → `CERRADO`.
 
 IDs semánticos (`BARRILES_*` / `EVENTOS_*`); transiciones reales en cada `nextState`.
 

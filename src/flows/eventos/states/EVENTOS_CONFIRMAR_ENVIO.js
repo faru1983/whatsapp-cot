@@ -3,7 +3,7 @@
 // El cliente revisa contacto, evento y pedido; solo entonces creamos la cotización web.
 // ==============================================================================
 import { defineState } from '../../../logic/compile-state.js';
-import { getEventosEnvioSummary } from '../../../views/templates.js';
+import { getEventosQuoteSummary } from '../../../views/templates.js';
 import { resolveDecisionIntent } from '../../../logic/decision-intent.js';
 import { rulesConfirmarOCorregirDatos } from '../../../logic/keyword-intent.js';
 import { withAssistantFooter } from '../../../logic/flow-rails.js';
@@ -27,22 +27,22 @@ import {
   shouldAskCliApiModeOnConfirm
 } from '../../../logic/cot-api.js';
 
-const SHORT_Q = withAssistantFooter(`*¿Todo bien?*
+const SHORT_Q = withAssistantFooter(`*¿Todo bien con tu cotización?*
 
-Escribe *OK* para crear tu cotización formal, o corrige el dato que falte.
+Escribe *OK* para crearla y enviarte la copia formal, o dime qué quieres *modificar*.
 _(ej: email ana@nuevo.com)_`);
 
-const AI_PROMPT = `[SISTEMA - ESTADO: CONFIRMAR ENVÍO DE COTIZACIÓN EVENTOS]
-El cliente ya dio nombre/correo (y datos faltantes del evento si aplicaba).
+const AI_PROMPT = `[SISTEMA - ESTADO: CONFIRMAR COTIZACIÓN FORMAL EVENTOS]
+El cliente ya dio fecha, comuna, nombre y correo. Ve el resumen completo (pedido + totales).
 Debe escribir *OK* / *1* Confirmar, o corregir el dato (ej. "email ana@nuevo.com").
-1. Responde dudas breves sin inventar precios.
-2. Si corrige un dato, confirma el cambio y vuelve a pedir confirmación.
+1. Responde dudas breves sin inventar precios distintos al resumen.
+2. Si corrige un dato, confirma el cambio y vuelve a mostrar el resumen.
 3. NUNCA crees la cotización web hasta que confirme (ok / opción 1).
 4. Si quiere cambiar cócteles, indícale que puede escribirlo o escribir *corregir*.`;
 
 export const EVENTOS_CONFIRMAR_ENVIO = defineState({
   id: 'EVENTOS_CONFIRMAR_ENVIO',
-  promptQuestion: (session) => getEventosEnvioSummary(session),
+  promptQuestion: (session) => getEventosQuoteSummary(session),
   shortQuestion: SHORT_Q,
   aiPrompt: AI_PROMPT,
 
@@ -80,6 +80,7 @@ _(ej: 20L Mojito y 10L Aperol / quita el aperol / agrega 5L Sangría)_`
     const missing = getMissingEventosContactFields(session);
 
     if (missing.length) {
+      session.eventosContactPhase = null;
       return {
         success: true,
         nextState: 'EVENTOS_DATOS_CONTACTO',
@@ -92,7 +93,7 @@ _(ej: 20L Mojito y 10L Aperol / quita el aperol / agrega 5L Sangría)_`
       return {
         success: true,
         nextState: 'EVENTOS_CONFIRMAR_ENVIO',
-        customReplies: getEventosEnvioSummary(session),
+        customReplies: getEventosQuoteSummary(session),
         flowProgress: true
       };
     }

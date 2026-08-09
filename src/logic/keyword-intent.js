@@ -362,8 +362,31 @@ export function rulesDispensadorOMuro() {
 }
 
 /**
+ * looksLikeEventosDispensadorCta: CTA Meta / frase clara de Dispensador (sin Muro).
+ *
+ * @param {string} lower - Mensaje en minúsculas
+ * @returns {boolean}
+ */
+function looksLikeEventosDispensadorCta(lower) {
+  if (/\bmuro\b/i.test(lower)) return false;
+  return /\b(dispensador(\s+port[aá]til)?|dispensador\s+de\s+c[oó]cteles|servicio\s+con\s+dispensador)\b/i.test(lower);
+}
+
+/**
+ * looksLikeEventosMuroCta: CTA Meta / frase clara de Muro (sin Dispensador).
+ *
+ * @param {string} lower - Mensaje en minúsculas
+ * @returns {boolean}
+ */
+function looksLikeEventosMuroCta(lower) {
+  // Si menciona ambos formatos, no auto-fijamos (va a Eventos genérico o menú)
+  if (/\b(dispensador|port[aá]til)\b/i.test(lower) && /\bmuro\b/i.test(lower)) return false;
+  return /\b(muro(\s+de\s+cocteler[ií]a)?|servicio\s+con\s+muro)\b/i.test(lower);
+}
+
+/**
  * rulesRouterIntencion: Filtro determinístico de entrada.
- * Solo reconoce los dos flujos comerciales y el handoff humano.
+ * Prioridad: Humano → Eventos+formato (Meta Ads) → Eventos genérico → Barriles.
  * Cualquier otro texto queda sin etiqueta para que el router muestre el menú.
  *
  * @returns {Array<{ label: string, test: Function }>}
@@ -374,11 +397,22 @@ export function rulesRouterIntencion() {
       label: 'HUMANO',
       test: ({ trimmed }) => matchesMenuOption(trimmed, 3)
     },
+    // CTAs Meta Ads: fijar formato al entrar (antes del Eventos genérico)
+    {
+      label: 'EVENTOS_DISPENSADOR',
+      test: ({ lower }) => looksLikeEventosDispensadorCta(lower)
+    },
+    {
+      label: 'EVENTOS_MURO',
+      test: ({ lower }) => looksLikeEventosMuroCta(lower)
+    },
     {
       label: 'EVENTOS',
       test: ({ trimmed, lower }) => {
         if (matchesMenuOption(trimmed, 1)) return true;
-        return /\b(servicio para eventos|para un evento|evento|eventos|dispensador portatil|dispensador portátil|muro|matrimonio|matrimonios|cumplea[nñ]os)\b/i.test(lower);
+        // Genérico: eventos / celebración. NO “dispensador”/“muro” sueltos
+        // (esas van a EVENTOS_DISPENSADOR / EVENTOS_MURO arriba).
+        return /\b(servicio para eventos|para un evento|evento|eventos|matrimonio|matrimonios|cumplea[nñ]os)\b/i.test(lower);
       }
     },
     {

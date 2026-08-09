@@ -185,6 +185,26 @@ export function applyContactFromMessage(messageText, session) {
     return;
   }
 
+  // Comuna sola (ej. "Providencia"): no guardar como nombre
+  const locationHit = findLocationByFuzzyMatch(messageText);
+  if (
+    locationHit
+    && !email
+    && !/nombre\s*:/i.test(messageText)
+    && !/apellido\s*:/i.test(messageText)
+  ) {
+    const normMsg = normalizeString(String(messageText || '').trim());
+    const normLoc = normalizeString(locationHit.name || '');
+    if (
+      normMsg === normLoc
+      || normMsg === `en ${normLoc}`
+      || normMsg === `comuna ${normLoc}`
+      || normMsg === `comuna de ${normLoc}`
+    ) {
+      return;
+    }
+  }
+
   // Caso "solo apellido": ya teníamos nombre y el cliente responde una palabra
   const singleWord = String(messageText || '').trim();
   if (

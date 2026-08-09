@@ -282,11 +282,11 @@ Catálogo: www.cocktailsontap.cl/barriles`;
 Puedes ver la carta en https://www.cocktailsontap.cl/eventos — si seguimos por aquí, te la muestro al continuar.`;
     }
 
-    // Aún eligiendo Dispensador vs Muro (o datos previos): NUNCA ofrecer Desechable
-    const choosingFormat = sid === 'EVENTOS_ELECCION_FORMATO' || sid === 'EVENTOS_CONFIRMAR_DATOS';
+    // Aún eligiendo Dispensador vs Muro: NUNCA ofrecer Desechable
+    const choosingFormat = sid === 'EVENTOS_ELECCION_FORMATO';
     const continueHint = choosingFormat
       ? 'Si prefieres continuar por aquí, primero elige el formato.'
-      : 'Si prefieres continuar por aquí, te oriento según invitados y formato.';
+      : 'Si prefieres continuar por aquí, te oriento con el formato que ya elegiste.';
 
     return `Los precios dependen del servicio (*Dispensador* o *Muro*): hay barriles desde *5L* / *10L* según el formato que elijas.
 Puedes ver rangos en https://www.cocktailsontap.cl/eventos

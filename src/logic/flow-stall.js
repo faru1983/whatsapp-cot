@@ -57,7 +57,7 @@ export function getPendingFlowRequirement(session, stateId) {
       return session.eventoFormato ? null : 'format';
 
     case 'EVENTOS_INTRO_MENU':
-      return 'continue';
+      return session.eventosAwaitingDoubt ? 'doubt' : 'continue';
 
     case 'EVENTOS_ELECCION_MENU': {
       const products = session.orderBuilder?.products;
@@ -69,10 +69,18 @@ export function getPendingFlowRequirement(session, stateId) {
     case 'BARRILES_REVISION_COTIZACION':
       return 'confirm_quote';
 
-    case 'EVENTOS_DATOS_CONTACTO':
+    case 'EVENTOS_DATOS_CONTACTO': {
+      const phase = session.eventosContactPhase;
+      if (phase === 'fecha') return 'fecha';
+      if (phase === 'comuna') return 'comuna';
+      if (phase === 'invitados') return 'invitados';
+      if (phase === 'nombre') return 'nombre';
+      if (phase === 'email') return 'email';
+      return 'contact';
+    }
+
     case 'BARRILES_DATOS_CONTACTO':
       // Clave fija 'contact': el progreso parcial lo marca el estado con flowProgress
-      // (nombre→email→dirección). Así el anti-loop del engine cubre ruido repetido.
       return 'contact';
 
     case 'EVENTOS_CONFIRMAR_ENVIO':

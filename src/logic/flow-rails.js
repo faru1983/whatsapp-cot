@@ -188,7 +188,7 @@ _(ej: Mojito, Sangría, Ramazzotti — o "1 mojito y 2 sangría")_`,
     products: `*¿Qué sabor y cuántos barriles quieres?*
 _(ej: 2 mojitos — o escribe *lista*)_`,
     format: 'Escribe *1* *Dispensador* o *2* *Muro* para seguir.',
-    continue: 'Escribe *1* cuando quieras ver la carta y precios.',
+    continue: 'Escribe *1* para cotizar o *2* si tienes una duda.',
     doubt: 'Escríbeme tu duda y te conectamos con el equipo.',
     cart: `*¿Qué cócteles te gustaría incluir?*
 _(ej: 5L Mojito)_`,
@@ -239,6 +239,14 @@ _(ej: Los Alerces 123)_`
 _(ej: escribe *OK* para continuar, o "elimina el aperol, agrega 1 sangría")_`;
     }
     return hints.products;
+  }
+
+  // Eventos intro: menú cotizar/duda (o espera del texto de la duda)
+  if (stateId === 'EVENTOS_INTRO_MENU') {
+    if (session?.eventosAwaitingDoubt || pendingKey === 'doubt') {
+      return 'Escríbeme tu duda y te conectamos con el equipo.';
+    }
+    return null;
   }
 
   if (key && hints[key]) return hints[key];

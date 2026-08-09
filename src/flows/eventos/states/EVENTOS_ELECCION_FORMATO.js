@@ -1,32 +1,28 @@
 // ==============================================================================
-// OBJETIVO: Paso EVENTOS_ELECCION_FORMATO — Dispensador vs Muro (menú 1️⃣/2️⃣).
-// Al elegir, enviamos el pitch de lo incluido y pedimos ok para ver la carta.
+// OBJETIVO: Paso EVENTOS_ELECCION_FORMATO — puerta de entrada Dispensador vs Muro.
+// Se usa cuando el cliente eligió Eventos sin traer formato (menú / “evento”).
+// Al elegir, envía intro fase A (imagen + tipo de evento) → RECOGIDA_DATOS.
 // ==============================================================================
 import { defineState } from '../../../logic/compile-state.js';
-import { getEventFormatPitch } from '../../../views/templates.js';
 import { resolveDecisionIntent } from '../../../logic/decision-intent.js';
 import { rulesDispensadorOMuro } from '../../../logic/keyword-intent.js';
-import {
-  getEventFormatKey,
-  ensureEventOrderBuilder
-} from '../../../logic/eventos-helpers.js';
-import { img, vid } from '../../../logic/media.js';
 import {
   withAssistantFooter,
   formatMenuBlock,
   MENU_WRITE_CTA
 } from '../../../logic/flow-rails.js';
+import {
+  getEventFormatChoiceCaption,
+  buildEventFormatChoiceReplies,
+  enterEventosWithFormat
+} from '../../../logic/eventos-intro.js';
 
 const MENU_BLOCK = formatMenuBlock(['Dispensador', 'Muro']);
 
-// Re-pregunta corta (si dudó o eligió "ambos"); la entrada inicial ya trae el menú completo en la foto.
+// Re-pregunta corta (si dudó o eligió "ambos")
 const SHORT_Q = withAssistantFooter(`${MENU_WRITE_CTA}
 
 ${MENU_BLOCK}`);
-
-const ASK_INTRO = `*¿Quieres ver los cócteles disponibles y precios?*
-
-${formatMenuBlock(['Ver carta y precios', 'Hablar con Humano'])}`;
 
 // Respuesta fija si pide los dos formatos a la vez (no cotizamos ambos en el bot)
 const REPLY_AMBOS = `Idealmente cotizamos *uno* de los dos servicios (*Dispensador* o *Muro*).
@@ -37,21 +33,21 @@ Si prefieres seguir acá, ${MENU_WRITE_CTA.toLowerCase()}
 
 ${MENU_BLOCK}`;
 
-const AI_PROMPT = `[SISTEMA - ESTADO: PREGUNTAS SOBRE FORMATO DE EVENTO]
-El cliente ya recibió la recomendación de formato (Dispensador Portátil o Muro de Coctelería) pero tiene dudas en lugar de elegir.
-Ya está en Servicio para Eventos: NUNCA ofrezcas Barriles Desechables ni digas que hay "3 formatos" incluyendo desechable.
+const AI_PROMPT = `[SISTEMA - ESTADO: ELEGIR FORMATO DE EVENTO]
+El cliente está en Servicio para Eventos y debe elegir Dispensador Portátil o Muro de Coctelería.
+NUNCA ofrezcas Barriles Desechables ni digas que hay "3 formatos" incluyendo desechable.
 1. Responde su duda de forma breve y amigable.
 2. REGLA DE LOGÍSTICA: Instalación Dispensador = gratis; Muro = $50.000. NUNCA inventes tarifas de envío.
-3. Precios/carta: di que dependen del formato (Dispensador o Muro; barriles desde 5L/10L), menciona https://www.cocktailsontap.cl/eventos y pide elegir *1* o *2*. No cotices totales aún.
-4. NUNCA cotices ni calcules precios finales todavía.
+3. Orientación: Dispensador = eventos de cualquier tamaño (mín. 10L); Muro = grandes/masivos (mín. 30L).
+4. Precios/carta: di que dependen del formato, menciona https://www.cocktailsontap.cl/eventos y pide elegir *1* o *2*. No cotices totales aún.
 5. Si pide AMBOS formatos: explica que el bot cotiza uno a la vez; para ambos puede escribir HUMANO o elegir Dispensador/Muro.
 6. Al finalizar, recuérdale que escriba *1* *Dispensador* o *2* *Muro*.`;
 
 export const EVENTOS_ELECCION_FORMATO = defineState({
   id: 'EVENTOS_ELECCION_FORMATO',
-  promptQuestion: () => `${MENU_WRITE_CTA}
-
-${MENU_BLOCK}`,
+  // Primera entrada ya trae imagen+caption desde el router; esto es fallback/re-entry
+  texts: () => buildEventFormatChoiceReplies(),
+  promptQuestion: () => getEventFormatChoiceCaption(),
   shortQuestion: SHORT_Q,
   aiPrompt: AI_PROMPT,
 
@@ -63,8 +59,8 @@ ${MENU_BLOCK}`,
       allowedLabels: ['DISPENSADOR', 'MURO', 'AMBOS'],
       keywordRules: rulesDispensadorOMuro(),
       labelHints: {
-        DISPENSADOR: 'Elige opción 1 / Dispensador Portátil (instalación gratis, mínimo 10L). También: "1", "1️⃣", "uno".',
-        MURO: 'Elige opción 2 / Muro de Coctelería (instalación con costo, mínimo 30L). También: "2", "2️⃣", "dos".',
+        DISPENSADOR: 'Elige opción 1 / Dispensador Portátil (instalación gratis, mínimo 10L, eventos de cualquier tamaño). También: "1", "1️⃣", "uno".',
+        MURO: 'Elige opción 2 / Muro de Coctelería (instalación con costo, mínimo 30L, eventos grandes/masivos). También: "2", "2️⃣", "dos".',
         AMBOS: 'Quiere los dos formatos a la vez (ambos, las 2, los 2, 1 y 2, dispensador y muro).'
       }
     });
@@ -80,24 +76,8 @@ ${MENU_BLOCK}`,
     }
 
     if (intent === 'MURO' || intent === 'DISPENSADOR') {
-      session.eventoFormato = intent === 'MURO' ? 'Muro de Coctelería' : 'Dispensador Portátil';
-      const formatKey = getEventFormatKey(session.eventoFormato);
-      ensureEventOrderBuilder(session, formatKey);
-
-      // Pitch con media: Dispensador = foto, Muro = video; la carta va en INTRO_MENU
-      const pitch = getEventFormatPitch(formatKey);
-      const pitchPart = formatKey === 'dispensador'
-        ? img('eventos_dispensador1.webp', pitch)
-        : vid('eventos_muro.mp4', pitch);
-
-      return {
-        success: true,
-        nextState: 'EVENTOS_INTRO_MENU',
-        customReplies: [
-          pitchPart,
-          ASK_INTRO
-        ]
-      };
+      const formatKey = intent === 'MURO' ? 'muro' : 'dispensador';
+      return enterEventosWithFormat(session, formatKey);
     }
 
     return { success: false };

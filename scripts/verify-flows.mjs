@@ -107,6 +107,8 @@ assert(fs.existsSync(assetPath), `existe asset barril_desechable_precios.webp`);
 assert(fs.existsSync(path.join(ASSETS_DIR, 'dispensador_portatil_precios.webp')), `existe asset dispensador_portatil_precios.webp`);
 assert(fs.existsSync(path.join(ASSETS_DIR, 'muro_de_cocteleria_precios.webp')), `existe asset muro_de_cocteleria_precios.webp`);
 assert(fs.existsSync(path.join(ASSETS_DIR, 'eventos_ambas.webp')), `existe asset eventos_ambas.webp`);
+assert(fs.existsSync(path.join(ASSETS_DIR, 'dispensador_portatil.webp')), `existe asset dispensador_portatil.webp`);
+assert(fs.existsSync(path.join(ASSETS_DIR, 'muro_de_cocteleria.webp')), `existe asset muro_de_cocteleria.webp`);
 assert(fs.existsSync(path.join(ASSETS_DIR, 'eventos_dispensador1.webp')), `existe asset eventos_dispensador1.webp`);
 assert(fs.existsSync(path.join(ASSETS_DIR, 'eventos_muro.mp4')), `existe asset eventos_muro.mp4`);
 
@@ -580,14 +582,14 @@ assert(
   assert(/¡Compra lista!/i.test(saleClose), `cierre barriles título corto`);
   assert(!/filter\(Boolean\)/.test(saleClose), `sanity`);
 
-  // Pitch formato: corto + misma promesa de incluido
+  // Pitch formato: incluido + compacto
   const pitchMuro = getEventFormatPitch('muro');
   const pitchDisp = getEventFormatPitch('dispensador');
-  assert(/Todo esto está incluido, sin costo adicional/i.test(pitchMuro), `pitch muro mantiene incluido`);
+  assert(/todo esto está incluido sin costo adicional/i.test(pitchMuro), `pitch muro mantiene incluido`);
   assert(/Hielo/.test(pitchMuro) && /Garnish/.test(pitchMuro) && /Vasos/.test(pitchMuro), `pitch muro lista lo incluido`);
   assert(pitchMuro.length < 520, `pitch muro compacto (len=${pitchMuro.length})`);
   assert(!/verdadero punto de atracción para tus invitados/i.test(pitchMuro), `pitch muro sin intro larga`);
-  assert(/Todo esto está incluido, sin costo adicional/i.test(pitchDisp), `pitch dispensador mantiene incluido`);
+  assert(/todo esto está incluido sin costo adicional/i.test(pitchDisp), `pitch dispensador mantiene incluido`);
   assert(pitchDisp.length < 520, `pitch dispensador compacto (len=${pitchDisp.length})`);
 }
 
@@ -716,13 +718,13 @@ try {
     }
   ]);
 
-  await runCase('Router menú dígito 1 → Eventos', [
+  await runCase('Router menú dígito 1 → Eventos (elige formato)', [
     {
       input: '1',
-      expectState: 'EVENTOS_RECOGIDA_DATOS',
+      expectState: 'EVENTOS_ELECCION_FORMATO',
       expectMuted: false,
-      expectIncludes: ['Cocktails on Tap', 'tipo de evento', 'ej:', 'matrimonio'],
-      expectNotIncludes: ['¡Hola!', 'te guiaré', 'Soy el', 'asistente virtual', 'cocktailsontap.cl/eventos', 'Escribe el número']
+      expectIncludes: ['[IMG:eventos_ambas.webp]', 'Dispensador', 'Muro', 'cualquier tamaño', 'grandes o masivos'],
+      expectNotIncludes: ['¡Hola!', 'te guiaré', 'Soy el', 'asistente virtual']
     }
   ]);
 
@@ -734,10 +736,10 @@ try {
     },
     {
       input: '1',
-      expectState: 'EVENTOS_RECOGIDA_DATOS',
+      expectState: 'EVENTOS_ELECCION_FORMATO',
       expectMuted: false,
-      expectIncludes: ['Cocktails on Tap', 'tipo de evento', 'ej:'],
-      expectNotIncludes: ['te guiaré', 'Soy el', 'asistente virtual', 'Escribe el número']
+      expectIncludes: ['Dispensador', 'Muro'],
+      expectNotIncludes: ['te guiaré', 'Soy el', 'asistente virtual']
     }
   ]);
 
@@ -811,10 +813,30 @@ try {
   await runCase('CTA Meta con producto eventos en la frase', [
     {
       input: '¡Hola! Quiero más información sobre el Servicio para Eventos',
+      expectState: 'EVENTOS_ELECCION_FORMATO',
+      expectMuted: false,
+      expectIncludes: ['Dispensador', 'Muro'],
+      expectNotIncludes: ['¡Hola!', 'te guiaré', 'Soy el', 'asistente virtual']
+    }
+  ]);
+
+  await runCase('CTA Meta Dispensador → intro formato directo', [
+    {
+      input: '¡Hola! Quiero más información sobre el Servicio con Dispensador de Cócteles.',
       expectState: 'EVENTOS_RECOGIDA_DATOS',
       expectMuted: false,
-      expectIncludes: ['Cocktails on Tap', 'tipo de evento'],
-      expectNotIncludes: ['¡Hola!', 'te guiaré', 'Soy el', 'asistente virtual']
+      expectIncludes: ['[IMG:eventos_dispensador1.webp]', 'Dispensador Portátil', 'tipo de evento', 'cualquier tamaño'],
+      expectNotIncludes: ['¡Hola!', 'asistente virtual', 'eventos_ambas']
+    }
+  ]);
+
+  await runCase('CTA Meta Muro → intro formato directo', [
+    {
+      input: '¡Hola! Quiero más información sobre el Servicio con Muro de Coctelería.',
+      expectState: 'EVENTOS_RECOGIDA_DATOS',
+      expectMuted: false,
+      expectIncludes: ['[VID:eventos_muro.mp4]', 'Muro de Coctelería', 'tipo de evento', 'grandes o masivos'],
+      expectNotIncludes: ['¡Hola!', 'asistente virtual', 'eventos_ambas']
     }
   ]);
 
@@ -999,13 +1021,19 @@ try {
     }
   ]);
 
-  await runCase('Barriles menú 2️⃣ precios → catálogo + ¿quieres pedir?', [
+  await runCase('Barriles menú 2️⃣ precios → catálogo + web + ¿quieres pedir?', [
     { input: 'desechables', expectState: 'BARRILES_FILTRO_CANAL', expectMuted: false },
     {
       input: '2',
       expectState: 'BARRILES_INTRO_MENU',
       expectMuted: false,
-      expectIncludes: ['barril_desechable_precios', 'pedido', 'No, gracias'],
+      expectIncludes: [
+        'barril_desechable_precios',
+        'cocktailsontap.cl/barriles',
+        'Quieres continuar y hacer un pedido',
+        'Sí, quiero hacer un pedido',
+        'No, gracias'
+      ],
       expectNotIncludes: ['Cotizar mi pedido', 'Tengo una consulta']
     }
   ]);
@@ -1051,6 +1079,37 @@ try {
       expectState: 'BARRILES_RECOGIDA_PRODUCTOS',
       expectMuted: false,
       expectIncludes: ['cóctel', 'catálogo']
+    }
+  ]);
+
+  await runCase('Barriles post-precios "quiero comprar" → pide sabores', [
+    { input: 'desechables', expectState: 'BARRILES_FILTRO_CANAL' },
+    { input: '2', expectState: 'BARRILES_INTRO_MENU' },
+    {
+      input: 'quiero comprar',
+      expectState: 'BARRILES_RECOGIDA_PRODUCTOS',
+      expectMuted: false,
+      expectIncludes: ['cóctel']
+    }
+  ]);
+
+  await runCase('Barriles post-precios "gracias" → cierre suave', [
+    { input: 'desechables', expectState: 'BARRILES_FILTRO_CANAL' },
+    { input: '2', expectState: 'BARRILES_INTRO_MENU' },
+    {
+      input: 'gracias',
+      expectState: 'CERRADO',
+      expectMuted: true
+    }
+  ]);
+
+  await runCase('Barriles post-precios "solo eso" → cierre suave', [
+    { input: 'desechables', expectState: 'BARRILES_FILTRO_CANAL' },
+    { input: '2', expectState: 'BARRILES_INTRO_MENU' },
+    {
+      input: 'solo eso',
+      expectState: 'CERRADO',
+      expectMuted: true
     }
   ]);
 
@@ -1300,10 +1359,16 @@ try {
     assert(/c[oó]ctel/i.test(String(pedidoReplies[1] || '')), 'pedido: pide sabores');
     const preciosReplies = buildBarrilesPreciosReplies();
     assert(preciosReplies.length === 2, 'precios: imagen + menú sí/no');
+    assert(/cocktailsontap\.cl\/barriles/i.test(String(preciosReplies[0]?.caption || '')), 'precios: caption con web barriles');
     assert(/hacer un pedido/i.test(String(preciosReplies[1] || '')), 'precios: pregunta si quiere pedir');
     assert(/Quiero hacer un pedido/i.test(barrilesIntentMenuQuestion()), 'menú intención tiene pedido');
     assert(/Tengo una duda/i.test(barrilesIntentMenuQuestion()), 'menú intención tiene duda');
-    const { BARRILES_PEDIDO_SYNONYMS, BARRILES_PRECIOS_SYNONYMS } = await import('../src/logic/barriles-intro.js');
+    const {
+      BARRILES_PEDIDO_SYNONYMS,
+      BARRILES_PRECIOS_SYNONYMS,
+      BARRILES_POST_PRECIOS_SI_SYNONYMS,
+      BARRILES_POST_PRECIOS_NO_SYNONYMS
+    } = await import('../src/logic/barriles-intro.js');
     assert(BARRILES_PEDIDO_SYNONYMS.test('ok quiero hacer una compra'), 'sinónimo: hacer una compra');
     assert(BARRILES_PEDIDO_SYNONYMS.test('quiero armar una orden'), 'sinónimo: armar una orden');
     assert(BARRILES_PEDIDO_SYNONYMS.test('quiero comprar'), 'sinónimo: quiero comprar');
@@ -1313,6 +1378,12 @@ try {
     assert(BARRILES_PRECIOS_SYNONYMS.test('vale'), 'sinónimo precios: vale');
     assert(BARRILES_PRECIOS_SYNONYMS.test('costo'), 'sinónimo precios: costo');
     assert(!BARRILES_PRECIOS_SYNONYMS.test('mojito'), 'mojito ≠ sinónimo de precios');
+    assert(BARRILES_POST_PRECIOS_SI_SYNONYMS.test('quiero comprar'), 'post-precios sí: quiero comprar');
+    assert(BARRILES_POST_PRECIOS_SI_SYNONYMS.test('ok'), 'post-precios sí: ok solo');
+    assert(!BARRILES_POST_PRECIOS_SI_SYNONYMS.test('ok gracias'), 'post-precios: ok gracias ≠ sí');
+    assert(BARRILES_POST_PRECIOS_NO_SYNONYMS.test('gracias'), 'post-precios no: gracias');
+    assert(BARRILES_POST_PRECIOS_NO_SYNONYMS.test('solo eso'), 'post-precios no: solo eso');
+    assert(BARRILES_POST_PRECIOS_NO_SYNONYMS.test('ok gracias'), 'post-precios no: ok gracias');
     const {
       formatBarrilesCompactCatalog,
       buildBarrilesUnknownFlavorTextReply,
@@ -1577,6 +1648,14 @@ try {
     assert(/nombre y apellido/i.test(String(rFix.customReply || '')), 're-pide la fase actual (nombre)');
     assert(!/Necesito \*nombre/i.test(String(rFix.customReply || '')), 'no trata el mensaje como nombre fallido');
 
+    // Patrón hermano: "perdón, era el 12…" (sin "para") también corrige fecha
+    session.orderBuilder.clientData.date = '10/08/2026';
+    session.barrilesPedidoPhase = 'nombre';
+    const rPerdon = await stDatos.validateAndProcess('perdon, era el 12 de agosto', session);
+    assert(/corregí la entrega/i.test(String(rPerdon.customReply || '')), 'perdón+era el → ack fecha');
+    assert(/12\/08\/\d{4}/.test(String(session.orderBuilder.clientData.date || '')), 'perdón guarda 12/08');
+    assert(/nombre y apellido/i.test(String(rPerdon.customReply || '')), 'perdón: re-pide nombre');
+
     // Nombre real sigue funcionando
     const rName = await stDatos.validateAndProcess('Felipe Ramirez', session);
     assert(/correo|confirmaci[oó]n/i.test(String(rName.customReply || '')), 'tras nombre pide correo');
@@ -1589,29 +1668,38 @@ try {
     assert(session.orderBuilder.clientData.location === 'Providencia', 'guarda Providencia');
   }
 
-  await runCase('Eventos keyword', [
+  await runCase('Eventos keyword → elegir formato', [
     {
       input: 'evento',
-      expectState: 'EVENTOS_RECOGIDA_DATOS',
+      expectState: 'EVENTOS_ELECCION_FORMATO',
       expectMuted: false,
-      expectIncludes: ['Cocktails on Tap', 'tipo de evento'],
+      expectIncludes: ['[IMG:eventos_ambas.webp]', 'Dispensador', 'Muro'],
       expectNotIncludes: ['te guiaré', 'Soy el', 'asistente virtual']
     }
   ]);
 
-  await runCase('Eventos logística: próximo año + lugar no sé → confirmar', [
-    { input: 'evento', expectState: 'EVENTOS_RECOGIDA_DATOS' },
-    { input: 'matrimonio', expectState: 'EVENTOS_RECOGIDA_DATOS' },
-    { input: '50', expectState: 'EVENTOS_RECOGIDA_DATOS', expectIncludes: ['fecha', 'comuna'] },
+  await runCase('Eventos: formato → tipo → invitados → intro cotizar', [
+    { input: 'evento', expectState: 'EVENTOS_ELECCION_FORMATO' },
     {
-      input: 'es para el proximo año, el lugar aun no lo se',
-      expectState: 'EVENTOS_CONFIRMAR_DATOS',
-      expectIncludes: ['50', 'proximo año', 'Por confirmar']
+      input: '1',
+      expectState: 'EVENTOS_RECOGIDA_DATOS',
+      expectIncludes: ['[IMG:eventos_dispensador1.webp]', 'Dispensador Portátil', 'tipo de evento']
+    },
+    {
+      input: 'matrimonio',
+      expectState: 'EVENTOS_RECOGIDA_DATOS',
+      expectIncludes: ['Matrimonio', 'invitados', 'incluido']
+    },
+    {
+      input: '50',
+      expectState: 'EVENTOS_INTRO_MENU',
+      expectIncludes: ['50', 'cotización', 'duda', 'Para orientarte', 'Rendimiento']
     }
   ]);
 
   await runCase('Eventos info-only → web', [
-    { input: 'evento', expectState: 'EVENTOS_RECOGIDA_DATOS' },
+    { input: 'evento', expectState: 'EVENTOS_ELECCION_FORMATO' },
+    { input: '1', expectState: 'EVENTOS_RECOGIDA_DATOS' },
     {
       input: 'solo quiero cotizar',
       expectState: 'CERRADO',
@@ -1620,8 +1708,9 @@ try {
     }
   ]);
 
-  await runCase('Eventos skip tipo (no sé) → invitados → resumen Por confirmar', [
-    { input: 'evento', expectState: 'EVENTOS_RECOGIDA_DATOS' },
+  await runCase('Eventos skip tipo (no sé) → invitados → intro', [
+    { input: 'evento', expectState: 'EVENTOS_ELECCION_FORMATO' },
+    { input: '1', expectState: 'EVENTOS_RECOGIDA_DATOS' },
     {
       input: 'aún no lo sé',
       expectState: 'EVENTOS_RECOGIDA_DATOS',
@@ -1630,88 +1719,92 @@ try {
     },
     {
       input: '60',
-      expectState: 'EVENTOS_RECOGIDA_DATOS',
-      expectIncludes: ['fecha', 'comuna']
-    },
-    {
-      input: 'ok',
-      expectState: 'EVENTOS_CONFIRMAR_DATOS',
-      expectIncludes: ['60', 'Por confirmar']
+      expectState: 'EVENTOS_INTRO_MENU',
+      expectIncludes: ['60', 'cotización']
     }
   ]);
 
-  await runCase('Eventos tipo abierto (texto típico → invitados, sin menú numérico)', [
-    { input: 'evento', expectState: 'EVENTOS_RECOGIDA_DATOS' },
+  await runCase('Eventos tipo abierto (texto típico → invitados)', [
+    { input: 'evento', expectState: 'EVENTOS_ELECCION_FORMATO' },
+    { input: '1', expectState: 'EVENTOS_RECOGIDA_DATOS' },
     {
       input: 'cumpleaños',
       expectState: 'EVENTOS_RECOGIDA_DATOS',
-      expectIncludes: ['Cumpleaños', 'invitados', 'mejor formato'],
-      expectNotIncludes: ['Escribe el número', 'fecha', 'comuna']
+      expectIncludes: ['Cumpleaños', 'invitados'],
+      expectNotIncludes: ['Escribe el número', 'mejor formato']
     }
   ]);
 
-  await runCase('Eventos progresivo: tipo → invitados → skip logística → confirmar', [
-    { input: 'evento', expectState: 'EVENTOS_RECOGIDA_DATOS' },
+  await runCase('Eventos progresivo: formato → tipo → invitados → cotizar → carta', [
+    { input: 'evento', expectState: 'EVENTOS_ELECCION_FORMATO' },
+    {
+      input: '1',
+      expectState: 'EVENTOS_RECOGIDA_DATOS',
+      expectIncludes: ['Dispensador Portátil']
+    },
     {
       input: 'matrimonio',
       expectState: 'EVENTOS_RECOGIDA_DATOS',
-      expectIncludes: ['Matrimonio', 'invitados', 'mejor formato'],
-      expectNotIncludes: ['Escribe el número', 'fecha']
+      expectIncludes: ['Matrimonio', 'invitados']
     },
     {
       input: '80',
-      expectState: 'EVENTOS_RECOGIDA_DATOS',
-      expectIncludes: ['fecha', 'comuna', 'después']
+      expectState: 'EVENTOS_INTRO_MENU',
+      expectIncludes: [
+        '80',
+        'cotización',
+        'duda',
+        'Rendimiento',
+        'Para orientarte',
+        '*5L* → ≈ *25*',
+        '*10L* → ≈ *50*'
+      ]
     },
     {
-      input: 'ok',
-      expectState: 'EVENTOS_CONFIRMAR_DATOS',
-      expectIncludes: ['80', 'Matrimonio', 'Por confirmar']
+      input: '1',
+      expectState: 'EVENTOS_ELECCION_MENU',
+      expectIncludes: [
+        '[IMG:dispensador_portatil_precios.webp]',
+        'Mojito'
+      ],
+      expectNotIncludes: ['Para orientarte']
     }
   ]);
 
   await runCase('Eventos cumpleaños con invitados sin confundir edad', [
-    { input: 'Servicio para Eventos', expectState: 'EVENTOS_RECOGIDA_DATOS' },
+    {
+      input: '¡Hola! Quiero más información sobre el Servicio con Dispensador de Cócteles.',
+      expectState: 'EVENTOS_RECOGIDA_DATOS'
+    },
     {
       input: 'Cumpleaños 25 invitados Peñalolen',
-      expectState: 'EVENTOS_CONFIRMAR_DATOS',
+      expectState: 'EVENTOS_INTRO_MENU',
       expectMuted: false,
-      expectIncludes: ['25', 'Peñalolén', 'Cumpleaños'],
+      expectIncludes: ['25', 'cotización'],
       expectNotIncludes: ['25 años', 'cuántos invitados']
     }
   ]);
 
-  // Confirmación → una sola burbuja (foto + caption con menú); sin “¿Cuál prefieres?” aparte
-  await runCase('Eventos confirmación → formato (img+caption)', [
-    { input: 'evento', expectState: 'EVENTOS_RECOGIDA_DATOS' },
+  // Entrada genérica → imagen ambas + menú (sin invitados)
+  await runCase('Eventos entrada → formato (img+caption)', [
     {
-      input: 'cumpleaños para 50 invitados en Providencia el 15 de mayo',
-      expectState: 'EVENTOS_CONFIRMAR_DATOS',
-      expectMuted: false,
-      expectIncludes: ['50', 'Providencia']
-    },
-    {
-      input: 'ok',
+      input: 'evento',
       expectState: 'EVENTOS_ELECCION_FORMATO',
       expectMuted: false,
       expectIncludes: [
         '[IMG:eventos_ambas.webp]',
         'Dispensador Portátil',
         'Muro de Coctelería',
+        'cualquier tamaño',
         'Escribe el número de la opción que prefieres'
       ],
-      expectNotIncludes: ['Cuál prefieres']
+      expectNotIncludes: ['Cuál prefieres', 'invitados te recomendamos']
     }
   ]);
 
-  // "ambos" / "las 2" en elección de formato → respuesta fija, sin forzar opción ni fallback genérico
+  // "ambos" / "las 2" en elección de formato → respuesta fija
   await runCase('Eventos formato ambos → explicación', [
-    { input: 'evento', expectState: 'EVENTOS_RECOGIDA_DATOS' },
-    {
-      input: 'cumpleaños para 50 invitados en Providencia el 15 de mayo',
-      expectState: 'EVENTOS_CONFIRMAR_DATOS'
-    },
-    { input: 'ok', expectState: 'EVENTOS_ELECCION_FORMATO' },
+    { input: 'evento', expectState: 'EVENTOS_ELECCION_FORMATO' },
     {
       input: 'ambos',
       expectState: 'EVENTOS_ELECCION_FORMATO',
@@ -1722,12 +1815,7 @@ try {
   ]);
 
   await runCase('Eventos formato las 2 → explicación', [
-    { input: 'evento', expectState: 'EVENTOS_RECOGIDA_DATOS' },
-    {
-      input: 'cumpleaños para 80 invitados en Las Condes el 20 de junio',
-      expectState: 'EVENTOS_CONFIRMAR_DATOS'
-    },
-    { input: 'ok', expectState: 'EVENTOS_ELECCION_FORMATO' },
+    { input: 'evento', expectState: 'EVENTOS_ELECCION_FORMATO' },
     {
       input: 'las 2',
       expectState: 'EVENTOS_ELECCION_FORMATO',
@@ -1737,55 +1825,40 @@ try {
     }
   ]);
 
-  // Pitch → intro → carta + litros≈cócteles → menú
-  await runCase('Eventos formato → intro → menú (carta+rendimiento)', [
-    { input: 'evento', expectState: 'EVENTOS_RECOGIDA_DATOS' },
+  // Muro: intro con imagen del muro
+  await runCase('Eventos formato muro → intro imagen', [
+    { input: 'evento', expectState: 'EVENTOS_ELECCION_FORMATO' },
     {
-      input: 'cumpleaños para 50 invitados en Providencia el 15 de mayo',
-      expectState: 'EVENTOS_CONFIRMAR_DATOS'
-    },
-    { input: 'ok', expectState: 'EVENTOS_ELECCION_FORMATO' },
-    {
-      input: '1',
-      expectState: 'EVENTOS_INTRO_MENU',
+      input: '2',
+      expectState: 'EVENTOS_RECOGIDA_DATOS',
       expectMuted: false,
-      expectIncludes: ['Excelente elección', 'cócteles', 'precios', '[IMG:eventos_dispensador1.webp]'],
-      expectNotIncludes: ['[IMG:dispensador_portatil_precios.webp]']
-    },
-    {
-      input: 'ok',
-      expectState: 'EVENTOS_ELECCION_MENU',
-      expectMuted: false,
-      expectIncludes: [
-        '[IMG:dispensador_portatil_precios.webp]',
-        '30L',
-        '~150',
-        'Rendimiento',
-        '*5L* → ≈ *25*',
-        '*10L* → ≈ *50*',
-        'Mojito'
-      ]
+      expectIncludes: ['[VID:eventos_muro.mp4]', 'Muro de Coctelería', 'grandes o masivos', 'tipo de evento']
     }
   ]);
 
-  // Muro: pitch como caption del video
-  await runCase('Eventos formato muro → video pitch', [
-    { input: 'evento', expectState: 'EVENTOS_RECOGIDA_DATOS' },
-    {
-      input: 'matrimonio para 120 invitados en Providencia el 10 de agosto',
-      expectState: 'EVENTOS_CONFIRMAR_DATOS'
-    },
-    { input: 'ok', expectState: 'EVENTOS_ELECCION_FORMATO' },
+  await runCase('Eventos intro duda → SOS + mute', [
+    { input: 'evento', expectState: 'EVENTOS_ELECCION_FORMATO' },
+    { input: '1', expectState: 'EVENTOS_RECOGIDA_DATOS' },
+    { input: 'cumpleaños', expectState: 'EVENTOS_RECOGIDA_DATOS' },
+    { input: '40', expectState: 'EVENTOS_INTRO_MENU' },
     {
       input: '2',
       expectState: 'EVENTOS_INTRO_MENU',
-      expectMuted: false,
-      expectIncludes: ['[VID:eventos_muro.mp4]', 'Muro de Coctelería', 'cócteles', 'precios']
+      expectIncludes: ['duda', 'enseguida']
+    },
+    {
+      input: '¿puedo cambiar el horario de instalación?',
+      expectState: 'CERRADO',
+      expectMuted: true,
+      expectSilent: true,
+      expectAdminAlert: true,
+      expectSosTitle: 'DUDA EVENTOS'
     }
   ]);
 
   await runCase('Mirón en eventos (datos)', [
-    { input: 'evento', expectState: 'EVENTOS_RECOGIDA_DATOS' },
+    { input: 'evento', expectState: 'EVENTOS_ELECCION_FORMATO' },
+    { input: '1', expectState: 'EVENTOS_RECOGIDA_DATOS' },
     {
       input: 'después',
       expectState: 'CERRADO',
@@ -1823,14 +1896,14 @@ try {
   await runCase('Evitar falso positivo "personas" o "contacto"', [
     {
       input: 'Hola, cotizar evento para 50 personas, mi contacto es de las condes',
-      expectState: 'EVENTOS_RECOGIDA_DATOS',
+      expectState: 'EVENTOS_ELECCION_FORMATO',
       expectMuted: false
     }
   ]);
 
   await runCase('Pregunta de cobertura con comuna externa sin extraccion', [
     {
-      input: 'evento',
+      input: '¡Hola! Quiero más información sobre el Servicio con Dispensador de Cócteles.',
       expectState: 'EVENTOS_RECOGIDA_DATOS'
     },
     {
@@ -1844,7 +1917,7 @@ try {
 
   await runCase('Cobertura Viña al inicio: evaluar, no afirmar zona fija', [
     {
-      input: 'evento',
+      input: '¡Hola! Quiero más información sobre el Servicio con Dispensador de Cócteles.',
       expectState: 'EVENTOS_RECOGIDA_DATOS'
     },
     {
@@ -1858,7 +1931,7 @@ try {
 
   await runCase('Cobertura RM: confirma todas las comunas', [
     {
-      input: 'evento',
+      input: '¡Hola! Quiero más información sobre el Servicio con Dispensador de Cócteles.',
       expectState: 'EVENTOS_RECOGIDA_DATOS'
     },
     {
@@ -1872,14 +1945,14 @@ try {
 
   await runCase('Duda dispensador vs solo barriles en eventos (sin leak IA)', [
     {
-      input: 'Servicio para Eventos',
+      input: '¡Hola! Quiero más información sobre el Servicio con Dispensador de Cócteles.',
       expectState: 'EVENTOS_RECOGIDA_DATOS'
     },
     {
       input: 'solo o dispensador',
       expectState: 'EVENTOS_RECOGIDA_DATOS',
       expectMuted: false,
-      expectIncludes: ['Dispensador Portátil', 'Barriles Desechables', 'invitados'],
+      expectIncludes: ['Dispensador Portátil', 'Barriles Desechables'],
       expectNotIncludes: ['No puedo determinar', 'el cliente está preguntando', 'proporcionar más contexto']
     }
   ]);
@@ -1928,6 +2001,54 @@ try {
     const r2 = await st.validateAndProcess('perfecto gracias', session);
     assert(r2.success === false, 'perfecto gracias → sin productos');
   }
+
+  console.log('\n-- Eventos menú: sabor fuera de carta → miss (misma lógica Barriles) --');
+  resetSession(SESSION_ID);
+  {
+    const session = getSession(SESSION_ID);
+    session.currentState = 'EVENTOS_ELECCION_MENU';
+    session.userIntent = 'EVENTOS';
+    session.eventoFormato = 'Dispensador Portátil';
+    session.guests = 50;
+    session.orderBuilder = {
+      type: 'dispensador',
+      products: {
+        'Mojito::10L': { name: 'Mojito', litrage: '10L', quantity: 1 }
+      },
+      extras: {}
+    };
+
+    const st = statesMap.EVENTOS_ELECCION_MENU;
+    const r = await st.validateAndProcess('piña colada', session);
+    assert(r.success === true, 'fuera de carta → success (miss manejado)');
+    assert(r.nextState === 'EVENTOS_ELECCION_MENU', 'sigue en menú');
+    assert(r.stallHandled === true, 'fuera de carta → stallHandled');
+    const t = String(r.customReply || r.customReplies || '');
+    assert(/no entendí tu pedido/i.test(t), 'miss suave: no entendí tu pedido');
+    assert(/lista de sabores/i.test(t), 'recuerda la lista ya enviada');
+    assert(!/no te entendí bien/i.test(t), 'no plantilla genérica del engine');
+    assert(session.orderBuilder.products['Mojito::10L']?.quantity === 1, 'no muta el carrito válido');
+  }
+
+  console.log('\n-- Eventos menú: 1 real + 1 inexistente → carrito + aviso --');
+  resetSession(SESSION_ID);
+  {
+    const session = getSession(SESSION_ID);
+    session.currentState = 'EVENTOS_ELECCION_MENU';
+    session.userIntent = 'EVENTOS';
+    session.eventoFormato = 'Dispensador Portátil';
+    session.guests = 50;
+    session.orderBuilder = { type: 'dispensador', products: {}, extras: {} };
+
+    const st = statesMap.EVENTOS_ELECCION_MENU;
+    const r = await st.validateAndProcess('10L Mojito y piña colada', session);
+    assert(r.success === true, 'mixto → success');
+    const t = String(r.customReply || '');
+    assert(/Mojito/i.test(t), 'agrega el cóctel del catálogo');
+    assert(/piña colada/i.test(t) && /aún no/i.test(t), 'avisa el sabor fuera de carta');
+    assert(Object.keys(session.orderBuilder.products).some((k) => k.startsWith('Mojito')), 'Mojito en carrito');
+  }
+
   resetSession(SESSION_ID);
   {
     const session = getSession(SESSION_ID);
@@ -1997,6 +2118,8 @@ try {
     const totalMatch = t1.match(/\*Litros:\*\s*(\d+)L/i);
     assert(totalMatch && Number(totalMatch[1]) === 20, `total 5+15 = 20L`);
     assert(/≈\s*\*100\*\s*cócteles/i.test(t1), `20L muestra ≈ 100 cócteles`);
+    assert(/\*Subtotal:\*.*\n\*Litros:\*/s.test(t1), `litros va debajo del subtotal`);
+    assert(/≈\s*\*2\*\s*por persona/i.test(t1), `100 cócteles / 50 invitados → 2 por persona`);
   }
 
   console.log('\n-- Eventos: "Quitar" solo pide qué eliminar (no avanza) --');
@@ -2329,8 +2452,8 @@ try {
     const session = getSession(SESSION_ID);
     session.currentState = 'EVENTOS_RECOGIDA_DATOS';
     session.userIntent = 'EVENTOS';
+    session.eventoFormato = 'Dispensador Portátil';
     const st = statesMap.EVENTOS_RECOGIDA_DATOS;
-    await st.validateAndProcess('Servicio para Eventos', session);
     const r = await st.validateAndProcess(
       'No puedo ayudarte con eso. ¿Hay algo más en lo que pueda ayudarte?',
       session
@@ -2369,8 +2492,9 @@ try {
   await runCase('Anti-loop eventos handoff hablado', [
     {
       input: 'eventos',
-      expectState: 'EVENTOS_RECOGIDA_DATOS'
+      expectState: 'EVENTOS_ELECCION_FORMATO'
     },
+    { input: '1', expectState: 'EVENTOS_RECOGIDA_DATOS' },
     {
       input: 'Mi gustar',
       expectState: 'EVENTOS_RECOGIDA_DATOS',
@@ -2386,47 +2510,52 @@ try {
     }
   ]);
 
-  console.log('\n-- Eventos ok cotización → datos contacto → cierre --');
+  console.log('\n-- Eventos ok carrito → datos uno a uno → resumen formal --');
   resetSession(SESSION_ID);
   {
     const session = getSession(SESSION_ID);
-    session.currentState = 'EVENTOS_COTIZACION';
+    session.currentState = 'EVENTOS_ELECCION_MENU';
     session.userIntent = 'EVENTOS';
     session.eventoFormato = 'Dispensador Portátil';
     session.guests = 50;
     session.celebrationType = 'Cumpleaños';
-    session.date = '15 de mayo';
-    session.location = 'Providencia';
-    session.isRM = true;
     session.orderBuilder = {
       type: 'dispensador',
       products: {
         'Mojito::10L': { name: 'Mojito', litrage: '10L', quantity: 1 }
       },
-      extras: {},
-      quote: { total: 109990 }
+      extras: {}
     };
 
-    const stCot = statesMap.EVENTOS_COTIZACION;
-    const rOk = await stCot.validateAndProcess('ok', session);
-    assert(rOk.nextState === 'EVENTOS_DATOS_CONTACTO', 'ok cotización → DATOS_CONTACTO');
-    assert(String(rOk.customReply || '').includes('email') || String(rOk.customReply || '').includes('correo'), 'pide email al confirmar');
-    assert(
-      String(rOk.customReply || '').toLowerCase().includes('copia formal')
-        || String(rOk.customReply || '').toLowerCase().includes('correo'),
-      'explica copia formal / correo'
-    );
+    const stMenu = statesMap.EVENTOS_ELECCION_MENU;
+    const rOk = await stMenu.validateAndProcess('ok', session);
+    assert(rOk.nextState === 'EVENTOS_DATOS_CONTACTO', 'ok carrito → DATOS_CONTACTO');
 
     session.currentState = 'EVENTOS_DATOS_CONTACTO';
     const stContact = statesMap.EVENTOS_DATOS_CONTACTO;
-    const rContact = await stContact.validateAndProcess('Ana Pérez, ana@test.cl', session);
-    assert(rContact.nextState === 'EVENTOS_CONFIRMAR_ENVIO', 'contacto completo → CONFIRMAR_ENVIO');
-    const envioText = replyToText(rContact.customReplies || rContact.customReply);
-    assert(
-      /Datos para enviarte la cotizaci[oó]n/i.test(envioText),
-      'muestra confirmación liviana de contacto'
-    );
-    assert(!/10L Mojito|Subtotal|TOTAL/i.test(envioText), 'no re-lista el pedido completo');
+    const intro = typeof stContact.promptQuestion === 'function'
+      ? stContact.promptQuestion(session)
+      : stContact.promptQuestion;
+    const introText = Array.isArray(intro) ? intro.join('\n') : String(intro || '');
+    assert(/cotizaci[oó]n formal|copia al correo|uno por uno/i.test(introText), 'intro explica cotización formal');
+    assert(/fecha/i.test(introText), 'primera fase pide fecha');
+
+    const rFecha = await stContact.validateAndProcess('15 de mayo', session);
+    assert(rFecha.nextState === 'EVENTOS_DATOS_CONTACTO', 'tras fecha sigue en contacto');
+    assert(/comuna/i.test(String(rFecha.customReply || '')), 'pide comuna');
+
+    const rComuna = await stContact.validateAndProcess('Providencia', session);
+    assert(/nombre/i.test(String(rComuna.customReply || '')), 'pide nombre');
+
+    const rNombre = await stContact.validateAndProcess('Ana Pérez', session);
+    assert(/correo|email/i.test(String(rNombre.customReply || '')), 'pide email');
+
+    const rEmail = await stContact.validateAndProcess('ana@test.cl', session);
+    assert(rEmail.nextState === 'EVENTOS_CONFIRMAR_ENVIO', 'contacto completo → CONFIRMAR_ENVIO');
+    const envioText = replyToText(rEmail.customReplies || rEmail.customReply);
+    assert(/COTIZACI[OÓ]N FORMAL/i.test(envioText), 'muestra resumen formal');
+    assert(/Mojito/i.test(envioText), 'incluye el pedido');
+    assert(/TOTAL|Subtotal/i.test(envioText), 'incluye totales');
     assert(/OK/i.test(envioText), 'pide OK para crear');
 
     session.currentState = 'EVENTOS_CONFIRMAR_ENVIO';
@@ -2439,7 +2568,7 @@ try {
     assert(session.contact?.lastName === 'Pérez', 'guarda apellido');
   }
 
-  console.log('\n-- Eventos contacto: fecha solo mes pide día sin pie de asistente --');
+  console.log('\n-- Eventos contacto: fecha solo mes pide día --');
   resetSession(SESSION_ID);
   {
     const session = getSession(SESSION_ID);
@@ -2448,9 +2577,10 @@ try {
     session.eventoFormato = 'Dispensador Portátil';
     session.guests = 50;
     session.celebrationType = 'Cumpleaños';
-    session.date = 'septiembre'; // mes solo: no sirve para la API
+    session.date = 'septiembre';
     session.location = 'Providencia';
     session.isRM = true;
+    session.eventosContactPhase = 'fecha';
     session.orderBuilder = {
       type: 'dispensador',
       products: { 'Mojito::10L': { name: 'Mojito', litrage: '10L', quantity: 1 } },
@@ -2458,16 +2588,20 @@ try {
       quote: { total: 109990 }
     };
 
-    const stContact = statesMap.EVENTOS_DATOS_CONTACTO;
-    const rContact = await stContact.validateAndProcess('Felipe Ramirez, felipe@test.cl', session);
-    const t = String(rContact.customReply || '');
-    assert(rContact.nextState === 'EVENTOS_DATOS_CONTACTO', 'sigue en DATOS_CONTACTO hasta tener día');
-    assert(/septiembre/i.test(t) && /d[ií]a tentativo/i.test(t), 'recuerda el mes y pide día tentativo');
-    assert(/necesario para generar la cotizaci[oó]n/i.test(t), 'explica por qué necesita la fecha');
-    assert(!/soy asistente virtual/i.test(t), 'no repite el pie de asistente virtual');
+    const { resolveEventosContactPhase, askEventosContactPhase } = await import('../src/logic/cot-eventos-contact.js');
+    assert(resolveEventosContactPhase(session) === 'fecha', 'sigue faltando fecha concreta');
+    const ask = askEventosContactPhase('fecha', session);
+    assert(/septiembre/i.test(ask) && /d[ií]a/i.test(ask), 'recuerda el mes y pide día');
+    assert(!/soy asistente virtual/i.test(ask), 'ask de fase sin pie de asistente');
 
+    const stContact = statesMap.EVENTOS_DATOS_CONTACTO;
     const rDay = await stContact.validateAndProcess('20 de septiembre', session);
-    assert(rDay.nextState === 'EVENTOS_CONFIRMAR_ENVIO', 'con día concreto → CONFIRMAR_ENVIO');
+    assert(rDay.nextState === 'EVENTOS_DATOS_CONTACTO', 'con día → pide nombre (ya hay comuna)');
+    assert(/nombre/i.test(String(rDay.customReply || '')), 'pide nombre tras fecha');
+
+    await stContact.validateAndProcess('Felipe Ramirez', session);
+    const rEmail = await stContact.validateAndProcess('felipe@test.cl', session);
+    assert(rEmail.nextState === 'EVENTOS_CONFIRMAR_ENVIO', 'contacto completo → CONFIRMAR_ENVIO');
 
     session.currentState = 'EVENTOS_CONFIRMAR_ENVIO';
     const stConfirm = statesMap.EVENTOS_CONFIRMAR_ENVIO;
@@ -2551,7 +2685,7 @@ try {
     assert(rConfirm.nextState === 'CERRADO', '"15 de diciembre" cierra tras confirmar (legacy sin API)');
   }
 
-  console.log('\n-- Eventos contacto: comuna e invitados faltantes con tono formal --');
+  console.log('\n-- Eventos contacto: comuna e invitados faltantes (pregunta corta) --');
   resetSession(SESSION_ID);
   {
     const session = getSession(SESSION_ID);
@@ -2569,21 +2703,53 @@ try {
     };
     session.contact = { firstName: 'Ana', lastName: 'Pérez', email: 'ana@test.cl' };
 
-    const stContact = statesMap.EVENTOS_DATOS_CONTACTO;
-    // Sin mensaje nuevo: shortQuestion / ask directo vía validate vacío no aplica;
-    // simulamos un mensaje que no agrega datos para re-preguntar.
-    const r1 = await stContact.validateAndProcess('ok', session);
-    const t1 = String(r1.customReply || '');
-    assert(/comuna|invitados/i.test(t1), 'pide comuna o invitados faltantes');
-    assert(/cotizaci[oó]n formal/i.test(t1), 'explica que es para la cotización formal');
-    assert(!/soy asistente virtual/i.test(t1), 'sin pie de asistente en datos faltantes');
+    const {
+      resolveEventosContactPhase,
+      askEventosContactPhase
+    } = await import('../src/logic/cot-eventos-contact.js');
+    assert(resolveEventosContactPhase(session) === 'comuna', 'sin comuna → fase comuna');
+    const askComuna = askEventosContactPhase('comuna', session);
+    assert(/comuna/i.test(askComuna), 'pide comuna faltante');
+    assert(!/cotizaci[oó]n formal/i.test(askComuna), 're-pregunta sin repetir preámbulo formal');
+    assert(!/soy asistente virtual/i.test(askComuna), 'sin pie de asistente en datos faltantes');
 
-    // Completa comuna → debe pedir invitados con el mismo tono
+    session.eventosContactPhase = 'comuna';
+    const stContact = statesMap.EVENTOS_DATOS_CONTACTO;
+    // Completa comuna → debe pedir invitados (red de seguridad)
     const r2 = await stContact.validateAndProcess('Providencia', session);
     const t2 = String(r2.customReply || '');
     assert(session.location === 'Providencia', 'guarda comuna');
+    assert(resolveEventosContactPhase(session) === 'invitados', 'tras comuna falta invitados');
     assert(/invitados/i.test(t2), 'después de comuna pide invitados');
-    assert(/cotizaci[oó]n formal/i.test(t2), 'invitados también con tono formal');
+    assert(!/cotizaci[oó]n formal/i.test(t2), 'invitados también sin repetir preámbulo');
+  }
+
+  console.log('\n-- Eventos contacto: corrige fecha previa en fase comuna --');
+  resetSession(SESSION_ID);
+  {
+    const session = getSession(SESSION_ID);
+    session.currentState = 'EVENTOS_DATOS_CONTACTO';
+    session.userIntent = 'EVENTOS';
+    session.eventoFormato = 'Dispensador Portátil';
+    session.guests = 50;
+    session.date = '15/08/2026';
+    session.location = null;
+    session.eventosContactPhase = 'comuna';
+    session.orderBuilder = {
+      type: 'dispensador',
+      products: { 'Mojito::10L': { name: 'Mojito', litrage: '10L', quantity: 1 } },
+      extras: {}
+    };
+    session.contact = {};
+
+    const stContact = statesMap.EVENTOS_DATOS_CONTACTO;
+    const rFix = await stContact.validateAndProcess('perdon, era el 12 de agosto', session);
+    assert(rFix.nextState === 'EVENTOS_DATOS_CONTACTO', 'sigue en contacto');
+    assert(/corregí la fecha/i.test(String(rFix.customReply || '')), 'ack de corrección de fecha');
+    assert(/12\/08\/\d{4}/.test(String(session.date || '')), 'guarda fecha corregida');
+    assert(/comuna/i.test(String(rFix.customReply || '')), 're-pide la fase actual (comuna)');
+    assert(!/cotizaci[oó]n formal/i.test(String(rFix.customReply || '')), 'no repite preámbulo formal');
+    assert(rFix.flowProgress === true, 'corrección cuenta como progreso (sin strike)');
   }
 
   // --------------------------------------------------------------------------
@@ -2660,12 +2826,13 @@ try {
   console.log('\n-- P1: bleed cross-flow Eventos→Barriles→Eventos limpia invitados --');
   resetSession(SESSION_ID);
   {
-    // Entra a eventos y da invitados
+    // Entra a eventos (elige formato) y da invitados
     await processMessage(SESSION_ID, 'evento');
+    await processMessage(SESSION_ID, '1');
     await processMessage(SESSION_ID, 'cumpleaños para 50 invitados en Providencia el 15 de mayo');
     const sMid = getSession(SESSION_ID);
     assert(sMid.guests === 50, 'guarda 50 invitados en eventos');
-    assert(sMid.currentState === 'EVENTOS_CONFIRMAR_DATOS', 'está en confirmar datos');
+    assert(sMid.currentState === 'EVENTOS_INTRO_MENU', 'está en intro cotizar/duda');
 
     // Cambia a barriles (switchIntent limpia guests)
     await processMessage(SESSION_ID, 'mejor barriles desechables');
@@ -2682,11 +2849,10 @@ try {
     sBar.location = 'Providencia';
     saveSession(SESSION_ID, sBar);
 
-    // Sin el fix de limpieza en switch, volver a eventos confirmaría con guests=50.
     // Con el fix, el switch limpia guests otra vez al entrar a EVENTOS.
     await processMessage(SESSION_ID, 'servicio para eventos');
     const sBack = getSession(SESSION_ID);
-    assert(sBack.currentState === 'EVENTOS_RECOGIDA_DATOS', 'vuelve a recogida datos (no confirmar)');
+    assert(sBack.currentState === 'EVENTOS_ELECCION_FORMATO', 'vuelve a elegir formato');
     assert(!sBack.guests, 'no reutiliza invitados viejos al reentrar');
   }
 
@@ -3021,20 +3187,20 @@ try {
   console.error('  FAIL: excepción en simulación:', err);
 }
 
-console.log('\n-- CRM Interesado: Eventos al confirmar→formato; Barriles al cotizar --');
+console.log('\n-- CRM Interesado: Eventos al cotizar; Barriles al cotizar --');
 {
   const { notifyCrmOnBotStateChange } = await import('../src/logic/cot-crm-sync.js');
 
   const s1 = { userIntent: 'EVENTOS', guests: 50, waLabelClientePotencialApplied: false };
   assert(
-    notifyCrmOnBotStateChange(s1, 'EVENTOS_RECOGIDA_DATOS', 'EVENTOS_CONFIRMAR_DATOS') === false,
+    notifyCrmOnBotStateChange(s1, 'EVENTOS_RECOGIDA_DATOS', 'EVENTOS_INTRO_MENU') === false,
     'Eventos: salir de recogida NO marca Interesado'
   );
 
   const s2 = { userIntent: 'EVENTOS', guests: 50, celebrationType: 'Matrimonio', waLabelClientePotencialApplied: false };
   assert(
-    notifyCrmOnBotStateChange(s2, 'EVENTOS_CONFIRMAR_DATOS', 'EVENTOS_ELECCION_FORMATO') === true,
-    'Eventos: confirmar→formato SÍ marca Interesado / Cliente potencial'
+    notifyCrmOnBotStateChange(s2, 'EVENTOS_INTRO_MENU', 'EVENTOS_ELECCION_MENU') === true,
+    'Eventos: intro→cotizar SÍ marca Interesado / Cliente potencial'
   );
 
   const sPitch = { userIntent: 'BARRILES', waLabelClientePotencialApplied: false };

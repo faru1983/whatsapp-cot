@@ -1,69 +1,167 @@
 // ==============================================================================
-// OBJETIVO: Paso EVENTOS_DATOS_CONTACTO — datos para crear la cotización en la web.
-// Pedimos lo que falte (fecha/comuna/invitados + nombre, apellido, email).
-// WhatsApp sale del JID. Al completar → EVENTOS_CONFIRMAR_ENVIO (resumen) → API.
+// OBJETIVO: Paso EVENTOS_DATOS_CONTACTO — datos uno a uno para cotización formal.
+// Orden: fecha → comuna → (invitados si faltan) → nombre/apellido → email → resumen.
+// Espejo del checkout Barriles (sin dirección). Dispensador y Muro usan el mismo paso.
 // ==============================================================================
 import { defineState } from '../../../logic/compile-state.js';
+import { withAssistantFooter } from '../../../logic/flow-rails.js';
 import { ensureContactBucket, getEmailTypoSuggestion } from '../../../logic/cot-contact.js';
+import { toIsoDateFromBotText } from '../../../logic/cot-event-quote.js';
 import {
-  applyEventosContactDataFromMessage,
-  getMissingEventosContactFields,
-  askForMissingEventosContact
+  resolveEventosContactPhase,
+  askEventosContactPhase,
+  buildEventosContactIntro,
+  tryApplyEventosContactPriorCorrection,
+  applyEventosContactPhaseFromMessage
 } from '../../../logic/cot-eventos-contact.js';
-import { getEventosEnvioSummary, getEventosContactIntroAsk } from '../../../views/templates.js';
+import { getEventosQuoteSummary } from '../../../views/templates.js';
 
-const AI_PROMPT = `[SISTEMA - ESTADO: DATOS DE CONTACTO PARA COTIZACIÓN WEB]
-El cliente ya aprobó el resumen. Pedimos nombre y correo (copia formal), y si faltan: fecha, comuna o invitados.
-1. Pide solo lo que falte. WhatsApp ya lo tenemos del chat.
-2. NUNCA inventes precios nuevos; la cotización formal la crea el sistema web.
-3. Si la fecha es solo un mes (ej. "septiembre"), pide el día tentativo.
-4. Al completar, confirmamos los datos de contacto (OK) antes de crear la cotización.`;
+const AI_PROMPT = `[SISTEMA - ESTADO: DATOS PARA COTIZACIÓN FORMAL (uno a uno)]
+El cliente ya eligió cócteles. Pedimos datos para la cotización formal y copia al correo.
+Fases: fecha → comuna → nombre/apellido → email → resumen.
+1. Pide SOLO el dato de la fase actual. WhatsApp ya lo tenemos del chat.
+2. NUNCA inventes precios; la cotización formal la arma el resumen final.
+3. Si la fecha es solo un mes, pide el día tentativo.
+4. Si corrige un dato anterior, acéptalo y vuelve a pedir la fase actual.
+5. Al final, el resumen pide *OK* o corregir.`;
+
+/**
+ * shortQuestionForPhase: Re-pregunta corta según la fase pendiente.
+ *
+ * @param {object} session
+ * @returns {string}
+ */
+function shortQuestionForPhase(session) {
+  const phase = session.eventosContactPhase || resolveEventosContactPhase(session);
+  return withAssistantFooter(askEventosContactPhase(phase, session));
+}
+
+/**
+ * goConfirm: Pasa a CONFIRMAR_ENVIO con el resumen completo (cotización + contacto).
+ *
+ * @param {object} session
+ * @returns {object}
+ */
+function goConfirm(session) {
+  session.eventosContactPhase = 'confirm';
+  return {
+    success: true,
+    nextState: 'EVENTOS_CONFIRMAR_ENVIO',
+    customReplies: getEventosQuoteSummary(session),
+    flowProgress: true
+  };
+}
+
+/**
+ * advanceAfterSave: Recalcula fase y pregunta lo siguiente (o confirma).
+ *
+ * @param {object} session
+ * @param {string} [prefix] - Texto previo (ej. ack de corrección)
+ * @returns {object}
+ */
+function advanceAfterSave(session, prefix = '') {
+  const phase = resolveEventosContactPhase(session);
+  session.eventosContactPhase = phase;
+  if (phase === 'confirm') return goConfirm(session);
+  const ask = askEventosContactPhase(phase, session);
+  return {
+    success: true,
+    nextState: 'EVENTOS_DATOS_CONTACTO',
+    customReply: prefix ? `${prefix}\n\n${ask}` : ask,
+    flowProgress: true
+  };
+}
+
+/**
+ * reaskPhase: Re-pregunta la fase actual sin avance (anti-loop vía flowProgress=false).
+ *
+ * @param {object} session
+ * @param {string} phase
+ * @param {string} [prefix]
+ * @returns {object}
+ */
+function reaskPhase(session, phase, prefix = '') {
+  const ask = askEventosContactPhase(phase, session);
+  return {
+    success: true,
+    nextState: 'EVENTOS_DATOS_CONTACTO',
+    customReply: prefix ? `${prefix}\n\n${ask}` : ask,
+    flowProgress: false
+  };
+}
 
 export const EVENTOS_DATOS_CONTACTO = defineState({
   id: 'EVENTOS_DATOS_CONTACTO',
-  promptQuestion: (session) => {
-    ensureContactBucket(session);
-    const missing = getMissingEventosContactFields(session);
-    // Si faltan nombre/email (entrada típica), usamos el intro corto unificado
-    const needsPerson = missing.some((m) => ['nombre', 'apellido', 'email'].includes(m));
-    if (needsPerson && missing.every((m) => ['nombre', 'apellido', 'email'].includes(m))) {
-      return getEventosContactIntroAsk();
-    }
-    return askForMissingEventosContact(missing, session);
-  },
-  shortQuestion: (session) => {
-    ensureContactBucket(session);
-    return askForMissingEventosContact(getMissingEventosContactFields(session), session);
-  },
+  texts: (session) => [buildEventosContactIntro(session)],
+  shortQuestion: (session) => shortQuestionForPhase(session),
   aiPrompt: AI_PROMPT,
 
   async validateAndProcess(messageText, session) {
     ensureContactBucket(session);
 
-    // flowProgress=true solo si el mensaje aportó un dato nuevo (anti-loop en engine)
-    const hasNewInfo = applyEventosContactDataFromMessage(messageText, session);
+    const phase = session.eventosContactPhase || resolveEventosContactPhase(session);
+    session.eventosContactPhase = phase;
+    const trimmed = String(messageText || '').trim();
 
-    const missing = getMissingEventosContactFields(session);
-    if (missing.length) {
-      let ask = askForMissingEventosContact(missing, session);
-      const typo = getEmailTypoSuggestion(messageText);
-      if (typo && missing.includes('email')) {
-        ask =
-          `Detecté *${typo.typed}*. ¿Quisiste decir *${typo.suggestion}*?\n` +
-          `Escríbelo de nuevo (o confirma el correo correcto) para la cotización formal.\n\n${ask}`;
-      }
+    // Ya completo → resumen formal
+    if (phase === 'confirm') return goConfirm(session);
+
+    // Corrección de un dato ya pedido (ej. fecha mientras pedimos nombre)
+    const priorFix = tryApplyEventosContactPriorCorrection(trimmed, session, phase);
+    if (priorFix) {
       return {
         success: true,
         nextState: 'EVENTOS_DATOS_CONTACTO',
-        customReply: ask,
-        flowProgress: hasNewInfo
+        customReply: `${priorFix.ack}\n\n${askEventosContactPhase(phase, session)}`,
+        flowProgress: true
       };
     }
 
-    return {
-      success: true,
-      nextState: 'EVENTOS_CONFIRMAR_ENVIO',
-      customReplies: getEventosEnvioSummary(session)
-    };
+    const hasNewInfo = applyEventosContactPhaseFromMessage(messageText, session, phase);
+
+    // Tipografía de email: sugerir dominio común si parece typo
+    if (phase === 'email') {
+      const typo = getEmailTypoSuggestion(messageText);
+      const stillMissingEmail = resolveEventosContactPhase(session) === 'email';
+      if (typo && stillMissingEmail) {
+        return reaskPhase(
+          session,
+          'email',
+          `Detecté *${typo.typed}*. ¿Quisiste decir *${typo.suggestion}*?\n` +
+            `Escríbelo de nuevo (o confirma el correo correcto).`
+        );
+      }
+    }
+
+    // Fecha parcial (solo mes): progreso, pero seguimos en fase fecha pidiendo el día
+    if (phase === 'fecha' && hasNewInfo && !toIsoDateFromBotText(session.date)) {
+      return {
+        success: true,
+        nextState: 'EVENTOS_DATOS_CONTACTO',
+        customReply: askEventosContactPhase('fecha', session),
+        flowProgress: true
+      };
+    }
+
+    // Nombre incompleto (solo nombre, falta apellido)
+    if (phase === 'nombre') {
+      const first = String(session.contact?.firstName || '').trim();
+      const last = String(session.contact?.lastName || '').trim();
+      if (hasNewInfo && first && !last) {
+        return {
+          success: true,
+          nextState: 'EVENTOS_DATOS_CONTACTO',
+          customReply: `Gracias *${first}*.\n\n*¿Me confirmas tu apellido?*\n_(ej: Pérez)_`,
+          flowProgress: true
+        };
+      }
+    }
+
+    if (!hasNewInfo && resolveEventosContactPhase(session) === phase) {
+      // Igual que Barriles: success + flowProgress false → strikes anti-loop en engine
+      return reaskPhase(session, phase);
+    }
+
+    return advanceAfterSave(session);
   }
 });
