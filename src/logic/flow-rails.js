@@ -189,9 +189,13 @@ _(ej: Mojito, Sangría, Ramazzotti — o "1 mojito y 2 sangría")_`,
 _(ej: 2 mojitos — o escribe *lista*)_`,
     format: 'Escribe *1* *Dispensador* o *2* *Muro* para seguir.',
     continue: 'Escribe *1* para cotizar o *2* si tienes una duda.',
+    style: 'Escribe los cócteles que quieres (ej: Mojito y Sangría) o pide una *selección sugerida*.',
+    per_person: `*¿Cuántos cócteles por persona calculamos?*
+_(ej: 2 como complemento, o 3 si lo quieres como barra principal)_`,
+    flavor_mode: 'Escribe los cócteles que quieres o pide una *selección sugerida*.',
     doubt: 'Escríbeme tu duda y te conectamos con el equipo.',
     cart: `*¿Qué cócteles te gustaría incluir?*
-_(ej: 5L Mojito)_`,
+_(ej: 5L Mojito — o elige un estilo si aún no tienes pack)_`,
     confirm_quote: '¿Te parece bien? Escribe *1* *Confirmar* o *2* *Modificar*.',
     contact: `*¿Me compartes tu nombre y correo?*
 _(ej: Ana Pérez, ana@email.com)_`,
@@ -246,6 +250,11 @@ _(ej: escribe *OK* para continuar, o "elimina el aperol, agrega 1 sangría")_`;
     if (session?.eventosAwaitingDoubt || pendingKey === 'doubt') {
       return 'Escríbeme tu duda y te conectamos con el equipo.';
     }
+    return null;
+  }
+
+  // Eventos estilo: el shortQuestion ya trae el menú de la fase
+  if (stateId === 'EVENTOS_ESTILO_MENU') {
     return null;
   }
 

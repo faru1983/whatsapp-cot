@@ -24,7 +24,8 @@ import {
   wantsUnknownGuestsCount,
   looksLikeCelebrationUncertainty,
   asksEquipmentOrResaleQuestion,
-  getEventFormatKey
+  getEventFormatKey,
+  getEventPriceListImage
 } from '../../../logic/eventos-helpers.js';
 import { isLikelyThirdPartyBotReply, isGreetingOrNoise } from '../../../logic/interruptions.js';
 import { withAssistantFooter } from '../../../logic/flow-rails.js';
@@ -38,7 +39,8 @@ import {
   askGuestsCopyCanonical,
   buildFormatPhaseAReplies,
   buildFormatPhaseBReplies,
-  eventosIntroMenuQuestion
+  eventosIntroMenuQuestion,
+  nextEventosAck
 } from '../../../logic/eventos-intro.js';
 
 /** Cierre suave: sin evento concreto, solo info/precios → web. */
@@ -152,7 +154,7 @@ function goInfoOnlyWeb() {
 }
 
 /**
- * goIntroMenu: Tras tipo + invitados → sugerencia de litros + menú cotizar / duda.
+ * goIntroMenu: Tras tipo + invitados → catálogo + referencia 2/3 p/p + menú cotizar/duda.
  *
  * @param {object} session
  * @returns {object}
@@ -160,19 +162,24 @@ function goInfoOnlyWeb() {
 function goIntroMenu(session) {
   const type = session.celebrationType;
   const guests = session.guests;
-  let ack = `Perfecto`;
+  let ack = nextEventosAck(session);
   if (type) ack += `, *${type}*`;
   if (guests) ack += ` con *${guests}* invitados`;
   ack += `. 🍸`;
 
-  // Orientación de consumo según invitados (antes estaba al abrir la carta)
   const formatKey = formatKeyFromSession(session);
   const litersHint = getEventLitersSuggestion(session.guests, formatKey);
+  // Catálogo primero (referencia visual); luego orientación y decisión cotizar/duda
+  const catalogImg = getEventPriceListImage(
+    formatKey,
+    'Para tu referencia te dejo el *catálogo de cócteles* 👆'
+  );
 
   return {
     success: true,
     nextState: 'EVENTOS_INTRO_MENU',
     customReplies: [
+      catalogImg,
       `${ack}\n\n${litersHint}`,
       eventosIntroMenuQuestion()
     ],

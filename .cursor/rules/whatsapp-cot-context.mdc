@@ -17,7 +17,7 @@ index.js → engine.js → statesMap (flows/index.js)
   ↘ logic/compile-state.js (defineState)
   ↘ logic/interruptions.js + decision-intent + keyword-intent + nlu-intent
   ↘ logic/validators + actions (registro por nombre)
-  ↘ logic/eventos-helpers.js + order-builder.js + utils.js + media.js
+  ↘ logic/eventos-helpers.js + eventos-style-pack.js + order-builder.js + utils.js + media.js
   ↘ logic/cot-api.js + cot-catalog.js + cot-event-quote.js + cot-barriles-sale.js + cot-contact.js + cot-barriles-contact.js + cot-eventos-contact.js
   ↘ llm.js (fallback/NLU/FAQ) + db.js
   ↘ whatsapp-send.js + business-labels.js
@@ -31,7 +31,7 @@ index.js → engine.js → statesMap (flows/index.js)
 | `src/core/engine.js` | Máquina de estados + red de seguridad + CLI (`test:local`) |
 | `src/core/llm.js` | `generateResponse`, extractores NLU, `classifyStepIntent`, `responderFAQ` |
 | `src/core/db.js` | Sesiones SQLite |
-| `src/flows/index.js` | `statesMap` unificado (17 estados) |
+| `src/flows/index.js` | `statesMap` unificado (19 estados) |
 | `src/flows/router/states/` | `ESPERANDO_INTENCION` |
 | `src/flows/barriles/states/` | Un archivo por `BARRILES_*` |
 | `src/flows/eventos/states/` | Un archivo por `EVENTOS_*` |
@@ -101,7 +101,7 @@ Cada estado exporta (vía `defineState`):
 
 **Barriles:** `BARRILES_FILTRO_CANAL` (web + comuna/fecha) → `BARRILES_RECOGIDA_PRODUCTOS` → `BARRILES_REVISION_COTIZACION` (si ya hay datos; si no → `BARRILES_RECOGIDA_DATOS` como red de seguridad) → `BARRILES_ROUTER_MODIFICACION` (modificar) o `BARRILES_DATOS_CONTACTO` (generar compra) → `BARRILES_CONFIRMAR_COMPRA` → `POST /api/v1/direct-sales` → `CERRADO`.
 
-**Eventos:** `EVENTOS_ELECCION_FORMATO` (o CTA Meta Dispensador/Muro → formato fijado) → `EVENTOS_RECOGIDA_DATOS` (tipo → invitados) → `EVENTOS_INTRO_MENU` (cotizar / duda→SOS) → `EVENTOS_ELECCION_MENU` → `EVENTOS_COTIZACION` → `EVENTOS_DATOS_CONTACTO` → `EVENTOS_CONFIRMAR_ENVIO` → `POST /api/v1/quotes` → `CERRADO`.
+**Eventos:** `EVENTOS_ELECCION_FORMATO` (o CTA Meta Dispensador/Muro → formato fijado) → `EVENTOS_RECOGIDA_DATOS` (tipo → invitados) → `EVENTOS_INTRO_MENU` (cotizar / duda→SOS) → `EVENTOS_ESTILO_MENU` (2 p/p + clásicos/premium/variados; Combinados/sin alcohol si preguntan) → pack en `EVENTOS_ELECCION_MENU` → `EVENTOS_COTIZACION` → `EVENTOS_DATOS_CONTACTO` → `EVENTOS_CONFIRMAR_ENVIO` → `POST /api/v1/quotes` → `CERRADO`.
 
 IDs semánticos (`BARRILES_*` / `EVENTOS_*`); transiciones reales en cada `nextState`.
 

@@ -59,6 +59,10 @@ export function getPendingFlowRequirement(session, stateId) {
     case 'EVENTOS_INTRO_MENU':
       return session.eventosAwaitingDoubt ? 'doubt' : 'continue';
 
+    case 'EVENTOS_ESTILO_MENU': {
+      if (!session.eventosDrinksPerGuest) return 'per_person';
+      return 'cart';
+    }
     case 'EVENTOS_ELECCION_MENU': {
       const products = session.orderBuilder?.products;
       const hasProducts = products && Object.keys(products).length > 0;

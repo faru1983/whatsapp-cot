@@ -103,11 +103,67 @@ _(ej: matrimonio, cumpleaños, empresa, etc.)_`;
  */
 export function askGuestsCopyCanonical() {
   return `*¿Cuántos invitados serán aproximadamente?*
-_(ej: 10, 25, 50 personas)_`;
+_(ej: 50, 100, 200 personas)_`;
+}
+
+/** Acuses cordiales que rotan (evita repetir el mismo en cada paso). */
+export const EVENTOS_ACK_WORDS = ['Perfecto', 'Súper', 'Genial'];
+
+/**
+ * nextEventosAck: Siguiente acuse del flujo Eventos.
+ * Orden: Perfecto → Súper → Genial → Perfecto…
+ * Así no sale “Súper, Súper, Súper” en mensajes seguidos.
+ *
+ * @param {object} [session] - Sesión (se muta eventosAckRotate)
+ * @returns {string} Ej. "Perfecto"
+ */
+export function nextEventosAck(session = {}) {
+  const list = EVENTOS_ACK_WORDS;
+  const i = Math.max(0, Number(session.eventosAckRotate) || 0);
+  const word = list[i % list.length];
+  session.eventosAckRotate = i + 1;
+  return word;
 }
 
 /**
- * buildFormatPhaseAText: Caption fase A (intro + tipo de evento).
+ * minOrderCocktailsForFormat: Cócteles del pedido mínimo (tabla rendimientos o 5/L).
+ *
+ * @param {'dispensador'|'muro'|string} formatKey
+ * @returns {{ minLiters: number, cocktails: number }}
+ */
+export function minOrderCocktailsForFormat(formatKey) {
+  const minLiters = getMinLitersForFormat(formatKey);
+  const fromTable = preciosData.rendimientos_barriles?.[`${minLiters}L`];
+  const cocktails = fromTable != null ? fromTable : minLiters * 5;
+  return { minLiters, cocktails };
+}
+
+/**
+ * buildFormatDesdePitch: Instalación + “desde” en cócteles (sin repetir el nombre del formato).
+ * El producto ya se nombró arriba; acá solo el beneficio comercial y el ancla de precio.
+ *
+ * @param {'dispensador'|'muro'} formatKey
+ * @returns {string}
+ */
+export function buildFormatDesdePitch(formatKey) {
+  const isMuro = formatKey === 'muro';
+  const desde = formatPrice(eventFormatFromPrice(formatKey));
+  const { minLiters, cocktails } = minOrderCocktailsForFormat(formatKey);
+
+  if (isMuro) {
+    return `La *instalación* tiene un costo de *${instalacionMuroFormatted()}*; tú eliges los cócteles y pagas por lo que pidas.
+
+El servicio parte desde *${desde}* — eso equivale a *${cocktails} cócteles* (*${minLiters}L*) de un sabor (pedido mínimo).`;
+  }
+
+  return `La *instalación es gratis*: solo pagas los cócteles que elijas.
+
+El servicio parte desde *${desde}* — eso equivale a *${cocktails} cócteles* (*${minLiters}L*) de un sabor (pedido mínimo).`;
+}
+
+/**
+ * buildFormatPhaseAText: Intro del formato + pregunta de tipo (avanza el flujo).
+ * Nombra el producto una sola vez; luego beneficio → precio → pregunta.
  *
  * @param {'dispensador'|'muro'} formatKey
  * @returns {string}
@@ -117,28 +173,21 @@ export function buildFormatPhaseAText(formatKey) {
   const nombre = isMuro ? 'Muro de Coctelería' : 'Dispensador Portátil';
   const emoji = isMuro ? '🍹' : '🍸';
   const ideal = isMuro
-    ? 'Es ideal para matrimonios, empresas y eventos *grandes o masivos*. Tus invitados se sirven cócteles preparados al instante, con una barra premium que se convierte en el punto de atracción.'
-    : 'Es ideal para cumpleaños, matrimonios, empresas y eventos de *cualquier tamaño*. Tus invitados pueden servirse cócteles preparados al instante, sin filas y sin bartender.';
-  const minL = getMinLitersForFormat(formatKey);
-  const desde = formatPrice(eventFormatFromPrice(formatKey));
-  const instalacionLine = isMuro
-    ? `🔧 Instalación: ${instalacionMuroFormatted()}`
-    : `🔧 Instalación: *gratis*`;
+    ? 'Ideal para matrimonios, empresas y eventos *grandes o masivos*: una barra premium donde tus invitados se sirven cócteles al instante — el punto de atracción del evento.'
+    : 'Ideal para cumpleaños, matrimonios, empresas y eventos de *cualquier tamaño*: cócteles listos al instante, sin filas y sin bartender.';
 
-  return `${emoji} Te cuento sobre nuestro *${nombre}*.
+  return `${emoji} *${nombre}*
 
 ${ideal}
 
-🍹 Pedido mínimo: *${minL}L* de cócteles
-💰 Servicio desde *${desde}*
-${instalacionLine}
+${buildFormatDesdePitch(formatKey)}
 
-Para orientarte, ${askCelebrationCopy()}`;
+Para armarte una propuesta a la medida, ${askCelebrationCopy()}`;
 }
 
 /**
- * buildFormatPhaseBText: Texto fase B (incluido + pedir invitados).
- * Integra el ack del tipo con el recordatorio de instalación (sin “Perfecto” + “¡Genial!”).
+ * buildFormatPhaseBText: Tras el tipo → valor incluido + pedir invitados.
+ * No repite instalación (ya fue en fase A). Empuja a dar la cantidad para cotizar.
  *
  * @param {'dispensador'|'muro'} formatKey
  * @param {object} [session] - Para ack del tipo de evento
@@ -146,27 +195,26 @@ Para orientarte, ${askCelebrationCopy()}`;
  */
 export function buildFormatPhaseBText(formatKey, session = null) {
   const isMuro = formatKey === 'muro';
-  const nombreCorto = isMuro ? 'muro' : 'dispensador';
-  // En fase A ya dijimos gratis / costo: aquí solo recordamos, en una sola frase con el ack.
-  const installReminder = isMuro
-    ? `te recuerdo que la instalación del *${nombreCorto}* tiene un costo de *${instalacionMuroFormatted()}* y solo pagas por los cócteles que elijas.`
-    : `te recuerdo que la instalación del *${nombreCorto}* es *gratis* y solo pagas por los cócteles que elijas.`;
+  const bridge = isMuro
+    ? 'Con el número de invitados te preparo una *propuesta concreta* de cócteles para el muro.'
+    : 'Con el número de invitados te preparo una *propuesta concreta* de cócteles.';
 
   let lead = '';
+  const ack = nextEventosAck(session || {});
   if (session?.celebrationType) {
-    lead = `Genial, anoté *${session.celebrationType}*: ${installReminder}`;
+    lead = `${ack}, anoté *${session.celebrationType}* 🥂\n\n${bridge}`;
   } else if (session?.eventosCelebrationSkipped) {
-    lead = `Sin problema, el tipo lo dejamos por confirmar. ${installReminder.charAt(0).toUpperCase()}${installReminder.slice(1)}`;
+    lead = `Sin problema, el tipo lo dejamos por confirmar.\n\n${bridge}`;
   } else {
-    lead = `Genial 🍸 ${installReminder.charAt(0).toUpperCase()}${installReminder.slice(1)}`;
+    lead = `${ack} 🥂\n\n${bridge}`;
   }
 
   return `${lead}
 
-✨ Además, todo esto está incluido sin costo adicional:
+✨ Ya va *incluido* sin costo extra:
 🧊 Hielo · 🍊 Garnish · 🥂 Vasos/copas · 🧰 Accesorios de bar
 
-⏰ Instalamos horas antes del evento y retiramos como máximo al día siguiente.
+⏰ Instalamos horas antes y retiramos como máximo al día siguiente.
 
 ${askGuestsCopyCanonical()}`;
 }
@@ -216,11 +264,13 @@ export function getEventFormatChoiceCaption() {
   const instalacion = instalacionMuroFormatted();
   const desdeDisp = formatPrice(eventFormatFromPrice('dispensador'));
   const desdeMuro = formatPrice(eventFormatFromPrice('muro'));
-  return `En *Servicio para Eventos* puedes elegir el formato que mejor calza con tu celebración:
+  const dispMin = minOrderCocktailsForFormat('dispensador');
+  const muroMin = minOrderCocktailsForFormat('muro');
+  return `En *Servicio para Eventos* elige el formato que mejor calza:
 
-1️⃣ *Dispensador Portátil* — ideal para eventos de *cualquier tamaño*. Instalación gratis, pedido mín. 10L, desde *${desdeDisp}*
+1️⃣ *Dispensador Portátil* — eventos de *cualquier tamaño*. Instalación *gratis*; desde *${desdeDisp}* (= *${dispMin.cocktails} cócteles* / *${dispMin.minLiters}L*).
 
-2️⃣ *Muro de Coctelería* — ideal para eventos *grandes o masivos*. Instalación ${instalacion}, pedido mín. 30L, desde *${desdeMuro}*
+2️⃣ *Muro de Coctelería* — eventos *grandes o masivos*. Instalación *${instalacion}*; desde *${desdeMuro}* (= *${muroMin.cocktails} cócteles* / *${muroMin.minLiters}L*).
 
 ${MENU_WRITE_CTA}
 
@@ -251,7 +301,7 @@ export function eventosIntroMenuBlock() {
  * @returns {string}
  */
 export function eventosIntroMenuQuestion() {
-  return `*Para continuar, ¿qué estás buscando?*
+  return `*¿Te armo la cotización o tienes alguna duda?*
 
 ${eventosIntroMenuBlock()}`;
 }
@@ -269,13 +319,13 @@ export function buildEventosAskDoubtReply() {
  * EVENTOS_COTIZAR_SYNONYMS: Equivale a 1️⃣ (hacer cotización).
  */
 export const EVENTOS_COTIZAR_SYNONYMS =
-  /hacer\s+((una|la)\s+)?cotizaci[oó]n|\bcotizar\b|\bcotizaci[oó]n\b|quiero\s+(cotizar|seguir|continuar)|armar\s+((una|la)\s+)?cotizaci[oó]n|ver\s+(la\s+)?(carta|precios)|opci[oó]n\s*1|^(uno|primera?)$/i;
+  /hacer\s+((una|la)\s+)?cotizaci[oó]n|\bcotizar\b|\bcotizaci[oó]n\b|quiero\s+(cotizar|seguir|continuar|armar)|armar\s+((una|la)\s+)?cotizaci[oó]n|ver\s+(la\s+)?(carta|precios)|armame|ármame|dale|seguimos|opci[oó]n\s*1|^(uno|primera?|si|sí)$/i;
 
 /**
  * EVENTOS_DUDA_SYNONYMS: Equivale a 2️⃣ (tengo una duda).
  */
 export const EVENTOS_DUDA_SYNONYMS =
-  /\b(duda|dudas|consulta|consultas|pregunta|preguntas|ayuda)\b|tengo\s+(una\s+)?(duda|consulta|pregunta)|hablar\s+con\s+(un\s+)?humano|opci[oó]n\s*2|^(dos|segunda?)$/i;
+  /\b(duda|dudas|consulta|consultas|pregunta|preguntas|ayuda)\b|tengo\s+(una\s+)?(duda|consulta|pregunta)|quiero\s+preguntar|hablar\s+con\s+(un\s+)?(humano|asesor|persona)|opci[oó]n\s*2|^(dos|segunda?)$/i;
 
 /**
  * applyEventFormatToSession: Fija formato + orderBuilder en la sesión.

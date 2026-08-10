@@ -63,6 +63,22 @@ import {
 } from '../../../logic/eventos-helpers.js';
 import { withAssistantFooter, formatMenuBlock } from '../../../logic/flow-rails.js';
 import { matchesMenuOption } from '../../../logic/keyword-intent.js';
+import {
+  applyStylePackToSession,
+  applySuggestedSelectionToSession,
+  buildPackProposalReply,
+  wantsMoreEventQuantity,
+  wantsSelfBuildEventMenu,
+  wantsSuggestedSelection,
+  EVENT_DRINKS_PER_GUEST_PARTY,
+  asksEventCombinadosInfo,
+  asksEventMocktailsInfo,
+  buildCombinadosInfoReply,
+  buildMocktailsInfoReply,
+  detectSideStyleFromText,
+  buildFlavorPickAsk
+} from '../../../logic/eventos-style-pack.js';
+import { nextEventosAck } from '../../../logic/eventos-intro.js';
 
 const ASK_COCKTAILS = ASK_EVENT_COCKTAILS;
 const ASK_OK_AFTER_CART = `*¿Todo bien con el pedido?*
@@ -113,6 +129,7 @@ function shortQuestionForSession(session) {
   if (hasCart) {
     return withAssistantFooter(ASK_OK_AFTER_CART);
   }
+  // Sin carrito: misma pregunta abierta (sin re-listar todo el catálogo)
   return withAssistantFooter(ASK_COCKTAILS);
 }
 
@@ -246,6 +263,99 @@ export const EVENTOS_ELECCION_MENU = defineState({
     const defaultLitrage = formatKey === 'muro' ? '10L' : '5L';
     // Para CRM Interesado: primer cóctel del carrito (no al solo ver la carta)
     const linesBefore = eventCartLineCount(session);
+
+    // ------------------------------------------------------------------
+    // Selección sugerida (opcional) o pack propuesto: más cantidad / atajos
+    // ------------------------------------------------------------------
+    if (
+      wantsSuggestedSelection(messageText)
+      && !hasProductOrderSignal(messageText)
+      && eventCartLineCount(session) === 0
+    ) {
+      const pack = applySuggestedSelectionToSession(session, formatKey);
+      const { reply, followUp } = buildPackProposalReply(session, formatKey, pack);
+      return withFirstCocktailCrmEngage(linesBefore, session, {
+        success: true,
+        nextState: 'EVENTOS_ELECCION_MENU',
+        customReplies: [reply, withAssistantFooter(followUp)],
+        flowProgress: true
+      });
+    }
+
+    if (session.eventosPackProposed && wantsMoreEventQuantity(messageText) && session.eventosStyleKey) {
+      const pack = session.eventosStyleKey === 'SUGERIDO'
+        ? applySuggestedSelectionToSession(session, formatKey, EVENT_DRINKS_PER_GUEST_PARTY)
+        : applyStylePackToSession(
+          session,
+          session.eventosStyleKey,
+          formatKey,
+          EVENT_DRINKS_PER_GUEST_PARTY
+        );
+      const { reply, followUp } = buildPackProposalReply(session, formatKey, pack);
+      return withFirstCocktailCrmEngage(linesBefore, session, {
+        success: true,
+        nextState: 'EVENTOS_ELECCION_MENU',
+        customReplies: [
+          `${nextEventosAck(session)}, lo subimos a ~*${EVENT_DRINKS_PER_GUEST_PARTY} por persona* (más fiesta) 🎉\n\n${reply}`,
+          withAssistantFooter(followUp)
+        ],
+        flowProgress: true
+      });
+    }
+
+    if (wantsSelfBuildEventMenu(messageText)) {
+      return {
+        success: true,
+        nextState: 'EVENTOS_ELECCION_MENU',
+        customReply: withAssistantFooter(buildFlavorPickAsk()),
+        flowProgress: true
+      };
+    }
+
+    // Pack lateral: combinados / sin alcohol — solo si aún no hay carrito manual,
+    // o si viene de un pack y elige explícito (mensaje corto).
+    const sideStyle = detectSideStyleFromText(messageText);
+    const packCartEmpty = eventCartLineCount(session) === 0;
+    const shortSidePick = /^(combinados?|piscola|piscolas|sin\s+alcohol|mocktails?|mocktail)$/i
+      .test(String(messageText || '').trim());
+    if (
+      sideStyle
+      && !hasProductOrderSignal(messageText)
+      && (packCartEmpty || (session.eventosPackProposed && shortSidePick))
+    ) {
+      const pack = applyStylePackToSession(session, sideStyle, formatKey);
+      const { reply, followUp } = buildPackProposalReply(session, formatKey, pack);
+      return withFirstCocktailCrmEngage(linesBefore, session, {
+        success: true,
+        nextState: 'EVENTOS_ELECCION_MENU',
+        customReplies: [reply, withAssistantFooter(followUp)],
+        flowProgress: true
+      });
+    }
+    if (asksEventCombinadosInfo(messageText) && !hasProductOrderSignal(messageText) && packCartEmpty) {
+      return {
+        success: true,
+        nextState: 'EVENTOS_ELECCION_MENU',
+        customReply: buildCombinadosInfoReply(false)
+          + '\n\nSi quieres ese pack, escribe *combinados*. Si no, dime un cóctel o *ok* si ya tienes pedido 😊',
+        flowProgress: true
+      };
+    }
+    // "sin alcohol" con carrito: lo maneja getNonAlcoholicSuggestionReply más abajo (familia)
+    if (
+      (asksEventMocktailsInfo(messageText) || wantsNonAlcoholicOption(messageText))
+      && !hasProductOrderSignal(messageText)
+      && !hasDrinkSelection(messageText)
+      && packCartEmpty
+    ) {
+      return {
+        success: true,
+        nextState: 'EVENTOS_ELECCION_MENU',
+        customReply: buildMocktailsInfoReply(false)
+          + '\n\nEscribe *sin alcohol* para armarte el pack, o el nombre del Mocktail que quieres 🍹',
+        flowProgress: true
+      };
+    }
 
     // Corrección de invitados/tipo sin pedido de cócteles (no roba "10L mojito"
     // ni el menú pendiente "¿son N barriles?")

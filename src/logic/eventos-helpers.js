@@ -1244,6 +1244,37 @@ export function formatEventCartSummary(products, formatKey) {
 }
 
 /**
+ * formatEventLitersSummaryLine: Resumen corto en cursiva (misma línea en carrito y cotización formal).
+ * Ej.: _15L | 75 cócteles | 3 x persona_
+ *
+ * @param {{ totalLiters?: number, totalDrinks?: number }} quote
+ * @param {{ guests?: number|null }} [opts]
+ * @returns {string} Vacío si no hay litros
+ */
+export function formatEventLitersSummaryLine(quote, opts = {}) {
+  const liters = Number(quote?.totalLiters) || 0;
+  if (liters <= 0) return '';
+
+  const drinks = Number(quote?.totalDrinks);
+  const approxDrinks = Number.isFinite(drinks) && drinks > 0
+    ? drinks
+    : liters * 5;
+
+  let line = `_${liters}L | ${approxDrinks} cócteles`;
+
+  const guests = Number(opts.guests);
+  if (guests > 0 && approxDrinks > 0) {
+    const perPerson = approxDrinks / guests;
+    const perPersonStr = Number.isInteger(perPerson)
+      ? String(perPerson)
+      : perPerson.toFixed(1);
+    line += ` | ${perPersonStr} x persona`;
+  }
+  line += `_`;
+  return line;
+}
+
+/**
  * formatEventCartTotalsLine: Subtotal; debajo resumen corto de litros/cócteles/por persona.
  * El mínimo del formato ya se dijo antes: no se repite aquí.
  *
@@ -1252,27 +1283,9 @@ export function formatEventCartSummary(products, formatKey) {
  * @returns {string}
  */
 export function formatEventCartTotalsLine(quote, opts = {}) {
-  const liters = Number(quote?.totalLiters) || 0;
-  const drinks = Number(quote?.totalDrinks);
-  const approxDrinks = Number.isFinite(drinks) && drinks > 0
-    ? drinks
-    : liters * 5;
-
-  // Una sola línea en cursiva: fácil de leer en el móvil
-  let litersLine = `_${liters}L | ${approxDrinks} cócteles`;
-
-  const guests = Number(opts.guests);
-  if (guests > 0 && approxDrinks > 0) {
-    const perPerson = approxDrinks / guests;
-    const perPersonStr = Number.isInteger(perPerson)
-      ? String(perPerson)
-      : perPerson.toFixed(1);
-    litersLine += ` | ${perPersonStr} x persona`;
-  }
-  litersLine += `_`;
-
+  const litersLine = formatEventLitersSummaryLine(quote, opts);
   return `*Subtotal:* ${formatPrice(quote?.subtotal || 0)}
-${litersLine}`;
+${litersLine || `_${Number(quote?.totalLiters) || 0}L_`}`;
 }
 
 /**

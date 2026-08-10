@@ -405,8 +405,8 @@ export function syncCrmCtwaAttributionAsync(session) {
 
 /**
  * shouldEngageCrmOnTransition: ¿Esta transición del bot = momento Interesado?
- * Eventos: NO al solo elegir “cotizar” (ver carta); se marca al primer pedido de cócteles
- *   vía notifyCrmEngageTrigger (crmEngage en ELECCION_MENU).
+ * Eventos: NO al solo elegir “cotizar” (estilo/pack aún no); se marca al primer pedido
+ *   de cócteles vía notifyCrmEngageTrigger (crmEngage al armar pack o elegir a mano).
  * Barriles: al elegir pedir (FILTRO o post-precios) o atajo sabor → RECOGIDA_PRODUCTOS.
  * Solo ver precios o dejar una duda sigue siendo Curioso.
  *

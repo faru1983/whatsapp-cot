@@ -9,8 +9,8 @@ import {
   findLocationByFuzzyMatch
 } from '../logic/utils.js';
 import { OrderBuilder } from '../logic/order-builder.js';
-import { formatMenuBlock, MENU_WRITE_CTA } from '../logic/flow-rails.js';
-import { eventFormatFromPrice } from '../logic/eventos-intro.js';
+import { getEventFormatChoiceCaption } from '../logic/eventos-intro.js';
+import { formatEventLitersSummaryLine } from '../logic/eventos-helpers.js';
 
 // ==============================================================================
 // OBJETIVO: Textos compartidos (cotización, dudas, alertas admin, pitches eventos).
@@ -413,49 +413,48 @@ export function getEventFormatPitch(formatKey) {
 }
 
 /**
- * getEventLitersSuggestion: Explica cuántos litros pedir según invitados.
- * Rendimientos del formato (datos.json) en lista clara + referencia 3/5 por persona.
- * El mínimo ya se dijo en fase A; aquí solo se recuerda.
+ * getEventLitersSuggestion: Orientación 2 p/p (complemento) + 3 p/p (barra principal).
+ * El detalle de pack/estilo viene después de “quiero cotizar”.
+ * Rendimientos finos quedan en FAQ si preguntan “cuántos vasos da”.
  *
  * @param {number} guests - Cantidad de invitados
- * @param {'dispensador'|'muro'} formatKey - Formato (define mínimo y litrajes)
+ * @param {'dispensador'|'muro'} formatKey - Formato (define mínimo)
  * @returns {string}
  */
 export function getEventLitersSuggestion(guests, formatKey) {
   const n = Number(guests) || 0;
-  const rendimientos = preciosData.rendimientos_barriles || {};
-  // 5 cócteles por litro (= 200ml). Si el litraje está en la tabla, usamos ese valor.
-  const cocktailsForLiters = (liters) => {
-    const fromTable = rendimientos[`${liters}L`];
-    if (fromTable != null) return fromTable;
-    return liters * 5;
+  const minLiters = formatKey === 'muro' ? 30 : 10;
+  const step = formatKey === 'muro' ? 10 : 5;
+
+  /**
+   * litersForPerPerson: Redondea litros al step del formato (y al mínimo).
+   *
+   * @param {number} per - Cócteles por persona
+   * @returns {{ cocktails: number, liters: number, mathLine: string }}
+   */
+  const litersForPerPerson = (per) => {
+    const cocktails = n > 0 ? n * per : 0;
+    const rawLiters = cocktails > 0 ? Math.ceil(cocktails / 5) : 0;
+    const liters = Math.max(minLiters, Math.ceil((rawLiters || minLiters) / step) * step);
+    const mathLine = n
+      ? `${n}×${per} = *${cocktails}* cócteles (~*${liters}L*)`
+      : `*${per}* cócteles por persona`;
+    return { cocktails, liters, mathLine };
   };
 
-  // 3 tragos (tranquilo) o 5 (fiesta) × 0.2 L por trago, redondeado a múltiplos de 5L
-  const tranquilo = Math.ceil((n * 3 * 0.2) / 5) * 5;
-  const fiesta = Math.ceil((n * 5 * 0.2) / 5) * 5;
-  const minLiters = formatKey === 'muro' ? 30 : 10;
-  const litrajes = formatKey === 'muro' ? ['10L', '20L', '30L'] : ['5L', '10L'];
-  // Una línea por barril: fácil de escanear en el móvil
-  const rendLines = litrajes
-    .map((l) => {
-      const liters = parseInt(l, 10);
-      const cocktails = rendimientos[l] ?? cocktailsForLiters(liters);
-      return `- Barril *${l}* → *${cocktails}* cócteles de 200ml`;
-    })
-    .join('\n');
-
+  const base = litersForPerPerson(2);
+  const party = litersForPerPerson(3);
   const guestsLabel = n ? `*${n} invitados*` : '*tus invitados*';
 
-  return `*Rendimientos aproximados:*
-${rendLines}
+  return `Con ${guestsLabel} una buena referencia es:
 
-Para orientarte con ${guestsLabel}, una buena referencia de consumo es:
+🍹 *Complemento de la celebración:* *2 cócteles por persona*.
+Ejemplo: ${base.mathLine}.
 
-🍹 *${tranquilo}L* (~${cocktailsForLiters(tranquilo)} cócteles) — evento más tranquilo (~3 por persona)
-🎉 *${fiesta}L* (~${cocktailsForLiters(fiesta)} cócteles) — si quieren fiesta (~5 por persona)
+🎉 *Si lo quieres como barra principal:* *3 o más* por persona.
+Ejemplo: ${party.mathLine}.
 
-Recuerda que el pedido mínimo es *${minLiters}L* y puedes combinar sabores hasta llegar a esa cantidad (o la que prefieras).`;
+Cuando elijas *cotizar*, te ayudo a armar la propuesta.`;
 }
 
 /**
@@ -574,15 +573,8 @@ export function getEventosQuoteSummary(session) {
 
   text += `\n--------------------\n`;
   text += `Subtotal cócteles: ${formatPrice(quote.subtotal)}\n`;
-  if (quote.totalLiters > 0) {
-    let litersLine = `Litros: ${quote.totalLiters}L · ≈ ${quote.totalDrinks} cócteles`;
-    if (session.guests) {
-      const perPerson = quote.totalDrinks / session.guests;
-      const perPersonStr = Number.isInteger(perPerson)
-        ? String(perPerson)
-        : perPerson.toFixed(1);
-      litersLine += ` (≈ ${perPersonStr} por persona)`;
-    }
+  const litersLine = formatEventLitersSummaryLine(quote, { guests: session.guests });
+  if (litersLine) {
     text += `${litersLine}\n`;
   }
   if (quote.installation > 0) {
@@ -739,27 +731,15 @@ _(ej: cambia la fecha, agrega 1 sangría, la comuna es Providencia)_`
 }
 
 /**
- * getEventFormatRecommendation: Caption de elección Dispensador/Muro (sin invitados).
- * Compat: firma antigua (guests, instalacion) ignorada; el copy ya no usa N invitados.
+ * getEventFormatRecommendation: Caption de elección Dispensador/Muro (compat).
+ * Delega al copy canónico de eventos-intro (cócteles primero).
  *
  * @param {number} [_guests]
- * @param {string} [instalacionMuroStr] - Precio muro ya formateado (opcional)
+ * @param {string} [_instalacionMuroStr] - Ignorado; el pitch usa datos.json
  * @returns {string}
  */
-export function getEventFormatRecommendation(_guests, instalacionMuroStr) {
-  const instalacion = instalacionMuroStr
-    || formatPrice(preciosData.instalacion_muro || 50000);
-  const desdeDisp = formatPrice(eventFormatFromPrice('dispensador'));
-  const desdeMuro = formatPrice(eventFormatFromPrice('muro'));
-  return `En *Servicio para Eventos* puedes elegir el formato que mejor calza con tu celebración:
-
-1️⃣ *Dispensador Portátil* — ideal para eventos de *cualquier tamaño*. Instalación gratis, pedido mín. 10L, desde *${desdeDisp}*
-
-2️⃣ *Muro de Coctelería* — ideal para eventos *grandes o masivos*. Instalación ${instalacion}, pedido mín. 30L, desde *${desdeMuro}*
-
-${MENU_WRITE_CTA}
-
-${formatMenuBlock(['Dispensador', 'Muro'])}`;
+export function getEventFormatRecommendation(_guests, _instalacionMuroStr) {
+  return getEventFormatChoiceCaption();
 }
 
 // ==============================================================================
