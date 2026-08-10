@@ -70,13 +70,16 @@ import {
   wantsMoreEventQuantity,
   wantsSelfBuildEventMenu,
   wantsSuggestedSelection,
+  applyBaselineLitersIfNamesOnly,
+  messageOmitsEventLitrage,
   EVENT_DRINKS_PER_GUEST_PARTY,
   asksEventCombinadosInfo,
   asksEventMocktailsInfo,
   buildCombinadosInfoReply,
   buildMocktailsInfoReply,
   detectSideStyleFromText,
-  buildFlavorPickAsk
+  buildFlavorPickQuestion,
+  buildFlavorCatalogBlock
 } from '../../../logic/eventos-style-pack.js';
 import { nextEventosAck } from '../../../logic/eventos-intro.js';
 
@@ -307,7 +310,10 @@ export const EVENTOS_ELECCION_MENU = defineState({
       return {
         success: true,
         nextState: 'EVENTOS_ELECCION_MENU',
-        customReply: withAssistantFooter(buildFlavorPickAsk()),
+        customReplies: [
+          buildFlavorCatalogBlock(),
+          buildFlavorPickQuestion()
+        ],
         flowProgress: true
       };
     }
@@ -752,6 +758,34 @@ _(ej: 5L Mojito)_ 🍸`;
     if (dudas?.length > 0) {
       const todasLasOpcionesDudosas = dudas.flatMap(d => d.opciones);
       extractedList = extractedList.filter(p => !todasLasOpcionesDudosas.includes(p.name));
+    }
+
+    // Si ya fijó cócteles p/p y solo nombró sabores (sin 5L/10L), repartimos el total
+    const cartLitersBeforeExtract = (() => {
+      const b = new OrderBuilder(formatKey, preciosData);
+      b.products = session.orderBuilder.products;
+      return b.getTotalLiters();
+    })();
+    const isAddIntent = hasExplicitEventAddIntent(messageText);
+    if (
+      extractedList.length > 0
+      && session.eventosDrinksPerGuest
+      && messageOmitsEventLitrage(extractText || messageText)
+    ) {
+      const scaled = applyBaselineLitersIfNamesOnly(
+        extractedList,
+        extractText || messageText,
+        session,
+        formatKey,
+        { cartLiters: cartLitersBeforeExtract, isAdd: isAddIntent }
+      );
+      if (scaled.length > 0) {
+        // Lista sin tamaños = pedido completo (no sumar encima de un carrito viejo)
+        if (!isAddIntent && cartLitersBeforeExtract > 0) {
+          session.orderBuilder.products = {};
+        }
+        extractedList = scaled;
+      }
     }
 
     const { parsedProducts, invalidLitrages } = validateEventProductLines(

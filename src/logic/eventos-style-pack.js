@@ -9,7 +9,7 @@ import {
   formatPrice,
   partitionLitersIntoBarrels,
   getCoctelesByCategoria,
-  getCoctelesNamesCatalog
+  getCoctelesNamesCatalogCompact
 } from './utils.js';
 import {
   getMinLitersForFormat,
@@ -266,6 +266,94 @@ export function buildPackFromFlavorNames(flavorNames, guests, formatKey, drinksP
 }
 
 /**
+ * messageOmitsEventLitrage: ¿El cliente nombró sabores sin indicar tamaño (5L, 10 litros, etc.)?
+ * Si omitió tamaños y ya hay p/p, repartimos el total del baseline entre esos sabores.
+ *
+ * @param {string} messageText
+ * @returns {boolean}
+ */
+export function messageOmitsEventLitrage(messageText) {
+  const t = String(messageText || '').trim();
+  if (!t) return true;
+  // "5L", "10 litros", "15 lt"
+  if (/\b\d+\s*(?:l|lt|lts|litros?)\b/i.test(t)) return false;
+  // "5 de aperol" / "10 de mojito" (atajo de litros)
+  if (/\b\d+\s+de\s+[a-záéíóúñü]/i.test(t)) return false;
+  // "5 aperol" / "10 mojito" (≥5 = litros, misma regla del parser)
+  if (/\b([5-9]|\d{2,})\s+[a-záéíóúñü]/i.test(t)) return false;
+  return true;
+}
+
+/**
+ * buildProductLinesForTargetLiters: Reparte un total de litros entre sabores (barriles válidos).
+ *
+ * @param {string[]} flavorNames
+ * @param {number} targetLiters
+ * @param {'dispensador'|'muro'|string} formatKey
+ * @returns {Array<{ name: string, quantity: number, litrage: string }>}
+ */
+export function buildProductLinesForTargetLiters(flavorNames, targetLiters, formatKey) {
+  const catalog = preciosData.cocteles || {};
+  const names = [];
+  for (const raw of flavorNames || []) {
+    const n = String(raw || '').trim();
+    if (n && catalog[n] && !names.includes(n)) names.push(n);
+  }
+  if (names.length === 0) return [];
+
+  const allowed = getAllowedLitrages(formatKey);
+  const shares = splitLitersAcrossFlavors(Number(targetLiters) || 0, names.length, allowed);
+  const products = [];
+  for (let i = 0; i < names.length; i++) {
+    const liters = shares[i] || 0;
+    if (liters <= 0) continue;
+    products.push(...litersToProductLines(names[i], liters, allowed));
+  }
+  return products;
+}
+
+/**
+ * applyBaselineLitersIfNamesOnly: Si hay p/p y el mensaje no trae tamaños, reparte litros del baseline.
+ * Carrito vacío / corrección: reparte el total. “Agrega …” con carrito: reparte lo que falta.
+ *
+ * @param {Array<{ name: string, quantity?: number, litrage?: string }>} extractedList
+ * @param {string} messageText
+ * @param {object} session
+ * @param {string} formatKey
+ * @param {{ cartLiters?: number, isAdd?: boolean, isCorrection?: boolean }} [opts]
+ * @returns {Array<{ name: string, quantity: number, litrage: string }>}
+ */
+export function applyBaselineLitersIfNamesOnly(extractedList, messageText, session, formatKey, opts = {}) {
+  const list = Array.isArray(extractedList) ? extractedList : [];
+  if (list.length === 0) return list;
+  if (!session?.eventosDrinksPerGuest) return list;
+  if (!messageOmitsEventLitrage(messageText)) return list;
+
+  const names = [];
+  for (const p of list) {
+    const n = String(p?.name || '').trim();
+    if (n && !names.includes(n)) names.push(n);
+  }
+  if (names.length === 0) return list;
+
+  const per = Number(session.eventosDrinksPerGuest) || EVENT_DRINKS_PER_GUEST;
+  const baseline = calculateEventBaseline(session.guests, formatKey, per);
+  const cartLiters = Number(opts.cartLiters) || 0;
+  const isAdd = Boolean(opts.isAdd);
+
+  // “Agrega X” sin tamaño: completar lo que falta para el p/p (mínimo 1 barril chico)
+  if (isAdd && cartLiters > 0) {
+    const allowed = getAllowedLitrages(formatKey);
+    const step = Math.min(...allowed.map((l) => parseInt(l, 10)).filter((n) => n > 0)) || 5;
+    const remaining = Math.max(step, baseline.totalLiters - cartLiters);
+    return buildProductLinesForTargetLiters(names, remaining, formatKey);
+  }
+
+  // Primera elección / lista de sabores / corrección: repartir el total del p/p
+  return buildProductLinesForTargetLiters(names, baseline.totalLiters, formatKey);
+}
+
+/**
  * buildStylePackProductLines: Arma las líneas del carrito para un estilo + invitados.
  *
  * @param {string} styleKey
@@ -469,25 +557,41 @@ export function getEventosEstiloPhase(session = {}) {
  */
 export function buildPerPersonAsk() {
   return `*¿Cuántos cócteles por persona calculamos?*
-_(ej: 2 como complemento, o 3 si lo quieres como barra principal)_`;
+_(ej: 2, 3 o más)_`;
 }
 
 /**
- * buildFlavorPickAsk: Tras p/p — recuerda catálogo, lista por categoría y pregunta abierta.
- * La selección sugerida es un soft CTA (sin menú numerado).
+ * buildFlavorCatalogBlock: Recordatorio del catálogo + lista corta por categoría.
+ *
+ * @returns {string}
+ */
+export function buildFlavorCatalogBlock() {
+  return `Más arriba te dejé el *catálogo con precios* 👆
+Te recuerdo los sabores:
+
+${getCoctelesNamesCatalogCompact()}`;
+}
+
+/**
+ * buildFlavorPickQuestion: Pregunta abierta de sabores (+ soft CTA sugerida).
+ * Sin pie HUMANO: va en burbuja propia después de la lista.
+ *
+ * @returns {string}
+ */
+export function buildFlavorPickQuestion() {
+  return `*¿Cuáles te gustaría incluir?*
+_(ej: Mojito y Sangría — o ${EVENT_COCKTAIL_ORDER_EXAMPLE})_
+
+Si prefieres, te armo una *selección sugerida* y la ajustamos 😊`;
+}
+
+/**
+ * buildFlavorPickAsk: Re-pregunta corta (sin re-listar todo el catálogo).
  *
  * @returns {string}
  */
 export function buildFlavorPickAsk() {
-  return `Más arriba te dejé el *catálogo con precios* 👆
-Te recuerdo los sabores por categoría:
-
-${getCoctelesNamesCatalog()}
-
-*¿Cuáles te gustaría incluir?*
-_(ej: Mojito y Sangría — o ${EVENT_COCKTAIL_ORDER_EXAMPLE})_
-
-Si prefieres, te armo una *selección sugerida* y la ajustamos 😊`;
+  return buildFlavorPickQuestion();
 }
 
 /**
@@ -549,10 +653,13 @@ export function buildFlavorPickEntryReplies(session, formatKey, per) {
     ? 'como *complemento* de la celebración'
     : 'como *barra principal*';
 
+  // Burbuja 1: confirmación p/p + catálogo corto | Burbuja 2: solo la pregunta
   return [
     `Listo: *${per} cócteles por persona* ${label}.
-Ejemplo: ${baseline.mathLine} → unos *${baseline.totalLiters}L* en total.`,
-    buildFlavorPickAsk()
+Ejemplo: ${baseline.mathLine} → unos *${baseline.totalLiters}L* en total.
+
+${buildFlavorCatalogBlock()}`,
+    buildFlavorPickQuestion()
   ];
 }
 

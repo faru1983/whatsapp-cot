@@ -191,7 +191,7 @@ _(ej: 2 mojitos — o escribe *lista*)_`,
     continue: 'Escribe *1* para cotizar o *2* si tienes una duda.',
     style: 'Escribe los cócteles que quieres (ej: Mojito y Sangría) o pide una *selección sugerida*.',
     per_person: `*¿Cuántos cócteles por persona calculamos?*
-_(ej: 2 como complemento, o 3 si lo quieres como barra principal)_`,
+_(ej: 2, 3 o más)_`,
     flavor_mode: 'Escribe los cócteles que quieres o pide una *selección sugerida*.',
     doubt: 'Escríbeme tu duda y te conectamos con el equipo.',
     cart: `*¿Qué cócteles te gustaría incluir?*

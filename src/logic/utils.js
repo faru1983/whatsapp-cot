@@ -426,59 +426,118 @@ export function getCartaCocteles(format = 'desechable', options = {}) {
 }
 
 /**
- * buildCategoryNameBulletLines: Lista nombres de una categoría con viñetas.
- * Agrupa variantes de familia (Mojito Maracuyá, …) en una sola línea.
- *
- * @param {object[]} items - Cócteles de una categoría (salen de getCoctelesByCategoria)
- * @returns {string} Líneas "- Nombre" o "- Familia (sabor1, sabor2)"
- */
-function buildCategoryNameBulletLines(items) {
-	const names = items.map((item) => item.name).sort((a, b) => a.localeCompare(b, 'es'));
-	/** @type {Map<string, string[]>} */
-	const byFamily = new Map();
-	const singles = [];
-
-	for (const name of names) {
-		const base = getProductFamilyBase(name);
-		if (base) {
-			if (!byFamily.has(base)) byFamily.set(base, []);
-			byFamily.get(base).push(name);
-		} else {
-			singles.push(name);
-		}
-	}
-
-	const lines = [];
-	for (const [base, familyNames] of [...byFamily.entries()].sort((a, b) => a[0].localeCompare(b[0], 'es'))) {
-		if (familyNames.length === 1) {
-			lines.push(`- ${familyNames[0]}`);
-			continue;
-		}
-		const variants = familyNames.map((name) => formatVariantLabel(name, base));
-		lines.push(`- ${base} (${variants.join(', ')})`);
-	}
-	for (const name of singles) {
-		lines.push(`- ${name}`);
-	}
-	return lines.join('\n');
-}
-
-/**
  * getCoctelesNamesCatalog: Carta solo con nombres (sin precios), agrupada por categoría.
  * Sirve para "¿cuáles tienes?" sin depender del FAQ/LLM ni cortar el mensaje.
  *
  * @returns {string}
  */
 export function getCoctelesNamesCatalog() {
-	const cats = getCoctelesByCategoria();
-	const clasicos = buildCategoryNameBulletLines(cats['CLÁSICOS']);
-	const combinados = buildCategoryNameBulletLines(cats.COMBINADOS);
-	const mocktails = buildCategoryNameBulletLines(cats.MOCKTAILS);
+	// Misma vista compacta en todo Eventos (más legible en WhatsApp)
+	return getCoctelesNamesCatalogCompact();
+}
 
-	let text = '*Estos son los cócteles que manejamos:*\n\n';
-	text += `🍸 *CLÁSICOS*\n${clasicos}`;
-	text += `\n\n🥃 *COMBINADOS*\n${combinados}`;
-	text += `\n\n🍹 *MOCKTAILS (Sin Alcohol)*\n${mocktails}`;
+/**
+ * getCoctelesNamesCatalogCompact: Lista corta por categoría (agrupa familias / Spritz / Piscolas).
+ * Pensada para releer sabores después del catálogo con precios.
+ *
+ * @returns {string}
+ */
+export function getCoctelesNamesCatalogCompact() {
+	const catalog = preciosData.cocteles || {};
+	const has = (name) => Boolean(catalog[name]);
+
+	/** @type {Set<string>} */
+	const used = new Set();
+	const take = (name) => {
+		if (!has(name)) return false;
+		used.add(name);
+		return true;
+	};
+
+	// ------------------------------------------------------------------
+	// CLÁSICOS
+	// ------------------------------------------------------------------
+	const clasicos = [];
+	const mojitoVars = [];
+	if (take('Mojito')) mojitoVars.push('Tradicional');
+	if (take('Mojito Frambuesa')) mojitoVars.push('Frambuesa');
+	if (take('Mojito Mango')) mojitoVars.push('Mango');
+	if (take('Mojito Maracuyá')) mojitoVars.push('Maracuyá');
+	if (mojitoVars.length) clasicos.push(`Mojito: ${mojitoVars.join(' / ')}`);
+
+	const classicsRow = ['Sangría', 'Caipiriña', 'Pisco Sour'].filter((n) => take(n));
+	if (classicsRow.length) clasicos.push(classicsRow.join(' / '));
+
+	const spritz = [];
+	if (take('Aperol Spritz')) spritz.push('Aperol');
+	if (take('Ramazzotti Spritz')) spritz.push('Ramazzotti');
+	if (spritz.length) clasicos.push(`Spritz: ${spritz.join(' / ')}`);
+
+	const gins = ['Tropical Gin', 'Gin & Tonic'].filter((n) => take(n));
+	if (gins.length) clasicos.push(gins.join(', '));
+
+	const muleRow = ['Tequila Margarita', 'Moscow Mule'].filter((n) => take(n));
+	if (muleRow.length) clasicos.push(muleRow.join(' / '));
+
+	// Nuevos clásicos del catálogo que no estén en el layout editorial
+	const leftoverClasicos = Object.keys(catalog)
+		.filter((n) => catalog[n]?.categoria === 'CLÁSICOS' && !used.has(n))
+		.sort((a, b) => a.localeCompare(b, 'es'));
+	if (leftoverClasicos.length) {
+		leftoverClasicos.forEach((n) => used.add(n));
+		clasicos.push(leftoverClasicos.join(' / '));
+	}
+
+	// ------------------------------------------------------------------
+	// COMBINADOS
+	// ------------------------------------------------------------------
+	const combinados = [];
+	const piscolaLabels = [
+		['Piscola Mistral 35°', 'Mistral 35'],
+		['Piscola Alto 35°', 'Alto 35'],
+		['Piscola Alto Transparente 40°', 'Alto 40°'],
+		['Piscola 3R Transparente 40°', '3R 40°']
+	];
+	const piscolas = piscolaLabels
+		.filter(([name]) => take(name))
+		.map(([, label]) => label);
+	if (piscolas.length) combinados.push(`Piscolas: ${piscolas.join(', ')}`);
+	if (take('Whiskcola J.W. Black')) combinados.push('Whiskcola J.W. Black');
+
+	const leftoverComb = Object.keys(catalog)
+		.filter((n) => catalog[n]?.categoria === 'COMBINADOS' && !used.has(n))
+		.sort((a, b) => a.localeCompare(b, 'es'));
+	if (leftoverComb.length) {
+		leftoverComb.forEach((n) => used.add(n));
+		combinados.push(leftoverComb.join(' / '));
+	}
+
+	// ------------------------------------------------------------------
+	// MOCKTAILS (mostramos “Sin Alcohol” al cliente)
+	// ------------------------------------------------------------------
+	const mocktails = [];
+	const mojitoNa = [];
+	if (take('Mojito Mocktail')) mojitoNa.push('Tradicional');
+	if (take('Mojito Frambuesa Mocktail')) mojitoNa.push('Frambuesa');
+	if (take('Mojito Mango Mocktail')) mojitoNa.push('Mango');
+	if (take('Mojito Maracuyá Mocktail')) mojitoNa.push('Maracuyá');
+	if (mojitoNa.length) mocktails.push(`Mojito Sin Alcohol: ${mojitoNa.join(' / ')}`);
+
+	const otherNa = [];
+	if (take('Sangría Mocktail')) otherNa.push('Sangría Sin Alcohol');
+	if (take('Maracuyá Spritz Mocktail')) otherNa.push('Maracuyá Spritz Sin Alcohol');
+	if (otherNa.length) mocktails.push(otherNa.join(' / '));
+
+	const leftoverMock = Object.keys(catalog)
+		.filter((n) => catalog[n]?.categoria === 'MOCKTAILS' && !used.has(n))
+		.sort((a, b) => a.localeCompare(b, 'es'))
+		.map((n) => n.replace(/\s*Mocktail\s*$/i, ' Sin Alcohol'));
+	if (leftoverMock.length) mocktails.push(leftoverMock.join(' / '));
+
+	let text = '';
+	if (clasicos.length) text += `🍸 *CLÁSICOS*\n${clasicos.join('\n')}`;
+	if (combinados.length) text += `${text ? '\n\n' : ''}🥃 *COMBINADOS*\n${combinados.join('\n')}`;
+	if (mocktails.length) text += `${text ? '\n\n' : ''}🍹 *MOCKTAILS*\n${mocktails.join('\n')}`;
 	return text;
 }
 

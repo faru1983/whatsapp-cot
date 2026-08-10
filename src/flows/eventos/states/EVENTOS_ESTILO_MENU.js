@@ -11,7 +11,8 @@ import {
 import { withAssistantFooter } from '../../../logic/flow-rails.js';
 import {
   buildPerPersonAsk,
-  buildFlavorPickAsk,
+  buildFlavorPickQuestion,
+  buildFlavorCatalogBlock,
   buildFlavorPickEntryReplies,
   parsePerPersonChoice,
   getEventosEstiloPhase,
@@ -28,7 +29,8 @@ function shortQuestionForSession(session) {
   if (getEventosEstiloPhase(session) === 'per_person') {
     return withAssistantFooter(buildPerPersonAsk());
   }
-  return withAssistantFooter(buildFlavorPickAsk());
+  // Pregunta de sabores sin pie HUMANO (la lista ya se mostró al entrar)
+  return buildFlavorPickQuestion();
 }
 
 const AI_PROMPT = `[SISTEMA - ESTADO: ARMAR COTIZACIÓN DE EVENTO]
@@ -63,14 +65,17 @@ export const EVENTOS_ESTILO_MENU = defineState({
       }
       // Ya tenía p/p: rearmar entrada a sabores en ELECCION
       const per = Number(session.eventosDrinksPerGuest) || 2;
+      const replies = buildFlavorPickEntryReplies(session, formatKey, per);
       if (priorFix.field === 'invitados') {
         const baseline = calculateEventBaseline(session.guests, formatKey, per);
         return {
           success: true,
           nextState: 'EVENTOS_ELECCION_MENU',
           customReplies: [
-            `${priorFix.ack}\n\nCon *${baseline.guests}* invitados y *${baseline.drinksPerGuest} p/p*: ${baseline.mathLine}.`,
-            withAssistantFooter(buildFlavorPickAsk())
+            `${priorFix.ack}\n\nCon *${baseline.guests}* invitados y *${baseline.drinksPerGuest} p/p*: ${baseline.mathLine}.
+
+${buildFlavorCatalogBlock()}`,
+            replies[1]
           ],
           flowProgress: true
         };
@@ -78,7 +83,10 @@ export const EVENTOS_ESTILO_MENU = defineState({
       return {
         success: true,
         nextState: 'EVENTOS_ELECCION_MENU',
-        customReplies: [priorFix.ack, withAssistantFooter(buildFlavorPickAsk())],
+        customReplies: [
+          `${priorFix.ack}\n\n${replies[0]}`,
+          replies[1]
+        ],
         flowProgress: true
       };
     }
@@ -95,10 +103,7 @@ export const EVENTOS_ESTILO_MENU = defineState({
       return {
         success: true,
         nextState: 'EVENTOS_ELECCION_MENU',
-        customReplies: [
-          replies[0],
-          withAssistantFooter(replies[1] || buildFlavorPickAsk())
-        ],
+        customReplies: replies,
         flowProgress: true
       };
     }
@@ -108,14 +113,10 @@ export const EVENTOS_ESTILO_MENU = defineState({
     // ------------------------------------------------------------------
     const choice = parsePerPersonChoice(messageText);
     if (choice?.per) {
-      const replies = buildFlavorPickEntryReplies(session, formatKey, choice.per);
       return {
         success: true,
         nextState: 'EVENTOS_ELECCION_MENU',
-        customReplies: [
-          replies[0],
-          withAssistantFooter(replies[1] || buildFlavorPickAsk())
-        ],
+        customReplies: buildFlavorPickEntryReplies(session, formatKey, choice.per),
         flowProgress: true
       };
     }

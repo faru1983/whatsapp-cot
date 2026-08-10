@@ -444,17 +444,15 @@ export function getEventLitersSuggestion(guests, formatKey) {
 
   const base = litersForPerPerson(2);
   const party = litersForPerPerson(3);
-  const guestsLabel = n ? `*${n} invitados*` : '*tus invitados*';
 
-  return `Con ${guestsLabel} una buena referencia es:
+  // No repetimos “N invitados”: el ack de arriba ya lo dijo
+  return `Una buena referencia:
 
 🍹 *Complemento de la celebración:* *2 cócteles por persona*.
 Ejemplo: ${base.mathLine}.
 
 🎉 *Si lo quieres como barra principal:* *3 o más* por persona.
-Ejemplo: ${party.mathLine}.
-
-Cuando elijas *cotizar*, te ayudo a armar la propuesta.`;
+Ejemplo: ${party.mathLine}.`;
 }
 
 /**

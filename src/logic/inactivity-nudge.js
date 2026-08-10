@@ -250,7 +250,7 @@ function nudgePendingAsk(stateId, session, pendingKey) {
   if (stateId === 'EVENTOS_ESTILO_MENU' || pendingKey === 'style' || pendingKey === 'per_person' || pendingKey === 'flavor_mode') {
     if (pendingKey === 'per_person' || (!session?.eventosDrinksPerGuest)) {
       return `*¿Cuántos cócteles por persona calculamos?*
-_(ej: 2 como complemento, o 3 si lo quieres como barra principal)_`;
+_(ej: 2, 3 o más)_`;
     }
     return 'Escribe los cócteles que quieres o pide una *selección sugerida*.';
   }
