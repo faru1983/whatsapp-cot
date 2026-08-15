@@ -23,6 +23,7 @@ import {
 import { submitBarrilesSaleFromSession } from './cot-barriles-sale.js';
 import { canSubmitCotApiWrite, isCotApiMockMode } from './cot-api.js';
 import { formatPrice, preciosData, parseDate, findLocationByFuzzyMatch } from './utils.js';
+import { ensureCatalogIndex, quoteBarrilesDirectShipping, enrichLocationFromCatalog } from './cot-catalog.js';
 import { buildAdminBarrilesOrderBody, getBarrilesSaleCreatedReply } from '../views/templates.js';
 
 export {
@@ -471,21 +472,92 @@ export function resolveBarrilesPedidoPhase(session) {
 }
 
 /**
- * formatBarrilesShippingNote: Texto de despacho según comuna (RM con precio / región por confirmar).
+ * litersFromBarrilesCart: Litros del pedido (5L por barril desechable).
+ *
+ * @param {object} session
+ * @returns {number}
+ */
+export function litersFromBarrilesCart(session) {
+  const products = session?.orderBuilder?.products || {};
+  let liters = 0;
+  for (const value of Object.values(products)) {
+    if (typeof value === 'number') {
+      liters += value * 5;
+      continue;
+    }
+    const qty = Number(value?.quantity) || 0;
+    const size = parseInt(String(value?.litrage || '5L').replace(/\D/g, ''), 10) || 5;
+    liters += qty * size;
+  }
+  return liters;
+}
+
+/**
+ * formatBarrilesShippingNote: Texto de despacho al confirmar comuna.
+ * Si hay catálogo vivo, muestra el monto (ya sabemos cuántos barriles).
  *
  * @param {object} locationData - Resultado de findLocationByFuzzyMatch
+ * @param {{ totalLiters?: number }} [opts]
  * @returns {string}
  */
-export function formatBarrilesShippingNote(locationData) {
+export function formatBarrilesShippingNote(locationData, opts = {}) {
   const name = String(locationData?.name || '').trim() || 'esa comuna';
-  if (locationData?.isRM) {
-    const cost = locationData?.deliveryCost?.desechable;
-    if (cost != null && Number(cost) > 0) {
-      return `📍 *${name}* (Región Metropolitana)\nDespacho: *${formatPrice(Number(cost))}*.`;
-    }
-    return `📍 *${name}* (Región Metropolitana)\nDespacho: valor por confirmar.`;
+  const totalLiters = Number(opts.totalLiters) > 0 ? Number(opts.totalLiters) : 5;
+  const quoted = quoteBarrilesDirectShipping({
+    comunaName: name,
+    region: locationData?.region,
+    regionCode: locationData?.regionCode,
+    isRM: locationData?.isRM,
+    totalLiters
+  });
+  const cost = quoted && !quoted.isPending
+    ? quoted.cost
+    : locationData?.deliveryCost?.desechable;
+  const carrier = quoted?.shippingCarrier || locationData?.deliveryCost?.shippingCarrier;
+  const isRM = quoted ? quoted.isRM : Boolean(locationData?.isRM);
+  const regionLabel = isRM
+    ? 'Región Metropolitana'
+    : (locationData?.region || 'Chile');
+
+  if (cost != null && Number(cost) > 0) {
+    const via = carrier === 'blue_express' ? 'Blue Express' : regionLabel;
+    return `📍 *${name}* (${via})\nDespacho: *${formatPrice(Number(cost))}*.`;
   }
-  return `📍 *${name}* (otras regiones)\nDespacho por *Blue Express* u otra encomienda: valor *por confirmar*.`;
+  if (isRM) {
+    return `📍 *${name}* (${regionLabel})\nDespacho: el valor queda en el resumen.`;
+  }
+  return `📍 *${name}* (${regionLabel})\nDespacho por *Blue Express*. El valor queda en el resumen.`;
+}
+
+/**
+ * resolveBarrilesLocationNote: Carga catálogo, cotiza flete con el carrito y arma la nota.
+ *
+ * @param {object} locationSearch
+ * @param {object} session
+ * @returns {Promise<{ locationData: object, note: string }>}
+ */
+export async function resolveBarrilesLocationNote(locationSearch, session) {
+  await ensureCatalogIndex({ silent: true });
+  const totalLiters = litersFromBarrilesCart(session) || 5;
+  const locationData = enrichLocationFromCatalog(locationSearch, { totalLiters }) || locationSearch;
+  const quoted = quoteBarrilesDirectShipping({
+    comunaName: locationData.name,
+    region: locationData.region,
+    regionCode: locationData.regionCode,
+    isRM: locationData.isRM,
+    totalLiters
+  });
+  if (quoted && !quoted.isPending && quoted.cost != null) {
+    locationData.deliveryCost = {
+      ...(locationData.deliveryCost || {}),
+      desechable: quoted.cost,
+      shippingCarrier: quoted.shippingCarrier
+    };
+  }
+  return {
+    locationData,
+    note: formatBarrilesShippingNote(locationData, { totalLiters })
+  };
 }
 
 /**
@@ -544,9 +616,9 @@ export function looksLikeBarrilesPedidoCorrectionIntent(text) {
  * @param {string} messageText
  * @param {object} session
  * @param {string} currentPhase - Fase en la que estamos ahora
- * @returns {{ field: string, ack: string }|null}
+ * @returns {Promise<{ field: string, ack: string }|null>}
  */
-export function tryApplyBarrilesPedidoPriorCorrection(messageText, session, currentPhase) {
+export async function tryApplyBarrilesPedidoPriorCorrection(messageText, session, currentPhase) {
   const phase = String(currentPhase || '');
   const phaseIdx = BARRILES_PEDIDO_PHASES.indexOf(phase);
   // Sin fase previa corregible (aún en comuna) o fase desconocida
@@ -606,10 +678,10 @@ export function tryApplyBarrilesPedidoPriorCorrection(messageText, session, curr
     // Si fuzzy encontró comuna oficial (Las Condes, Providencia…), es corrección.
     // Nombres de persona ("Ana Pérez") no matchean el catálogo de comunas.
     if (looksComunaMsg && locationSearch) {
-      cd.location = locationSearch.name;
-      cd.locationData = locationSearch;
-      session.location = locationSearch.name;
-      const note = formatBarrilesShippingNote(locationSearch);
+      const { locationData, note } = await resolveBarrilesLocationNote(locationSearch, session);
+      cd.location = locationData.name;
+      cd.locationData = locationData;
+      session.location = locationData.name;
       return { field: 'comuna', ack: `Listo, corregí la comuna.\n${note}` };
     }
   }

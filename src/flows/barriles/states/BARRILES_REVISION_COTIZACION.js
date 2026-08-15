@@ -10,6 +10,7 @@ import { rulesConfirmarOModificar } from '../../../logic/keyword-intent.js';
 import { getQuotationTemplate } from '../../../views/templates.js';
 import { withAssistantFooter, formatMenuBlock } from '../../../logic/flow-rails.js';
 import { buildBarrilesPedidoIntro } from '../../../logic/cot-barriles-contact.js';
+import { quoteBarrilesDirectShipping, enrichLocationFromCatalog } from '../../../logic/cot-catalog.js';
 
 const MENU_BLOCK = formatMenuBlock(['Generar compra', 'Modificar']);
 
@@ -31,8 +32,23 @@ export const BARRILES_REVISION_COTIZACION = defineState({
     const orderBuilder = new OrderBuilder('desechable', preciosData);
     orderBuilder.products = session.orderBuilder.products || {};
     orderBuilder.extras = session.orderBuilder.extras || {};
-    const locationData = session.orderBuilder.clientData.locationData;
-    const deliveryCost = locationData?.deliveryCost?.desechable || null;
+    const locationDataRaw = session.orderBuilder.clientData.locationData;
+    const locationName = locationDataRaw?.name || session.orderBuilder.clientData.location;
+    const catalogShip = quoteBarrilesDirectShipping({
+      comunaName: locationName,
+      region: locationDataRaw?.region,
+      regionCode: locationDataRaw?.regionCode,
+      isRM: locationDataRaw?.isRM,
+      totalLiters: orderBuilder.getTotalLiters()
+    });
+    const locationData = catalogShip
+      ? enrichLocationFromCatalog(locationDataRaw || { name: locationName }, {
+        totalLiters: orderBuilder.getTotalLiters()
+      })
+      : locationDataRaw;
+    const deliveryCost = catalogShip && !catalogShip.isPending
+      ? catalogShip.cost
+      : (locationData?.deliveryCost?.desechable || null);
     const quote = orderBuilder.calculateQuote(deliveryCost);
     session.orderBuilder.quote = quote;
     session.quotationGenerated = true;

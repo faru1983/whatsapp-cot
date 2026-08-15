@@ -188,6 +188,84 @@ assert(parseCliApiModeChoice('ok') === null, 'parse ok no es modo API');
   assert(/Comuna Inventada XYZ/.test(String(line)), 'adminBody incluye texto cliente');
 }
 
+// --- Catálogo mock: comunas nacionales (La Serena ya no va a Otra) ---
+{
+  const restore = installFetchMock(async (url) => {
+    assert(url.includes('/api/v1/catalog'), `URL catalog (es ${url})`);
+    return {
+      ok: true,
+      status: 200,
+      json: async () => ({
+        success: true,
+        products: [{ id: 'p1', name: 'Mojito Tradicional', sizes: [{ size: '5L - Desechable', sizeValue: 5, isDisposable: true }] }],
+        comunas: [
+          {
+            name: 'Providencia',
+            regionCode: 'RM',
+            cost: 5000,
+            freeFrom: 10,
+            directSaleDeliveryCost: 5000,
+            shippingCarrier: 'own',
+            blueExpressZone: null
+          },
+          {
+            name: 'La Serena',
+            regionCode: 'IV',
+            cost: null,
+            freeFrom: null,
+            directSaleDeliveryCost: null,
+            shippingCarrier: 'blue_express',
+            blueExpressZone: 'centro'
+          },
+          {
+            name: 'Puente Alto',
+            regionCode: 'RM',
+            cost: 30000,
+            freeFrom: null,
+            directSaleDeliveryCost: null,
+            shippingCarrier: 'blue_express',
+            blueExpressZone: 'misma_zona'
+          },
+          { name: 'Otra', regionCode: 'RM', cost: null, shippingCarrier: 'own' }
+        ],
+        regions: [{ code: 'RM' }, { code: 'IV' }],
+        blueExpressRates: {
+          misma_zona: { M: 4800, L: 5400 },
+          centro: { M: 7300, L: 9200 },
+          extremo: { M: 14500, L: 17000 }
+        },
+        eventTypes: [],
+        fetchedAt: new Date().toISOString()
+      })
+    };
+  });
+
+  const {
+    ensureCatalogIndex,
+    resolveComunaForApi,
+    quoteCatalogShipping
+  } = await import('../src/logic/cot-catalog.js');
+
+  await ensureCatalogIndex({ force: true, silent: true });
+  const serena = await resolveComunaForApi('La Serena');
+  assert(serena.matched === true && serena.region === 'IV', 'mock catalog: La Serena matchea IV');
+
+  const puente = quoteCatalogShipping({
+    serviceType: 'direct',
+    comunaName: 'Puente Alto',
+    totalLiters: 5
+  });
+  assert(puente && puente.cost === 4800 && puente.shippingCarrier === 'blue_express', 'Puente Alto 1 barril = $4.800 BE misma zona');
+
+  const serenaShip = quoteCatalogShipping({
+    serviceType: 'direct',
+    comunaName: 'La Serena',
+    totalLiters: 5
+  });
+  assert(serenaShip && serenaShip.cost === 7300, 'La Serena 1 barril = $7.300 BE centro');
+  restore();
+}
+
 console.log('\n=== Resultado mocked ===\n');
 if (failed > 0) {
   console.error(`COT API MOCKED FAILED (${failed} assertion(s))`);

@@ -1,16 +1,12 @@
 // ==============================================================================
-// OBJETIVO: Paso EVENTOS_INTRO_MENU — tras tipo + invitados, ¿cotiza o tiene duda?
-// Menú 1️⃣ cotización / 2️⃣ duda (estilo Barriles): keywords → NLU si falla.
-// Cotización → pitch 2 p/p + ESTILO_MENU. Duda → pide texto → SOS + mute.
+// OBJETIVO: Paso EVENTOS_INTRO_MENU — tras p/p, recomendación + Ver Precios / duda.
+// 1️⃣ envía catálogo de precios y pasa a sabores. 2️⃣ duda → SOS + mute.
 // ==============================================================================
 import { defineState } from '../../../logic/compile-state.js';
 import { resolveDecisionIntent } from '../../../logic/decision-intent.js';
 import { rulesMenuUnoDos } from '../../../logic/keyword-intent.js';
-import {
-  getEventFormatKey,
-  tryApplyEventosIntroPriorCorrection
-} from '../../../logic/eventos-helpers.js';
-import { getEventLitersSuggestion, buildAdminSosBody } from '../../../views/templates.js';
+import { getEventFormatKey, getEventPriceListImage, tryApplyEventosIntroPriorCorrection } from '../../../logic/eventos-helpers.js';
+import { buildAdminSosBody } from '../../../views/templates.js';
 import { withAssistantFooter } from '../../../logic/flow-rails.js';
 import {
   eventosIntroMenuQuestion,
@@ -18,7 +14,7 @@ import {
   EVENTOS_COTIZAR_SYNONYMS,
   EVENTOS_DUDA_SYNONYMS
 } from '../../../logic/eventos-intro.js';
-import { buildStyleEntryReplies } from '../../../logic/eventos-style-pack.js';
+import { buildFlavorPickEntryReplies, buildVolumeRecommendation, buildStyleEntryReplies } from '../../../logic/eventos-style-pack.js';
 
 const MENU_Q = eventosIntroMenuQuestion();
 const SHORT_Q = withAssistantFooter(MENU_Q);
@@ -26,11 +22,11 @@ const SHORT_Q = withAssistantFooter(MENU_Q);
 const AI_PROMPT = `[SISTEMA - ESTADO: INTRO MENÚ DE EVENTO]
 El cliente ya eligió Dispensador o Muro y nos dio tipo de evento e invitados.
 Debe elegir UNA opción:
-1️⃣ Quiero hacer una cotización — o 2️⃣ Tengo una duda.
+1️⃣ Ver Precios y Cotizar — o 2️⃣ Tengo una duda.
 1. Si no eligió opción clara, pide el *número* de la opción.
-2. Si corrige invitados o tipo (ej. "son 80 invitados", "es un matrimonio"), confirma el cambio y vuelve a mostrar el menú 1️⃣/2️⃣.
+2. Si corrige invitados o tipo, confirma el cambio, actualiza la recomendación de litros y vuelve a mostrar el menú 1️⃣/2️⃣.
 3. Responde dudas breves sobre el formato (instalación, qué incluye) sin inventar precios de cócteles.
-4. NUNCA armes el pedido ni cotices totales todavía.
+4. NUNCA armes el pedido ni cotices totales todavía. El catálogo de precios se envía al elegir 1️⃣.
 5. Al final, recuérdale el menú 1️⃣ / 2️⃣.`;
 
 /**
@@ -84,12 +80,13 @@ export const EVENTOS_INTRO_MENU = defineState({
     if (priorFix) {
       const formatKey = getEventFormatKey(session.eventoFormato);
       if (priorFix.field === 'invitados') {
-        // Reorientamos consumo si cambió el N de invitados
+        const per = Number(session.eventosDrinksPerGuest) || 2;
+        const rec = buildVolumeRecommendation(session, formatKey, per);
         return {
           success: true,
           nextState: 'EVENTOS_INTRO_MENU',
           customReplies: [
-            `${priorFix.ack}\n\n${getEventLitersSuggestion(session.guests, formatKey)}`,
+            `${priorFix.ack}\n\n${rec}`,
             MENU_Q
           ],
           flowProgress: true
@@ -115,7 +112,7 @@ export const EVENTOS_INTRO_MENU = defineState({
         extraDos: EVENTOS_DUDA_SYNONYMS
       }),
       labelHints: {
-        COTIZAR: 'Opción 1 / quiere hacer una cotización o ver la carta (1, 1️⃣, cotizar, cotización, ver precios).',
+        COTIZAR: 'Opción 1 / Ver Precios y Cotizar (1, 1️⃣, cotizar, cotización, ver precios).',
         DUDA: 'Opción 2 / tiene una duda o quiere hablar con el equipo (2, 2️⃣, duda, consulta, pregunta).'
       }
     });
@@ -131,13 +128,27 @@ export const EVENTOS_INTRO_MENU = defineState({
       };
     }
 
-    // 1️⃣ Cotización → pitch 2 p/p + menú de estilo (el cliente no arma litros)
+    // 1️⃣ Ver Precios y Cotizar → catálogo de precios + sabores (p/p ya está)
     if (intent === 'COTIZAR') {
       const formatKey = getEventFormatKey(session.eventoFormato);
+      const per = Number(session.eventosDrinksPerGuest) || 0;
+      const catalogImg = getEventPriceListImage(
+        formatKey,
+        'Para tu referencia te dejo el *catálogo de cócteles* 👆'
+      );
+      if (per >= 1) {
+        const flavorReplies = buildFlavorPickEntryReplies(session, formatKey, per);
+        return {
+          success: true,
+          nextState: 'EVENTOS_ELECCION_MENU',
+          customReplies: [catalogImg, ...flavorReplies],
+          flowProgress: true
+        };
+      }
       return {
         success: true,
         nextState: 'EVENTOS_ESTILO_MENU',
-        customReplies: buildStyleEntryReplies(session, formatKey),
+        customReplies: [catalogImg, ...buildStyleEntryReplies(session, formatKey)],
         flowProgress: true
       };
     }

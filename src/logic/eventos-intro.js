@@ -106,6 +106,88 @@ export function askGuestsCopyCanonical() {
 _(ej: 50, 100, 200 personas)_`;
 }
 
+/**
+ * buildBarrelYieldHint: Rendimiento oficial de barriles según el formato.
+ *
+ * @param {'dispensador'|'muro'|string} formatKey
+ * @returns {string}
+ */
+export function buildBarrelYieldHint(formatKey) {
+  const sizes = formatKey === 'muro' ? [10, 20, 30] : [5, 10];
+  const lines = sizes.map((size) => {
+    const drinks = preciosData.rendimientos_barriles?.[`${size}L`] ?? size * 5;
+    return `• *${size}L* → ~${drinks} cócteles`;
+  });
+  return `📦 *Rendimiento de los barriles* (vaso ~200 ml):
+${lines.join('\n')}`;
+}
+
+/**
+ * getEventLitersSuggestion: Orientación 2 p/p (complemento) + 3 p/p (barra principal).
+ *
+ * @param {number} guests - Cantidad de invitados
+ * @param {'dispensador'|'muro'|string} formatKey - Formato (define mínimo)
+ * @returns {string}
+ */
+export function getEventLitersSuggestion(guests, formatKey) {
+  const n = Number(guests) || 0;
+  const minLiters = formatKey === 'muro' ? 30 : 10;
+  const step = formatKey === 'muro' ? 10 : 5;
+
+  /**
+   * litersForPerPerson: Redondea litros al step del formato (y al mínimo).
+   *
+   * @param {number} per - Cócteles por persona
+   * @returns {{ cocktails: number, liters: number, mathLine: string }}
+   */
+  const litersForPerPerson = (per) => {
+    const cocktails = n > 0 ? n * per : 0;
+    const rawLiters = cocktails > 0 ? Math.ceil(cocktails / 5) : 0;
+    const liters = Math.max(minLiters, Math.ceil((rawLiters || minLiters) / step) * step);
+    const mathLine = n
+      ? `${n}×${per} = *${cocktails}* cócteles (~*${liters}L*)`
+      : `*${per}* cócteles por persona`;
+    return { cocktails, liters, mathLine };
+  };
+
+  const base = litersForPerPerson(2);
+  const party = litersForPerPerson(3);
+
+  return `Una buena referencia:
+
+🍹 *Complemento de la celebración:* *2 cócteles por persona*.
+Ejemplo: ${base.mathLine}.
+
+🎉 *Si lo quieres como barra principal:* *3 o más* por persona.
+Ejemplo: ${party.mathLine}.`;
+}
+
+/**
+ * buildDrinksPerPersonAsk: Tras invitados — referencia 2/3 p/p + rendimiento + pregunta.
+ * Sin catálogo de precios (eso va al elegir Ver Precios y Cotizar).
+ *
+ * @param {object} session
+ * @param {'dispensador'|'muro'|string} formatKey
+ * @returns {string}
+ */
+export function buildDrinksPerPersonAsk(session, formatKey) {
+  const type = session?.celebrationType;
+  const guests = session?.guests;
+  let ack = nextEventosAck(session);
+  if (type) ack += `, *${type}*`;
+  if (guests) ack += ` con *${guests}* invitados`;
+  ack += `. 🍸`;
+
+  return `${ack}
+
+${getEventLitersSuggestion(guests, formatKey)}
+
+${buildBarrelYieldHint(formatKey)}
+
+*¿Cuántos cócteles por persona te gustaría ofrecer?*
+_(ej: 2 como complemento, o 3 si es la barra principal)_`;
+}
+
 /** Acuses cordiales que rotan (evita repetir el mismo en cada paso). */
 export const EVENTOS_ACK_WORDS = ['Perfecto', 'Súper', 'Genial'];
 
@@ -292,16 +374,16 @@ export function buildEventFormatChoiceReplies() {
  * @returns {string}
  */
 export function eventosIntroMenuBlock() {
-  return formatMenuBlock(['Quiero hacer una cotización', 'Tengo una duda']);
+  return formatMenuBlock(['Ver Precios y Cotizar', 'Tengo una duda']);
 }
 
 /**
- * eventosIntroMenuQuestion: Pregunta + menú post-datos (tipo + invitados).
+ * eventosIntroMenuQuestion: Pregunta + menú tras recomendación de litros.
  *
  * @returns {string}
  */
 export function eventosIntroMenuQuestion() {
-  return `*¿Te armo la cotización o tienes alguna duda?*
+  return `*¿Cómo te gustaría seguir?*
 
 ${eventosIntroMenuBlock()}`;
 }
@@ -319,7 +401,7 @@ export function buildEventosAskDoubtReply() {
  * EVENTOS_COTIZAR_SYNONYMS: Equivale a 1️⃣ (hacer cotización).
  */
 export const EVENTOS_COTIZAR_SYNONYMS =
-  /hacer\s+((una|la)\s+)?cotizaci[oó]n|\bcotizar\b|\bcotizaci[oó]n\b|quiero\s+(cotizar|seguir|continuar|armar)|armar\s+((una|la)\s+)?cotizaci[oó]n|ver\s+(la\s+)?(carta|precios)|armame|ármame|dale|seguimos|opci[oó]n\s*1|^(uno|primera?|si|sí)$/i;
+  /hacer\s+((una|la)\s+)?cotizaci[oó]n|\bcotizar\b|\bcotizaci[oó]n\b|ver\s+precios(\s+y\s+cotizar)?|quiero\s+(cotizar|seguir|continuar|armar)|armar\s+((una|la)\s+)?cotizaci[oó]n|ver\s+(la\s+)?(carta|precios)|armame|ármame|dale|seguimos|opci[oó]n\s*1|^(uno|primera?|si|sí)$/i;
 
 /**
  * EVENTOS_DUDA_SYNONYMS: Equivale a 2️⃣ (tengo una duda).

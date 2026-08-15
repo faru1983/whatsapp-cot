@@ -191,7 +191,7 @@ export function shouldAskCliApiModeOnConfirm() {
  * fetchCatalogViaApi: Baja el catálogo activo (productos, precios, comunas).
  * GET /api/v1/catalog con Bearer token.
  *
- * @returns {Promise<{ success: boolean, products?: object[], comunas?: object[], eventTypes?: object[], fetchedAt?: string, error?: string }>}
+ * @returns {Promise<{ success: boolean, products?: object[], comunas?: object[], regions?: object[], blueExpressRates?: object, eventTypes?: object[], fetchedAt?: string, error?: string }>}
  */
 export async function fetchCatalogViaApi() {
   const config = getCotApiConfig();
@@ -230,6 +230,8 @@ export async function fetchCatalogViaApi() {
       success: true,
       products: data.products,
       comunas: Array.isArray(data.comunas) ? data.comunas : [],
+      regions: Array.isArray(data.regions) ? data.regions : [],
+      blueExpressRates: data.blueExpressRates || null,
       eventTypes: Array.isArray(data.eventTypes) ? data.eventTypes : [],
       fetchedAt: data.fetchedAt || new Date().toISOString()
     };

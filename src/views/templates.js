@@ -11,6 +11,7 @@ import {
 import { OrderBuilder } from '../logic/order-builder.js';
 import { getEventFormatChoiceCaption } from '../logic/eventos-intro.js';
 import { formatEventLitersSummaryLine } from '../logic/eventos-helpers.js';
+import { quoteCatalogShipping, quoteBarrilesDirectShipping, enrichLocationFromCatalog } from '../logic/cot-catalog.js';
 
 // ==============================================================================
 // OBJETIVO: Textos compartidos (cotización, dudas, alertas admin, pitches eventos).
@@ -412,48 +413,8 @@ export function getEventFormatPitch(formatKey) {
 ⏰ Instalamos horas antes del evento y retiramos como máximo al día siguiente.`;
 }
 
-/**
- * getEventLitersSuggestion: Orientación 2 p/p (complemento) + 3 p/p (barra principal).
- * El detalle de pack/estilo viene después de “quiero cotizar”.
- * Rendimientos finos quedan en FAQ si preguntan “cuántos vasos da”.
- *
- * @param {number} guests - Cantidad de invitados
- * @param {'dispensador'|'muro'} formatKey - Formato (define mínimo)
- * @returns {string}
- */
-export function getEventLitersSuggestion(guests, formatKey) {
-  const n = Number(guests) || 0;
-  const minLiters = formatKey === 'muro' ? 30 : 10;
-  const step = formatKey === 'muro' ? 10 : 5;
-
-  /**
-   * litersForPerPerson: Redondea litros al step del formato (y al mínimo).
-   *
-   * @param {number} per - Cócteles por persona
-   * @returns {{ cocktails: number, liters: number, mathLine: string }}
-   */
-  const litersForPerPerson = (per) => {
-    const cocktails = n > 0 ? n * per : 0;
-    const rawLiters = cocktails > 0 ? Math.ceil(cocktails / 5) : 0;
-    const liters = Math.max(minLiters, Math.ceil((rawLiters || minLiters) / step) * step);
-    const mathLine = n
-      ? `${n}×${per} = *${cocktails}* cócteles (~*${liters}L*)`
-      : `*${per}* cócteles por persona`;
-    return { cocktails, liters, mathLine };
-  };
-
-  const base = litersForPerPerson(2);
-  const party = litersForPerPerson(3);
-
-  // No repetimos “N invitados”: el ack de arriba ya lo dijo
-  return `Una buena referencia:
-
-🍹 *Complemento de la celebración:* *2 cócteles por persona*.
-Ejemplo: ${base.mathLine}.
-
-🎉 *Si lo quieres como barra principal:* *3 o más* por persona.
-Ejemplo: ${party.mathLine}.`;
-}
+/** Re-export: vive en eventos-intro (junto al ask p/p + rendimiento). */
+export { getEventLitersSuggestion } from '../logic/eventos-intro.js';
 
 /**
  * getEventDataSummary: Resumen de lo anotado del evento + pregunta de confirmación.
@@ -528,11 +489,21 @@ export function getEventosQuoteSummary(session) {
   let deliveryCost = null;
   let isRM = session.isRM;
   if (session.location) {
-    const loc = findLocationByFuzzyMatch(session.location);
-    if (loc) {
-      isRM = loc.isRM;
-      if (loc.isRM && loc.deliveryCost?.evento != null) {
-        deliveryCost = loc.deliveryCost.evento;
+    const catalogShip = quoteCatalogShipping({
+      serviceType: 'event',
+      comunaName: session.location,
+      totalLiters: orderBuilder.getTotalLiters()
+    });
+    if (catalogShip) {
+      isRM = catalogShip.isRM;
+      if (!catalogShip.isPending) deliveryCost = catalogShip.cost;
+    } else {
+      const loc = findLocationByFuzzyMatch(session.location);
+      if (loc) {
+        isRM = loc.isRM;
+        if (loc.isRM && loc.deliveryCost?.evento != null) {
+          deliveryCost = loc.deliveryCost.evento;
+        }
       }
     }
   }
@@ -659,9 +630,21 @@ export function getBarrilesPurchaseSummary(session) {
   const orderBuilder = new OrderBuilder('desechable', preciosData);
   orderBuilder.products = products;
   orderBuilder.extras = extras;
-  const deliveryCost = locData?.isRM && locData?.deliveryCost?.desechable != null
-    ? Number(locData.deliveryCost.desechable)
-    : null;
+  const catalogShip = quoteBarrilesDirectShipping({
+    comunaName: locData?.name || comuna,
+    region: locData?.region,
+    regionCode: locData?.regionCode,
+    isRM: locData?.isRM,
+    totalLiters: orderBuilder.getTotalLiters()
+  });
+  const locationForQuote = catalogShip
+    ? enrichLocationFromCatalog(locData || { name: comuna }, { totalLiters: orderBuilder.getTotalLiters() }) || locData
+    : locData;
+  const deliveryCost = catalogShip && !catalogShip.isPending
+    ? catalogShip.cost
+    : (locationForQuote?.deliveryCost?.desechable != null
+      ? Number(locationForQuote.deliveryCost.desechable)
+      : null);
   const quote = orderBuilder.calculateQuote(deliveryCost);
   if (session.orderBuilder) session.orderBuilder.quote = quote;
 
@@ -704,7 +687,7 @@ export function getBarrilesPurchaseSummary(session) {
     text += `Despacho: ${formatPrice(deliveryCost)}\n`;
     text += `====================\n`;
     text += `*TOTAL: ${formatPrice(quote.total)}*`;
-  } else if (locData && !locData.isRM) {
+  } else if (locationForQuote && !locationForQuote.isRM) {
     text += `Despacho: _por confirmar_ (Blue Express)\n`;
     text += `====================\n`;
     text += `*TOTAL: ${formatPrice(quote.subtotal)}*\n`;

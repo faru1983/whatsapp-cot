@@ -1,10 +1,10 @@
 // ==============================================================================
 // OBJETIVO: Paso EVENTOS_RECOGIDA_DATOS — intro Eventos con formato ya fijado.
-// Fase A) tipo de evento → B) invitados. Luego → INTRO_MENU (cotizar / duda).
+// Fase A) tipo de evento → B) invitados → C) cócteles p/p. Luego → INTRO_MENU (precios / duda).
 // Fecha/comuna ya no se piden aquí (quedan opcionales más adelante / Por confirmar).
 // ==============================================================================
 import { defineState } from '../../../logic/compile-state.js';
-import { getBrowseOnlyGoodbye, getEventLitersSuggestion } from '../../../views/templates.js';
+import { getBrowseOnlyGoodbye } from '../../../views/templates.js';
 import {
   asksPriceOrCatalog,
   asksYieldOrRendimiento,
@@ -24,8 +24,7 @@ import {
   wantsUnknownGuestsCount,
   looksLikeCelebrationUncertainty,
   asksEquipmentOrResaleQuestion,
-  getEventFormatKey,
-  getEventPriceListImage
+  getEventFormatKey
 } from '../../../logic/eventos-helpers.js';
 import { isLikelyThirdPartyBotReply, isGreetingOrNoise } from '../../../logic/interruptions.js';
 import { withAssistantFooter } from '../../../logic/flow-rails.js';
@@ -40,8 +39,9 @@ import {
   buildFormatPhaseAReplies,
   buildFormatPhaseBReplies,
   eventosIntroMenuQuestion,
-  nextEventosAck
+  buildDrinksPerPersonAsk
 } from '../../../logic/eventos-intro.js';
+import { parsePerPersonChoice, buildVolumeRecommendation } from '../../../logic/eventos-style-pack.js';
 
 /** Cierre suave: sin evento concreto, solo info/precios → web. */
 const REPLY_INFO_ONLY_WEB = `Entiendo: si aún no tienes un evento o celebración definida y solo necesitas información, te invitamos a revisar nuestra web. En *Cotizar* puedes simular distintas opciones y ver precios:
@@ -58,17 +58,17 @@ _(ej: 50 o unas 80)_`;
 
 const AI_PROMPT = `[SISTEMA - ESTADO: DATOS DEL EVENTO (formato ya elegido)]
 Eres el asistente virtual de Cocktails on Tap. El cliente YA eligió Dispensador o Muro.
-Orden: (A) tipo de evento (pregunta abierta + parser/NLU; o skip → Por confirmar), (B) invitados.
+Orden: (A) tipo de evento, (B) invitados, (C) cócteles por persona + rendimiento de barriles.
 Si el cliente NO tiene evento y solo quiere precios/info a futuro → invitar a la web (Cotizar), no insistir con datos.
 0. NO digas "hola" ni te presentes como asistente virtual.
 1. Responde dudas breves y amigables.
 2. REGLA DE COBERTURA: RM = todas las comunas. Fuera de RM = evaluar según tamaño del evento y fecha; seguir cotizando para que el equipo confirme viaje. NUNCA digas cobertura fija en La Serena/Coquimbo.
 3. REGLA DE LOGÍSTICA: Instalación Dispensador gratis, Muro $50.000. NUNCA inventes tarifas de envío.
 4. RENDIMIENTO / VASOS: responde SOLO según el formato elegido. Dispensador: 5L≈25 y 10L≈50 cócteles (vaso 200ml). Muro: 10L≈50, 20L≈100, 30L≈150. PROHIBIDO hablar de Barriles Desechables.
-5. NUNCA cotices ni calcules precios finales todavía.
+5. NUNCA cotices ni calcules precios finales todavía. NO envíes el catálogo de precios hasta que elija Ver Precios y Cotizar.
 6. Puedes mencionar www.cocktailsontap.cl/eventos si pregunta precios; no lo presentes como menú obligatorio.
-7. Si faltan invitados, pídelos (un aproximado sirve). Si no tiene evento y solo quiere precios/info a futuro, invítalo a cotizar en la web.
-8. Al final, re-pregunta solo el dato pendiente (tipo o invitados).`;
+7. Si faltan invitados, pídelos. Si ya hay invitados y faltan cócteles p/p, pregunta p/p y muestra el rendimiento.
+8. Al final, re-pregunta solo el dato pendiente (tipo, invitados o cócteles por persona).`;
 
 /**
  * hasGuests: ¿Ya hay cantidad de invitados en sesión?
@@ -77,7 +77,27 @@ Si el cliente NO tiene evento y solo quiere precios/info a futuro → invitar a 
  * @returns {boolean}
  */
 function hasGuests(session) {
-  return session?.guests != null && session.guests !== '';
+  return Number(session?.guests) > 0;
+}
+
+/**
+ * hasDrinksPerPerson: ¿Ya eligió cuántos cócteles por persona?
+ *
+ * @param {object} session
+ * @returns {boolean}
+ */
+function hasDrinksPerPerson(session) {
+  return Number(session?.eventosDrinksPerGuest) >= 1;
+}
+
+/**
+ * needsDrinksPerPerson: Ya hay invitados y falta el consumo p/p.
+ *
+ * @param {object} session
+ * @returns {boolean}
+ */
+function needsDrinksPerPerson(session) {
+  return hasGuests(session) && !hasDrinksPerPerson(session);
 }
 
 /**
@@ -126,6 +146,9 @@ function shortQuestionForSession(session) {
   if (!hasGuests(session)) {
     return withAssistantFooter(askGuestsCopyCanonical());
   }
+  if (needsDrinksPerPerson(session)) {
+    return withAssistantFooter(buildDrinksPerPersonAsk(session, formatKeyFromSession(session)));
+  }
   return withAssistantFooter(eventosIntroMenuQuestion());
 }
 
@@ -154,35 +177,35 @@ function goInfoOnlyWeb() {
 }
 
 /**
- * goIntroMenu: Tras tipo + invitados → catálogo + referencia 2/3 p/p + menú cotizar/duda.
+ * goIntroMenu: Tras p/p → recomendación de litros + menú Ver Precios / duda.
+ * El catálogo de precios se envía recién cuando elige cotizar.
  *
  * @param {object} session
  * @returns {object}
  */
 function goIntroMenu(session) {
-  const type = session.celebrationType;
-  const guests = session.guests;
-  let ack = nextEventosAck(session);
-  if (type) ack += `, *${type}*`;
-  if (guests) ack += ` con *${guests}* invitados`;
-  ack += `. 🍸`;
-
   const formatKey = formatKeyFromSession(session);
-  const litersHint = getEventLitersSuggestion(session.guests, formatKey);
-  // Catálogo primero (referencia visual); luego orientación y decisión cotizar/duda
-  const catalogImg = getEventPriceListImage(
-    formatKey,
-    'Para tu referencia te dejo el *catálogo de cócteles* 👆'
-  );
-
+  const per = Number(session.eventosDrinksPerGuest) || 2;
+  const rec = buildVolumeRecommendation(session, formatKey, per);
   return {
     success: true,
     nextState: 'EVENTOS_INTRO_MENU',
-    customReplies: [
-      catalogImg,
-      `${ack}\n\n${litersHint}`,
-      eventosIntroMenuQuestion()
-    ],
+    customReplies: [rec, eventosIntroMenuQuestion()],
+    flowProgress: true
+  };
+}
+
+/**
+ * askDrinksPhase: Tras invitados → rendimiento + pregunta de cócteles p/p (sin imagen de precios).
+ *
+ * @param {object} session
+ * @returns {object}
+ */
+function askDrinksPhase(session) {
+  return {
+    success: true,
+    nextState: 'EVENTOS_RECOGIDA_DATOS',
+    customReply: buildDrinksPerPersonAsk(session, formatKeyFromSession(session)),
     flowProgress: true
   };
 }
@@ -338,7 +361,9 @@ export const EVENTOS_RECOGIDA_DATOS = defineState({
       const formato = session.eventoFormato || 'Dispensador Portátil / Muro';
       const pendingAsk = !hasGuests(session)
         ? (needsCelebrationType(session) ? askCelebrationCopy() : askGuestsCopyCanonical())
-        : eventosIntroMenuQuestion();
+        : (needsDrinksPerPerson(session)
+          ? buildDrinksPerPersonAsk(session, formatKeyFromSession(session))
+          : eventosIntroMenuQuestion());
       return {
         success: true,
         nextState: 'EVENTOS_RECOGIDA_DATOS',
@@ -351,8 +376,16 @@ ${pendingAsk}`,
       };
     }
 
-    // Con invitados → menú cotizar / duda
+    // Con invitados: pedir p/p (o, si ya lo dijo, ir al menú Ver Precios)
     if (hasGuests(session)) {
+      if (!hasDrinksPerPerson(session)) {
+        const choice = parsePerPersonChoice(messageText);
+        if (choice?.per) {
+          session.eventosDrinksPerGuest = choice.per;
+          return goIntroMenu(session);
+        }
+        return askDrinksPhase(session);
+      }
       return goIntroMenu(session);
     }
 

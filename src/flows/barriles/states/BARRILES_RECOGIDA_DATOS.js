@@ -15,7 +15,7 @@ import {
   applyContactFromMessage,
   applyAddressFromMessage,
   resolveBarrilesPedidoPhase,
-  formatBarrilesShippingNote,
+  resolveBarrilesLocationNote,
   askBarrilesPedidoPhase,
   buildBarrilesPedidoIntro,
   tryApplyBarrilesPedidoPriorCorrection,
@@ -29,8 +29,8 @@ import { getBarrilesPurchaseSummary } from '../../../views/templates.js';
 const AI_PROMPT = `[SISTEMA - ESTADO: PEDIDO BARRILES (datos uno a uno)]
 El cliente está armando un *pedido* de Barriles Desechables (no una cotización).
 Fases: comuna → fecha → nombre/apellido → email → dirección → confirmación.
-1. Pide SOLO el dato de la fase actual. No inventes tarifas de despacho.
-2. RM: despacho con precio de datos.json. Otras regiones: Blue Express / por confirmar.
+1. Pide SOLO el dato de la fase actual. No inventes tarifas: usa la nota de despacho ya calculada.
+2. Si la nota trae monto, confírmalo. Si dice que queda en el resumen, no inventes un valor.
 3. Fecha: mínimo 2 días; si es antes, avisa que hay que confirmar disponibilidad.
 4. Si corrige un dato anterior (ej. fecha mientras pedimos nombre), acéptalo y vuelve a pedir la fase actual.
 5. Al final, el resumen pide *OK* o corregir un dato.`;
@@ -116,7 +116,7 @@ _(ej: 1 mojito)_`
 
     // Corrección del paso anterior (ej. "me equivoqué, es para el 13 de agosto"
     // mientras pedimos nombre): actualiza ese dato y re-pide la fase actual.
-    const priorFix = tryApplyBarrilesPedidoPriorCorrection(trimmed, session, phase);
+    const priorFix = await tryApplyBarrilesPedidoPriorCorrection(trimmed, session, phase);
     if (priorFix) {
       return {
         success: true,
@@ -142,9 +142,9 @@ ${askBarrilesPedidoPhase('comuna', session)}`,
         };
       }
       session.orderBuilder.clientData.location = locationSearch.name;
-      session.orderBuilder.clientData.locationData = locationSearch;
       session.location = locationSearch.name;
-      const note = formatBarrilesShippingNote(locationSearch);
+      const { locationData, note } = await resolveBarrilesLocationNote(locationSearch, session);
+      session.orderBuilder.clientData.locationData = locationData;
       return advanceAfterSave(session, `Perfecto.\n${note}`);
     }
 

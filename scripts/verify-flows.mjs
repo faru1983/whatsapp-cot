@@ -550,6 +550,7 @@ assert(
     formatPackFlavorLines,
     asksEventCombinadosInfo,
     detectSideStyleFromText,
+    buildVolumeRecommendation,
     EVENT_DRINKS_PER_GUEST
   } = await import('../src/logic/eventos-style-pack.js');
 
@@ -558,6 +559,18 @@ assert(
   assert(base250.totalCocktails === 500, '250×2 = 500 cócteles');
   assert(base250.totalLiters === 100, '500 cócteles → 100L en dispensador');
   assert(/250×2 = \*500\* cócteles/.test(base250.mathLine), 'mathLine muestra la cuenta');
+
+  // Pitch post-p/p: volumen + guía de reparto sabor/tamaño (no solo “elige sabores”)
+  const rec30 = buildVolumeRecommendation({ guests: 30 }, 'dispensador', 2);
+  assert(/\*15L\*/.test(rec30), 'recomendación 30×2 → 15L');
+  assert(/2 o 3 sabores/i.test(rec30), 'pitch sugiere rango de sabores');
+  assert(/\*10L\* del favorito/.test(rec30), 'pitch 2 sabores: más litros al favorito');
+  assert(/\*5L\* \+ \*5L\* \+ \*5L\*/.test(rec30), 'pitch 3 sabores: 5+5+5');
+  assert(/10L \+ 5L/.test(rec30), 'explica armado 15L → 10L + 5L');
+  assert(/Barriles del formato/.test(rec30), 'lista tamaños del formato');
+  const recMuro = buildVolumeRecommendation({ guests: 80 }, 'muro', 2);
+  assert(/\*30L\*/.test(recMuro) || /\*\d+L\*/.test(recMuro), 'recomendación muro con litros');
+  assert(/20L|10L|30L/.test(recMuro), 'pitch muro usa litrajes 10/20/30');
 
   const pack = buildStylePackProductLines('CLASICOS', 80, 'dispensador');
   assert(pack.flavorLiters.length === 3, 'pack clásicos: 3 sabores');
@@ -591,13 +604,15 @@ assert(
   assert(/\*\¿.+\?\*\n_\(ej: /s.test(buildPerPersonAsk()), 'ask p/p: *pregunta?* + _(ej:)_');
   assert(/2, 3 o m[aá]s/.test(buildPerPersonAsk()), 'ask p/p abierto a 2, 3 o más');
   assert(buildFlavorCatalogBlock().includes('CLÁSICOS'), 'bloque catálogo lista categorías');
-  assert(buildFlavorCatalogBlock().includes('catálogo con precios'), 'bloque recuerda catálogo');
+  assert(buildFlavorCatalogBlock().includes('Te recuerdo los sabores'), 'bloque recuerda sabores');
+  assert(!buildFlavorCatalogBlock().includes('catálogo con precios'), 'bloque no repite catálogo (va en imagen)');
   assert(buildFlavorPickQuestion().includes('selección sugerida'), 'ask menciona selección sugerida');
   assert(!buildFlavorPickQuestion().includes('CLÁSICOS'), 'pregunta no re-lista catálogo');
   assert(buildFlavorPickAsk() === buildFlavorPickQuestion(), 'ask corto = pregunta');
   const entry = buildFlavorPickEntryReplies({ guests: 25 }, 'dispensador', 2);
   assert(entry.length === 2, 'entrada sabores: 2 burbujas');
-  assert(/catálogo con precios/.test(entry[0]) && /CLÁSICOS/.test(entry[0]), 'burbuja 1: ack + catálogo');
+  assert(/Te recuerdo los sabores/.test(entry[0]) && /CLÁSICOS/.test(entry[0]), 'burbuja 1: lista sabores');
+  assert(!/Listo:.*cócteles por persona/i.test(entry[0]), 'burbuja 1: sin re-confirmar p/p');
   assert(/Cuáles te gustaría incluir/.test(entry[1]), 'burbuja 2: pregunta');
   assert(!/Soy asistente virtual/i.test(entry.join('\n')), 'entrada sabores sin pie HUMANO');
   assert(wantsSuggestedSelection('selección sugerida') === true, 'detecta selección sugerida');
@@ -1825,14 +1840,14 @@ try {
     session.contact = {};
 
     // Patrón: corrección explícita de fecha mientras pedimos nombre
-    const helper = tryApplyBarrilesPedidoPriorCorrection(
-      'me equivoque es para el 13 de agosto',
+    const helper = await tryApplyBarrilesPedidoPriorCorrection(
+      'me equivoque es para el 20 de agosto',
       session,
       'nombre'
     );
     assert(helper?.field === 'fecha', 'helper: detecta corrección de fecha');
-    assert(/13\/08\/2026|13 de agosto/i.test(String(helper?.ack || '')), 'helper: ack con fecha nueva');
-    assert(/13\/08\/2026|13 de agosto/i.test(String(session.orderBuilder.clientData.date)), 'helper: guarda fecha');
+    assert(/20\/08\/2026|20 de agosto/i.test(String(helper?.ack || '')), 'helper: ack con fecha nueva');
+    assert(/20\/08\/2026|20 de agosto/i.test(String(session.orderBuilder.clientData.date)), 'helper: guarda fecha');
 
     // Reset fecha y probar vía estado completo
     session.orderBuilder.clientData.date = '10/08/2026';
@@ -1896,23 +1911,43 @@ try {
     },
     {
       input: '50',
-      expectState: 'EVENTOS_INTRO_MENU',
+      expectState: 'EVENTOS_RECOGIDA_DATOS',
       expectIncludes: [
         '50',
         'Súper',
-        'cotización',
-        'duda',
-        '2 cócteles por persona',
-        '3 o más',
+        'buena referencia',
+        'Complemento',
+        'barra principal',
+        'cócteles por persona',
+        'Rendimiento',
+        '5L',
+        '10L'
+      ],
+      expectNotIncludes: [
+        'Pedido mínimo',
+        'catálogo de cócteles',
+        '[IMG:dispensador_portatil_precios.webp]',
+        'Ver Precios'
+      ]
+    },
+    {
+      input: '2',
+      expectState: 'EVENTOS_INTRO_MENU',
+      expectIncludes: [
+        '2',
+        'sugiero',
+        'Ver Precios',
+        'duda'
+      ],
+      expectNotIncludes: [
         'catálogo de cócteles',
         '[IMG:dispensador_portatil_precios.webp]'
-      ],
-      expectNotIncludes: ['Pedido mínimo']
+      ]
     },
     {
       input: 'son 80 invitados',
       expectState: 'EVENTOS_INTRO_MENU',
-      expectIncludes: ['80', 'corregí', 'cotización', '3 o más']
+      expectIncludes: ['80', 'corregí', 'Ver Precios']
     }
   ]);
 
@@ -1938,8 +1973,8 @@ try {
     },
     {
       input: '60',
-      expectState: 'EVENTOS_INTRO_MENU',
-      expectIncludes: ['60', 'cotización']
+      expectState: 'EVENTOS_RECOGIDA_DATOS',
+      expectIncludes: ['60', 'buena referencia', 'cócteles por persona', 'Rendimiento']
     }
   ]);
 
@@ -1968,47 +2003,44 @@ try {
     },
     {
       input: '80',
-      expectState: 'EVENTOS_INTRO_MENU',
+      expectState: 'EVENTOS_RECOGIDA_DATOS',
       expectIncludes: [
         '80',
-        'cotización',
-        'duda',
-        '2 cócteles por persona',
-        '3 o más',
-        '80×2 = *160* cócteles',
-        '80×3 = *240* cócteles',
-        'catálogo de cócteles',
-        '[IMG:dispensador_portatil_precios.webp]'
+        'buena referencia',
+        'Complemento',
+        'cócteles por persona',
+        'Rendimiento',
+        '5L',
+        '10L'
       ],
       expectNotIncludes: [
         'Pedido mínimo',
-        'Rendimientos aproximados',
-        'Para orientarte',
-        'Cuando elijas',
-        'Con *80 invitados* una buena'
+        'catálogo de cócteles',
+        '[IMG:dispensador_portatil_precios.webp]',
+        'Ver Precios'
+      ]
+    },
+    {
+      input: '2',
+      expectState: 'EVENTOS_INTRO_MENU',
+      expectIncludes: [
+        'sugiero',
+        'Ver Precios',
+        'duda',
+        '80',
+        '2'
+      ],
+      expectNotIncludes: [
+        'catálogo de cócteles',
+        '[IMG:dispensador_portatil_precios.webp]'
       ]
     },
     {
       input: '1',
-      expectState: 'EVENTOS_ESTILO_MENU',
-      expectIncludes: [
-        'cócteles por persona',
-        '2, 3 o más'
-      ],
-      expectNotIncludes: [
-        '¿Qué cócteles te gustaría incluir',
-        'Escribe el número de la opción',
-        '1️⃣ *2 por persona',
-        'como complemento, o 3 si lo quieres'
-      ]
-    },
-    {
-      // Tras p/p → ELECCION: catálogo en burbuja 1, pregunta en burbuja 2 (sin HUMANO)
-      input: '2',
       expectState: 'EVENTOS_ELECCION_MENU',
       expectIncludes: [
-        '2 cócteles por persona',
-        'catálogo con precios',
+        '[IMG:dispensador_portatil_precios.webp]',
+        'catálogo de cócteles',
         'CLÁSICOS',
         'Spritz',
         'Piscolas',
@@ -2020,7 +2052,10 @@ try {
         'Escribe el número de la opción',
         'Más premium',
         'Soy asistente virtual',
-        'Estos son los cócteles que manejamos'
+        'Estos son los cócteles que manejamos',
+        'Listo:',
+        'como *complemento*',
+        'Más arriba te dejé'
       ]
     },
     {
@@ -2040,9 +2075,9 @@ try {
     { input: 'evento', expectState: 'EVENTOS_ELECCION_FORMATO' },
     { input: '1', expectState: 'EVENTOS_RECOGIDA_DATOS' },
     { input: 'matrimonio', expectState: 'EVENTOS_RECOGIDA_DATOS' },
-    { input: '100', expectState: 'EVENTOS_INTRO_MENU' },
-    { input: '1', expectState: 'EVENTOS_ESTILO_MENU' },
-    { input: '3', expectState: 'EVENTOS_ELECCION_MENU' }, // 3 cócteles p/p → sabores
+    { input: '100', expectState: 'EVENTOS_RECOGIDA_DATOS' },
+    { input: '3', expectState: 'EVENTOS_INTRO_MENU' },
+    { input: '1', expectState: 'EVENTOS_ELECCION_MENU' },
     {
       input: 'tienen combinados?',
       expectState: 'EVENTOS_ELECCION_MENU',
@@ -2063,10 +2098,10 @@ try {
     },
     {
       input: 'Cumpleaños 25 invitados Peñalolen',
-      expectState: 'EVENTOS_INTRO_MENU',
+      expectState: 'EVENTOS_RECOGIDA_DATOS',
       expectMuted: false,
-      expectIncludes: ['25', 'cotización'],
-      expectNotIncludes: ['25 años', 'cuántos invitados']
+      expectIncludes: ['25', 'cócteles por persona'],
+      expectNotIncludes: ['25 años', 'cuántos invitados', '[IMG:dispensador_portatil_precios.webp]']
     }
   ]);
 
@@ -2125,7 +2160,8 @@ try {
     { input: 'evento', expectState: 'EVENTOS_ELECCION_FORMATO' },
     { input: '1', expectState: 'EVENTOS_RECOGIDA_DATOS' },
     { input: 'cumpleaños', expectState: 'EVENTOS_RECOGIDA_DATOS' },
-    { input: '40', expectState: 'EVENTOS_INTRO_MENU' },
+    { input: '40', expectState: 'EVENTOS_RECOGIDA_DATOS' },
+    { input: '2', expectState: 'EVENTOS_INTRO_MENU' },
     {
       input: '2',
       expectState: 'EVENTOS_INTRO_MENU',
@@ -3204,7 +3240,7 @@ try {
     await processMessage(SESSION_ID, 'cumpleaños para 50 invitados en Providencia el 15 de mayo');
     const sMid = getSession(SESSION_ID);
     assert(sMid.guests === 50, 'guarda 50 invitados en eventos');
-    assert(sMid.currentState === 'EVENTOS_INTRO_MENU', 'está en intro cotizar/duda');
+    assert(sMid.currentState === 'EVENTOS_RECOGIDA_DATOS', 'está pidiendo cócteles por persona');
 
     // Cambia a barriles (switchIntent limpia guests)
     await processMessage(SESSION_ID, 'mejor barriles desechables');

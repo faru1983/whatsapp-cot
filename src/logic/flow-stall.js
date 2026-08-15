@@ -18,10 +18,10 @@ export function getPendingFlowRequirement(session, stateId) {
       return session.userIntent ? null : 'intent';
 
     case 'EVENTOS_RECOGIDA_DATOS':
-      // C (fecha/comuna) es opcional. Tipo se puede saltar → pending guests.
-      if (session.guests) return null;
-      if (!session.celebrationType && !session.eventosCelebrationSkipped) return 'celebration';
-      return 'guests';
+      if (!session.celebrationType && !session.eventosCelebrationSkipped && !session.guests) return 'celebration';
+      if (!session.guests) return 'guests';
+      if (!session.eventosDrinksPerGuest) return 'per_person';
+      return null;
 
     case 'EVENTOS_CONFIRMAR_DATOS':
       return session.guests ? 'confirm' : 'guests';

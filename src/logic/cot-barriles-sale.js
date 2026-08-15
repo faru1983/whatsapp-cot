@@ -93,6 +93,7 @@ export async function buildBarrilesSalePayload(session) {
       phone,
       comuna: comunaResolved.comuna,
       otherComuna: comunaResolved.otherComuna,
+      region: comunaResolved.region || '',
       address: address,
       comments: comments
     },

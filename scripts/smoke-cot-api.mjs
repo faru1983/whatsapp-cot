@@ -46,7 +46,9 @@ async function main() {
   }
 
   assert(Array.isArray(cat.products) && cat.products.length > 0, `products > 0 (tiene ${cat.products?.length || 0})`);
-  assert(Array.isArray(cat.comunas) && cat.comunas.length > 0, `comunas > 0 (tiene ${cat.comunas?.length || 0})`);
+  assert(Array.isArray(cat.comunas) && cat.comunas.length > 50, `comunas nacionales > 50 (tiene ${cat.comunas?.length || 0})`);
+  assert(Array.isArray(cat.regions) && cat.regions.length >= 16, `regions ≥ 16 (tiene ${cat.regions?.length || 0})`);
+  assert(cat.blueExpressRates && cat.blueExpressRates.misma_zona, 'blueExpressRates incluye misma_zona');
   assert(Array.isArray(cat.eventTypes) && cat.eventTypes.length > 0, `eventTypes > 0 (tiene ${cat.eventTypes?.length || 0})`);
 
   const { productsByName, source } = await ensureCatalogIndex({ force: true });
@@ -72,10 +74,23 @@ async function main() {
 
   const comunaOk = await resolveComunaForApi('Providencia');
   assert(comunaOk.matched === true && comunaOk.comuna === 'Providencia', 'comuna Providencia matchea catálogo');
+  assert(comunaOk.region === 'RM', 'Providencia → región RM');
 
-  const comunaOtra = await resolveComunaForApi('La Serena');
+  const comunaSerena = await resolveComunaForApi('La Serena');
   assert(
-    comunaOtra.matched === false && comunaOtra.comuna === 'Otra' && comunaOtra.otherComuna === 'La Serena',
+    comunaSerena.matched === true && comunaSerena.comuna === 'La Serena' && comunaSerena.region === 'IV',
+    'La Serena matchea catálogo nacional (IV)'
+  );
+
+  const comunaValpo = await resolveComunaForApi('Valparaíso');
+  assert(
+    comunaValpo.matched === true && comunaValpo.comuna === 'Valparaíso' && comunaValpo.region === 'V',
+    'Valparaíso matchea catálogo (V)'
+  );
+
+  const comunaOtra = await resolveComunaForApi('Comuna Inventada XYZ');
+  assert(
+    comunaOtra.matched === false && comunaOtra.comuna === 'Otra' && comunaOtra.otherComuna === 'Comuna Inventada XYZ',
     'comuna desconocida → Otra + otherComuna'
   );
 
@@ -97,7 +112,7 @@ async function main() {
     process.exit(1);
   }
   console.log('SMOKE COT API PASSED');
-  console.log(`  productos=${cat.products.length} comunas=${cat.comunas.length} eventTypes=${cat.eventTypes.length}`);
+  console.log(`  productos=${cat.products.length} comunas=${cat.comunas.length} regions=${cat.regions?.length || 0} eventTypes=${cat.eventTypes.length}`);
 }
 
 main().catch((err) => {

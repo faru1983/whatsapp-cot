@@ -8,6 +8,7 @@ import {
   preciosData,
   formatPrice,
   partitionLitersIntoBarrels,
+  formatBarrelPartsLabel,
   getCoctelesByCategoria,
   getCoctelesNamesCatalogCompact
 } from './utils.js';
@@ -139,6 +140,152 @@ export function calculateEventBaseline(guests, formatKey, drinksPerGuest = EVENT
     totalLiters,
     mathLine
   };
+}
+
+/**
+ * buildSalesFlavorShares: Reparte litros poniendo más volumen en el “favorito”.
+ * Así el pitch suena a vendedor: el principal no se agota primero.
+ *
+ * @param {number} totalLiters
+ * @param {number} flavorCount
+ * @param {string[]} allowedLitrages
+ * @returns {number[]}
+ */
+function buildSalesFlavorShares(totalLiters, flavorCount, allowedLitrages) {
+  const shares = splitLitersAcrossFlavors(totalLiters, flavorCount, allowedLitrages);
+  return [...shares].sort((a, b) => b - a);
+}
+
+/**
+ * formatLitersWithBarrelHint: "*15L* (10L + 5L)" si el total no es un solo barril.
+ *
+ * @param {number} liters
+ * @param {string[]} allowedLitrages
+ * @returns {string}
+ */
+function formatLitersWithBarrelHint(liters, allowedLitrages) {
+  const n = Number(liters) || 0;
+  if (n <= 0) return '';
+  const parts = partitionLitersIntoBarrels(n, allowedLitrages);
+  const label = formatBarrelPartsLabel(parts || []);
+  // Un solo barril (ej. 10L o 1×10L) → no hace falta el desglose
+  if (parts && parts.length === 1 && parts[0].count === 1) return `*${n}L*`;
+  if (label) return `*${n}L* (${label})`;
+  return `*${n}L*`;
+}
+
+/**
+ * formatSalesShareLine: Texto de un reparto (ej. "*10L* del favorito + *5L* de un segundo").
+ *
+ * @param {number[]} shares - Litros por sabor, mayor→menor
+ * @param {string[]} allowedLitrages
+ * @returns {string}
+ */
+function formatSalesShareLine(shares, allowedLitrages) {
+  const list = (shares || []).filter((n) => Number(n) > 0);
+  if (list.length === 0) return '';
+  const fmt = (n) => formatLitersWithBarrelHint(n, allowedLitrages);
+  if (list.length === 1) return `${fmt(list[0])} de un solo sabor`;
+  if (list.length === 2) {
+    if (list[0] === list[1]) return `${fmt(list[0])} + ${fmt(list[1])} (mitad y mitad)`;
+    return `${fmt(list[0])} del favorito + ${fmt(list[1])} de un segundo`;
+  }
+  // 3+: todos iguales → "5L + 5L + 5L"; si no, más litros al favorito
+  const allSame = list.every((n) => n === list[0]);
+  if (allSame) return list.map((n) => fmt(n)).join(' + ');
+  return `${fmt(list[0])} del favorito + ` + list.slice(1).map((n) => fmt(n)).join(' + ');
+}
+
+/**
+ * suggestedFlavorCountOptions: Cuántos sabores conviene mostrar en el pitch.
+ * Regla de venta: pocos sabores en eventos chicos; más variedad si hay litros.
+ *
+ * @param {number} totalLiters
+ * @param {number} step - Barril más chico del formato (5 o 10)
+ * @returns {number[]}
+ */
+function suggestedFlavorCountOptions(totalLiters, step) {
+  const L = Number(totalLiters) || 0;
+  const s = Math.max(1, Number(step) || 5);
+  if (L < s * 2) return [1];
+  if (L <= s * 2) return [2];
+  if (L <= s * 6) return [2, 3];
+  return [3, 4];
+}
+
+/**
+ * buildFlavorDistributionTips: Guía de vendedor — cómo repartir sabores y tamaños.
+ *
+ * @param {number} totalLiters
+ * @param {string[]} allowedLitrages
+ * @returns {string}
+ */
+function buildFlavorDistributionTips(totalLiters, allowedLitrages) {
+  const L = Math.max(0, Number(totalLiters) || 0);
+  const allowed = allowedLitrages || [];
+  const step = Math.min(...allowed.map((x) => parseInt(x, 10)).filter((n) => n > 0)) || 5;
+  const counts = suggestedFlavorCountOptions(L, step);
+
+  const lines = [];
+  const rangeLabel = counts.length === 1
+    ? (counts[0] === 1 ? '*1 sabor*' : `*${counts[0]} sabores*`)
+    : `*${counts[0]} o ${counts[counts.length - 1]} sabores*`;
+
+  lines.push(`💡 *Cómo lo armaría yo:* con ese volumen lo ideal es ${rangeLabel} (si eliges muchos, cada uno rinde poco).`);
+
+  for (const n of counts) {
+    if (n < 1) continue;
+    const shares = buildSalesFlavorShares(L, n, allowed);
+    const split = formatSalesShareLine(shares, allowed);
+    if (!split) continue;
+    if (n === 1) {
+      lines.push(`• *1 sabor:* ${split} — simple y abundante.`);
+    } else if (n === 2) {
+      const tip = shares[0] === shares[1]
+        ? 'equilibrio rico entre los dos'
+        : 'así el principal no se acaba primero';
+      lines.push(`• *2 sabores:* ${split} — ${tip}.`);
+    } else {
+      lines.push(`• *${n} sabores:* ${split} — más variedad sin quedarte corto.`);
+    }
+  }
+
+  // Si el total no es un solo barril, explicamos cómo se arma (15L → 10L + 5L)
+  const asOne = partitionLitersIntoBarrels(L, allowed);
+  const barrelLabel = formatBarrelPartsLabel(asOne || []);
+  if (barrelLabel && asOne && (asOne.length > 1 || (asOne[0]?.count || 0) > 1)) {
+    lines.push(`Si concentras todo en un sabor, se arma en *${barrelLabel}*.`);
+  }
+
+  return lines.join('\n');
+}
+
+/**
+ * buildVolumeRecommendation: Pitch de vendedor — volumen + cómo repartir sabores/tamaños.
+ * Tras p/p guiamos al cliente antes de mostrar precios.
+ *
+ * @param {object} session
+ * @param {'dispensador'|'muro'|string} formatKey
+ * @param {number} per
+ * @returns {string}
+ */
+export function buildVolumeRecommendation(session, formatKey, per) {
+  const baseline = calculateEventBaseline(session?.guests, formatKey, per);
+  const allowed = getAllowedLitrages(formatKey);
+  const sizesLine = allowed
+    .map((l) => {
+      const n = parseInt(l, 10);
+      return `*${l}* (~${cocktailsForLiters(n)} cócteles)`;
+    })
+    .join(' · ');
+  const tips = buildFlavorDistributionTips(baseline.totalLiters, allowed);
+
+  return `Con *${baseline.guests}* invitados y *${per}* cócteles por persona (${baseline.mathLine}) te sugiero pedir unos *${baseline.totalLiters}L* en total.
+
+${tips}
+
+📦 Barriles del formato: ${sizesLine}.
+Cuando veas los precios eliges los sabores y cómo repartirlos 👌`;
 }
 
 /**
@@ -561,13 +708,12 @@ _(ej: 2, 3 o más)_`;
 }
 
 /**
- * buildFlavorCatalogBlock: Recordatorio del catálogo + lista corta por categoría.
+ * buildFlavorCatalogBlock: Lista corta de sabores por categoría (el catálogo de precios va en imagen).
  *
  * @returns {string}
  */
 export function buildFlavorCatalogBlock() {
-  return `Más arriba te dejé el *catálogo con precios* 👆
-Te recuerdo los sabores:
+  return `Te recuerdo los sabores:
 
 ${getCoctelesNamesCatalogCompact()}`;
 }
@@ -636,7 +782,7 @@ ${buildPerPersonAsk()}`];
 }
 
 /**
- * buildFlavorPickEntryReplies: Tras fijar p/p → catálogo por categoría + pregunta abierta.
+ * buildFlavorPickEntryReplies: Tras Ver Precios → lista de sabores + pregunta (sin re-confirmar p/p).
  *
  * @param {object} session
  * @param {string} formatKey
@@ -648,17 +794,10 @@ export function buildFlavorPickEntryReplies(session, formatKey, per) {
   session.eventosFlavorMode = 'free';
   session.eventosStyleKey = null;
   session.eventosPackProposed = false;
-  const baseline = calculateEventBaseline(session.guests, formatKey, per);
-  const label = per <= 2
-    ? 'como *complemento* de la celebración'
-    : 'como *barra principal*';
+  void formatKey;
 
-  // Burbuja 1: confirmación p/p + catálogo corto | Burbuja 2: solo la pregunta
   return [
-    `Listo: *${per} cócteles por persona* ${label}.
-Ejemplo: ${baseline.mathLine} → unos *${baseline.totalLiters}L* en total.
-
-${buildFlavorCatalogBlock()}`,
+    buildFlavorCatalogBlock(),
     buildFlavorPickQuestion()
   ];
 }

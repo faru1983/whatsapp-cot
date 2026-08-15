@@ -4,6 +4,7 @@
 import fs from 'node:fs';
 import { DATOS_JSON_PATH } from '../core/paths.js';
 import { testLog } from '../core/debug-log.js';
+import { enrichLocationFromCatalog, getCachedComunas } from './cot-catalog.js';
 
 // ==============================================================================
 // BASE DE DATOS GENERAL (datos.json)
@@ -137,8 +138,9 @@ export function buildFaqCatalogContext(data = preciosData) {
 	lines.push('3) "muro" = Barril para servicio de eventos con Muro de Coctelería.');
 	lines.push('Nunca digas solo "el precio del Pisco Sour": siempre aclara o pregunta la categoría.');
 	lines.push('');
-	lines.push('- Despacho RM: "desechable" = envío barriles desechables; "evento" = envío dispensador/muro.');
-	lines.push('- Fuera de RM: NO inventar tarifa; di que va por encomienda y el costo se confirma al comprar.');
+	lines.push('- Despacho: tarifas vivas del catálogo web (GET /api/v1/catalog). No uses montos viejos de esta tabla.');
+	lines.push('- Barriles RM provincia Santiago: traslado propio. Resto RM: Blue Express misma zona (paquetes M/L).');
+	lines.push('- Barriles otras regiones: Blue Express centro u extremo. Eventos fuera de RM: tarifa propia si existe, si no por confirmar.');
 	lines.push('- Si el dato no está aquí ni en las respuestas frecuentes → NO_FAQ (no adivinar).');
 	lines.push('- NUNCA digas al cliente "DATOS OFICIALES", "FAQ", "datos.json" ni "sección": habla solo como vendedor.');
 	lines.push('');
@@ -196,19 +198,11 @@ export function buildFaqCatalogContext(data = preciosData) {
 		lines.push('');
 	}
 
-	// --- Despachos Región Metropolitana ---
-	const comunas = data.comunas_rm || {};
-	if (Object.keys(comunas).length > 0) {
-		lines.push('DESPACHOS RM (comuna → envío barril desechable | envío servicio eventos):');
-		lines.push('  "desechable" = envío de barriles desechables | "evento" = envío Dispensador/Muro (0 = sin costo)');
-		for (const [comuna, tarifas] of Object.entries(comunas)) {
-			const desechable = formatPrice(tarifas.desechable ?? 0);
-			const evento = formatPrice(tarifas.evento ?? 0);
-			lines.push(
-				`- ${comuna}: barril desechable ${desechable} | eventos (Dispensador/Muro) ${evento}`
-			);
-		}
-	}
+	// --- Despachos: resumen (montos exactos salen del catálogo API al cotizar) ---
+	lines.push('DESPACHOS (resumen; el bot cotiza con el catálogo vivo, no inventes montos):');
+	lines.push('- Eventos RM: traslado propio por comuna; Evento Gratis según umbral de litros.');
+	lines.push('- Barriles RM Santiago: propio. Barriles resto RM: Blue Express misma zona.');
+	lines.push('- Barriles regiones: Blue Express (centro / extremo). Comuna desconocida → pendiente.');
 
 	return lines.join('\n');
 }
@@ -945,13 +939,28 @@ export function findLocationByFuzzyMatch(userLocation) {
 
 	const comunasRM = preciosData.comunas_rm || {};
 	const regionesChile = preciosData.regiones_chile || {};
+	const catalogComunas = getCachedComunas().filter(
+		(c) => c?.name && normalizeLocationText(c.name) !== 'otra'
+	);
 
 	/**
 	 * tryReturn: Resuelve nombre oficial → registro, o null si no existe.
 	 * @param {string} officialName
 	 */
-	const tryReturn = (officialName) =>
-		resolveComunaRecord(officialName, comunasRM, regionesChile);
+	const tryReturn = (officialName) => {
+		const base = resolveComunaRecord(officialName, comunasRM, regionesChile);
+		if (base) return enrichLocationFromCatalog(base);
+		const catalogHit = getCachedComunas().find(
+			(c) => c?.name && normalizeLocationText(c.name) === normalizeLocationText(officialName)
+		);
+		if (!catalogHit) return null;
+		return enrichLocationFromCatalog({
+			name: catalogHit.name,
+			region: catalogHit.regionShortName || '',
+			deliveryCost: null,
+			isRM: catalogHit.regionCode === 'RM'
+		});
+	};
 
 	// --- A) Apodos / typos conocidos (frase completa en el mensaje) ---
 	// Preferimos aliases más largos ("santiago centro" antes que "stgo")
@@ -971,15 +980,20 @@ export function findLocationByFuzzyMatch(userLocation) {
 			return tryReturn(comunaName);
 		}
 	}
+	for (const c of catalogComunas) {
+		if (normalizeLocationText(c.name) === normalized) {
+			return tryReturn(c.name);
+		}
+	}
 	for (const [regionName, comunasList] of Object.entries(regionesChile)) {
 		for (const comuna of comunasList) {
 			if (normalizeLocationText(comuna) === normalized) {
-				return {
+				return enrichLocationFromCatalog({
 					name: comuna,
 					region: regionName,
 					deliveryCost: null,
 					isRM: false
-				};
+				});
 			}
 		}
 	}
@@ -1005,6 +1019,19 @@ export function findLocationByFuzzyMatch(userLocation) {
 			}
 		}
 	}
+	for (const c of catalogComunas) {
+		const keys = buildLocationSearchKeys(c.name);
+		for (const key of keys) {
+			const inMessage = textContainsLocationPhrase(normalized, key);
+			const inHint = hints.some(
+				(h) => h === key || stripLeadingArticle(h) === stripLeadingArticle(key)
+			);
+			if ((inMessage || inHint) && key.length > bestKeyLen) {
+				best = c.name;
+				bestKeyLen = key.length;
+			}
+		}
+	}
 
 	if (best) return tryReturn(best);
 
@@ -1014,12 +1041,12 @@ export function findLocationByFuzzyMatch(userLocation) {
 			const keys = buildLocationSearchKeys(comuna);
 			for (const key of keys) {
 				if (textContainsLocationPhrase(normalized, key) || hints.includes(key)) {
-					return {
+					return enrichLocationFromCatalog({
 						name: comuna,
 						region: regionName,
 						deliveryCost: null,
 						isRM: false
-					};
+					});
 				}
 			}
 		}

@@ -406,6 +406,7 @@ export async function buildEventQuotePayload(session) {
       phone,
       comuna: comunaResolved.comuna,
       otherComuna: comunaResolved.otherComuna,
+      region: comunaResolved.region || '',
       address: String(contact.address || '').trim(),
       comments: String(contact.comments || '').trim()
     },

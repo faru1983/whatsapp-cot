@@ -254,6 +254,8 @@ export async function ensureCatalogIndex(opts = {}) {
         raw: {
           products: result.products,
           comunas: result.comunas,
+          regions: result.regions || [],
+          blueExpressRates: result.blueExpressRates || null,
           eventTypes: result.eventTypes,
           fetchedAt: result.fetchedAt
         },
@@ -317,19 +319,371 @@ export async function warmCotCatalog(opts = {}) {
 /**
  * getCachedComunas: Comunas del último catálogo API (o [] si no hay).
  *
- * @returns {Array<{ name: string, cost: number|null, freeFrom: number|null }>}
+ * @returns {Array<{
+ *   name: string,
+ *   regionCode?: string,
+ *   regionShortName?: string,
+ *   availableForEvents?: boolean,
+ *   availableForDirect?: boolean,
+ *   cost: number|null,
+ *   freeFrom: number|null,
+ *   directSaleDeliveryCost?: number|null,
+ *   shippingCarrier?: string,
+ *   blueExpressZone?: string|null
+ * }>}
  */
 export function getCachedComunas() {
   return cache.raw?.comunas || [];
 }
 
 /**
- * getCatalogSource: Origen actual del índice (api | stale | fallback | null).
+ * getCachedBlueExpressRates: Tarifas BE del catálogo (o null).
  *
- * @returns {string|null}
+ * @returns {object|null}
  */
-export function getCatalogSource() {
-  return cache.source;
+export function getCachedBlueExpressRates() {
+  return cache.raw?.blueExpressRates || null;
+}
+
+const BE_BARRELS_PER_L = 4;
+const BE_FALLBACK_RATES = {
+  misma_zona: { M: 4800, L: 5400 },
+  centro: { M: 7300, L: 9200 },
+  extremo: { M: 14500, L: 17000 }
+};
+
+/**
+ * barrelsFromLiters: 5L = 1 barril desechable (igual que la web).
+ *
+ * @param {number} totalLiters
+ * @returns {number}
+ */
+function barrelsFromLiters(totalLiters) {
+  if (!totalLiters || totalLiters <= 0) return 0;
+  return Math.max(1, Math.round(totalLiters / 5));
+}
+
+/**
+ * splitBlueExpressPacks: L de 4 barriles; 1 resto = M; 2–3 = un L extra.
+ *
+ * @param {number} barrelCount
+ * @returns {{ m: number, l: number }}
+ */
+function splitBlueExpressPacks(barrelCount) {
+  if (barrelCount <= 0) return { m: 0, l: 0 };
+  const fullL = Math.floor(barrelCount / BE_BARRELS_PER_L);
+  const rem = barrelCount % BE_BARRELS_PER_L;
+  if (rem === 0) return { m: 0, l: fullL };
+  if (rem === 1) return { m: 1, l: fullL };
+  return { m: 0, l: fullL + 1 };
+}
+
+/**
+ * quoteBlueExpressHome: Costo domicilio según zona y cantidad de barriles.
+ *
+ * @param {number} barrelCount
+ * @param {string} zone
+ * @param {object|null} rates
+ * @returns {number|null}
+ */
+function quoteBlueExpressHome(barrelCount, zone, rates) {
+  const table = rates && rates[zone] ? rates : BE_FALLBACK_RATES;
+  const zoneRates = table[zone];
+  if (!zoneRates) return null;
+  const packs = splitBlueExpressPacks(barrelCount);
+  return packs.m * Number(zoneRates.M || 0) + packs.l * Number(zoneRates.L || 0);
+}
+
+/**
+ * blueExpressZoneFromRegion: Zona BE de la web cuando el catálogo aún no trae la comuna.
+ * Espejo de regions.blue_express_zone en Supabase.
+ *
+ * @param {string} regionCode
+ * @param {string} regionLabel
+ * @returns {'misma_zona'|'centro'|'extremo'|null}
+ */
+export function blueExpressZoneFromRegion(regionCode, regionLabel) {
+  const code = String(regionCode || '').trim().toUpperCase();
+  if (code === 'RM') return 'misma_zona';
+  if (['XV', 'I', 'II', 'III', 'XIV', 'X', 'XI', 'XII'].includes(code)) return 'extremo';
+  if (['IV', 'V', 'VI', 'VII', 'XVI', 'VIII', 'IX'].includes(code)) return 'centro';
+
+  const n = normalizeCatalogName(regionLabel);
+  if (!n) return null;
+  if (n.includes('metropolitana') || n === 'rm') return 'misma_zona';
+  if (
+    n.includes('arica')
+    || n.includes('tarapaca')
+    || n.includes('antofagasta')
+    || n.includes('atacama')
+    || n.includes('los rios')
+    || n.includes('los lagos')
+    || n.includes('aysen')
+    || n.includes('aisen')
+    || n.includes('magallanes')
+  ) {
+    return 'extremo';
+  }
+  if (
+    n.includes('coquimbo')
+    || n.includes('valparaiso')
+    || n.includes('ohiggins')
+    || n.includes('o higgins')
+    || n.includes('libertador')
+    || n.includes('maule')
+    || n.includes('nuble')
+    || n.includes('biobio')
+    || n.includes('bio bio')
+    || n.includes('araucania')
+  ) {
+    return 'centro';
+  }
+  return null;
+}
+
+/**
+ * quoteBarrilesDirectShipping: Flete desechable para una comuna.
+ * 1) catálogo vivo  2) Blue Express por zona de la región (tarifas admin o fallback).
+ *
+ * @param {{ comunaName: string, region?: string, regionCode?: string, isRM?: boolean, totalLiters?: number }} opts
+ * @returns {{
+ *   cost: number|null,
+ *   isPending: boolean,
+ *   shippingCarrier: string,
+ *   regionCode: string,
+ *   name: string,
+ *   isRM: boolean,
+ *   label: string
+ * }|null}
+ */
+export function quoteBarrilesDirectShipping(opts) {
+  const comunaName = String(opts?.comunaName || '').trim();
+  const totalLiters = Number(opts?.totalLiters) || 5;
+  const catalog = quoteCatalogShipping({
+    serviceType: 'direct',
+    comunaName,
+    totalLiters
+  });
+  if (catalog && !catalog.isPending && catalog.cost != null) {
+    return catalog;
+  }
+
+  const isRM = Boolean(opts?.isRM) || String(opts?.regionCode || '') === 'RM';
+  if (isRM) return catalog;
+
+  const zone = blueExpressZoneFromRegion(opts?.regionCode, opts?.region);
+  if (!zone) return catalog;
+
+  const barrels = barrelsFromLiters(totalLiters || 5);
+  const cost = quoteBlueExpressHome(barrels, zone, getCachedBlueExpressRates());
+  if (cost == null) return catalog;
+
+  return {
+    cost,
+    isPending: false,
+    shippingCarrier: 'blue_express',
+    regionCode: String(opts?.regionCode || catalog?.regionCode || ''),
+    name: catalog?.name || comunaName,
+    isRM: false,
+    label: String(cost)
+  };
+}
+
+/**
+ * findCatalogComuna: Busca comuna del catálogo por nombre (sin tildes).
+ *
+ * @param {string} comunaName
+ * @returns {object|null}
+ */
+export function findCatalogComuna(comunaName) {
+  const needle = normalizeCatalogName(comunaName);
+  if (!needle) return null;
+  return getCachedComunas().find((c) => normalizeCatalogName(c.name) === needle) || null;
+}
+
+/**
+ * quoteCatalogShipping: Misma lógica que resolveShipping de la web (sin duplicar dominio).
+ *
+ * @param {{ serviceType: 'event'|'direct', comunaName: string, totalLiters?: number }} opts
+ * @returns {{
+ *   cost: number|null,
+ *   isPending: boolean,
+ *   shippingCarrier: string,
+ *   regionCode: string,
+ *   name: string,
+ *   isRM: boolean,
+ *   label: string
+ * }|null}
+ */
+export function quoteCatalogShipping(opts) {
+  const serviceType = opts?.serviceType === 'direct' ? 'direct' : 'event';
+  const comunaName = String(opts?.comunaName || '').trim();
+  const totalLiters = Number(opts?.totalLiters) || 0;
+  const hit = findCatalogComuna(comunaName);
+  if (!hit) return null;
+
+  const name = hit.name;
+  const regionCode = String(hit.regionCode || '');
+  const isRM = regionCode === 'RM';
+  const carrier = hit.shippingCarrier || 'own';
+
+  if (normalizeCatalogName(name) === 'otra') {
+    return {
+      cost: null,
+      isPending: true,
+      shippingCarrier: carrier,
+      regionCode,
+      name,
+      isRM,
+      label: 'Pendiente de factibilidad'
+    };
+  }
+
+  if (serviceType !== 'direct') {
+    const eventCost = hit.cost;
+    const eventFreeFrom = hit.freeFrom;
+    if (eventCost === null || eventCost === undefined) {
+      return {
+        cost: null,
+        isPending: true,
+        shippingCarrier: 'own',
+        regionCode,
+        name,
+        isRM,
+        label: 'Por confirmar'
+      };
+    }
+    if (eventFreeFrom != null && totalLiters >= Number(eventFreeFrom)) {
+      return {
+        cost: 0,
+        isPending: false,
+        shippingCarrier: 'own',
+        regionCode,
+        name,
+        isRM,
+        label: '¡Gratis!'
+      };
+    }
+    return {
+      cost: Number(eventCost),
+      isPending: false,
+      shippingCarrier: 'own',
+      regionCode,
+      name,
+      isRM,
+      label: String(eventCost)
+    };
+  }
+
+  if (carrier === 'blue_express') {
+    if (hit.directSaleDeliveryCost != null) {
+      return {
+        cost: Number(hit.directSaleDeliveryCost),
+        isPending: false,
+        shippingCarrier: 'blue_express',
+        regionCode,
+        name,
+        isRM,
+        label: String(hit.directSaleDeliveryCost)
+      };
+    }
+    const zone = hit.blueExpressZone;
+    const barrels = barrelsFromLiters(totalLiters || 5);
+    if (!zone || barrels < 1) {
+      return {
+        cost: null,
+        isPending: true,
+        shippingCarrier: 'blue_express',
+        regionCode,
+        name,
+        isRM,
+        label: 'Por confirmar'
+      };
+    }
+    const quoted = quoteBlueExpressHome(barrels, zone, getCachedBlueExpressRates());
+    if (quoted == null) {
+      return {
+        cost: null,
+        isPending: true,
+        shippingCarrier: 'blue_express',
+        regionCode,
+        name,
+        isRM,
+        label: 'Por confirmar'
+      };
+    }
+    return {
+      cost: quoted,
+      isPending: false,
+      shippingCarrier: 'blue_express',
+      regionCode,
+      name,
+      isRM,
+      label: String(quoted)
+    };
+  }
+
+  const ownCost = hit.directSaleDeliveryCost;
+  if (ownCost === null || ownCost === undefined) {
+    return {
+      cost: null,
+      isPending: true,
+      shippingCarrier: carrier,
+      regionCode,
+      name,
+      isRM,
+      label: 'Por confirmar'
+    };
+  }
+  return {
+    cost: Number(ownCost),
+    isPending: false,
+    shippingCarrier: carrier,
+    regionCode,
+    name,
+    isRM,
+    label: String(ownCost)
+  };
+}
+
+/**
+ * enrichLocationFromCatalog: Superpone tarifas vivas del catálogo sobre el match local.
+ *
+ * @param {{ name?: string, region?: string, deliveryCost?: object|null, isRM?: boolean }|null} record
+ * @param {{ totalLiters?: number }} [opts]
+ * @returns {object|null}
+ */
+export function enrichLocationFromCatalog(record, opts = {}) {
+  if (!record?.name) return record;
+  const liters = Number(opts.totalLiters) || 5;
+  const eventQuote = quoteCatalogShipping({
+    serviceType: 'event',
+    comunaName: record.name,
+    totalLiters: Number(opts.eventLiters) || 0
+  });
+  const directQuote = quoteCatalogShipping({
+    serviceType: 'direct',
+    comunaName: record.name,
+    totalLiters: liters
+  });
+  if (!eventQuote && !directQuote) return record;
+
+  const hit = findCatalogComuna(record.name);
+  return {
+    ...record,
+    name: hit?.name || record.name,
+    region: hit?.regionShortName
+      ? `Región ${hit.regionShortName}`
+      : record.region,
+    regionCode: hit?.regionCode || record.regionCode || null,
+    isRM: hit ? hit.regionCode === 'RM' : Boolean(record.isRM),
+    deliveryCost: {
+      evento: eventQuote && !eventQuote.isPending ? eventQuote.cost : null,
+      desechable: directQuote && !directQuote.isPending ? directQuote.cost : null,
+      shippingCarrier: directQuote?.shippingCarrier || hit?.shippingCarrier || null,
+      blueExpressZone: hit?.blueExpressZone || null
+    }
+  };
 }
 
 /**
@@ -338,12 +692,12 @@ export function getCatalogSource() {
  * (así la web no rechaza el envío por nombre desconocido).
  *
  * @param {string} comunaText - Ej. "Providencia" o "La Serena"
- * @returns {Promise<{ comuna: string, otherComuna: string, matched: boolean }>}
+ * @returns {Promise<{ comuna: string, otherComuna: string, matched: boolean, region: string }>}
  */
 export async function resolveComunaForApi(comunaText) {
   const raw = String(comunaText || '').trim();
   if (!raw) {
-    return { comuna: '', otherComuna: '', matched: false };
+    return { comuna: '', otherComuna: '', matched: false, region: '' };
   }
 
   // Asegura catálogo cargado (trae comunas en cache.raw)
@@ -352,21 +706,27 @@ export async function resolveComunaForApi(comunaText) {
 
   // Sin lista (fallback hardcodeado): enviamos el texto tal cual
   if (!comunas.length) {
-    return { comuna: raw, otherComuna: '', matched: false };
+    return { comuna: raw, otherComuna: '', matched: false, region: '' };
   }
 
   const needle = normalizeCatalogName(raw);
   const hit = comunas.find((c) => normalizeCatalogName(c.name) === needle);
   if (hit) {
-    return { comuna: hit.name, otherComuna: '', matched: true };
+    return {
+      comuna: hit.name,
+      otherComuna: '',
+      matched: true,
+      region: hit.regionCode || ''
+    };
   }
 
-  // "Otra" es la comuna comodín del catálogo web
+  // "Otra" es la comuna comodín del catálogo web (RM)
   const otra = comunas.find((c) => normalizeCatalogName(c.name) === 'otra');
   return {
     comuna: otra?.name || 'Otra',
     otherComuna: raw,
-    matched: false
+    matched: false,
+    region: otra?.regionCode || 'RM'
   };
 }
 

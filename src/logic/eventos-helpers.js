@@ -18,6 +18,7 @@ import { isLikelyThirdPartyBotReply } from './interruptions.js';
 import { OrderBuilder } from './order-builder.js';
 import { img } from './media.js';
 import { normalizeBotDateText } from './cot-event-quote.js';
+import { quoteCatalogShipping } from './cot-catalog.js';
 
 /** Ejemplo canónico (litros primero) — intro menú + re-preguntas. */
 export const EVENT_COCKTAIL_ORDER_EXAMPLE = '5L Mojito y 10L Aperol';
@@ -1333,9 +1334,18 @@ export function buildEventQuoteFromSession(session) {
 
   let deliveryCost = null;
   if (session.location) {
-    const locationSearch = findLocationByFuzzyMatch(session.location);
-    if (locationSearch?.isRM && locationSearch.deliveryCost?.evento != null) {
-      deliveryCost = locationSearch.deliveryCost.evento;
+    const catalogShip = quoteCatalogShipping({
+      serviceType: 'event',
+      comunaName: session.location,
+      totalLiters: orderBuilder.getTotalLiters()
+    });
+    if (catalogShip && !catalogShip.isPending) {
+      deliveryCost = catalogShip.cost;
+    } else if (!catalogShip) {
+      const locationSearch = findLocationByFuzzyMatch(session.location);
+      if (locationSearch?.isRM && locationSearch.deliveryCost?.evento != null) {
+        deliveryCost = locationSearch.deliveryCost.evento;
+      }
     }
   }
 
