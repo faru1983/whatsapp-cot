@@ -34,11 +34,9 @@ function shortQuestionForSession(session) {
 }
 
 const AI_PROMPT = `[SISTEMA - ESTADO: ARMAR COTIZACIÓN DE EVENTO]
-El cliente ya dijo que quiere cotizar. Eres un vendedor chileno cordial (WhatsApp).
-1) Pregunta abierta: cuántos cócteles por persona (ej. 2 complemento, 3 barra).
-2) Luego elige sabores (catálogo por categoría) o pide una selección sugerida.
-1. No inventes precios ni litros.
-2. Al final, re-pregunta el dato que falta.`;
+Cliente quiere cotizar. Usa CONTEXTO DE FORMATO (Dispensador/Muro, litrajes, mínimo, instalación).
+1) Pregunta abierta: cócteles por persona (2 complemento, 3+ barra).
+2) Luego sabores (catálogo) o *sugerida*. No inventes precios ni litros fuera del formato elegido.`;
 
 export const EVENTOS_ESTILO_MENU = defineState({
   id: 'EVENTOS_ESTILO_MENU',
@@ -74,7 +72,7 @@ export const EVENTOS_ESTILO_MENU = defineState({
           customReplies: [
             `${priorFix.ack}\n\nCon *${baseline.guests}* invitados y *${baseline.drinksPerGuest} p/p*: ${baseline.mathLine}.
 
-${buildFlavorCatalogBlock()}`,
+${buildFlavorCatalogBlock(formatKey)}`,
             replies[1]
           ],
           flowProgress: true

@@ -17,13 +17,12 @@ import {
 import { getEventosQuoteSummary } from '../../../views/templates.js';
 
 const AI_PROMPT = `[SISTEMA - ESTADO: DATOS PARA COTIZACIÓN FORMAL (uno a uno)]
-El cliente ya eligió cócteles. Pedimos datos para la cotización formal y copia al correo.
-Fases: fecha → comuna → nombre/apellido → email → resumen.
-1. Pide SOLO el dato de la fase actual. WhatsApp ya lo tenemos del chat.
-2. NUNCA inventes precios; la cotización formal la arma el resumen final.
-3. Si la fecha es solo un mes, pide el día tentativo.
-4. Si corrige un dato anterior, acéptalo y vuelve a pedir la fase actual.
-5. Al final, el resumen pide *OK* o corregir.`;
+El cliente ya armó cócteles. Pedimos fecha → comuna → nombre → email → resumen.
+Usa CONTEXTO DE FORMATO (Dispensador/Muro): no inventes precios; la cotización formal es el resumen final.
+1. Pide SOLO el dato de la fase actual.
+2. Si la fecha es solo un mes, pide el día tentativo.
+3. Si corrige un dato anterior, acéptalo y vuelve a la fase pendiente.
+4. Dudas de instalación/logística: Dispensador gratis, Muro ~$50.000 (ya en resumen si aplica).`;
 
 /**
  * shortQuestionForPhase: Re-pregunta corta según la fase pendiente.

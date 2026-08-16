@@ -69,7 +69,6 @@ export function getPendingFlowRequirement(session, stateId) {
       return hasProducts ? null : 'cart';
     }
 
-    case 'EVENTOS_COTIZACION':
     case 'BARRILES_REVISION_COTIZACION':
       return 'confirm_quote';
 

@@ -20,12 +20,66 @@ import { img } from './media.js';
 import { normalizeBotDateText } from './cot-event-quote.js';
 import { quoteCatalogShipping } from './cot-catalog.js';
 
-/** Ejemplo canónico (litros primero) — intro menú + re-preguntas. */
+/** Ejemplo canónico Dispensador (compat legacy). */
 export const EVENT_COCKTAIL_ORDER_EXAMPLE = '5L Mojito y 10L Aperol';
 
-/** Pregunta estándar al pedir cócteles del evento. Estilo: *pregunta* + _(ej: …)_. */
+/** Pregunta estándar al pedir cócteles del evento (Dispensador por defecto). */
 export const ASK_EVENT_COCKTAILS = `*¿Qué cócteles te gustaría incluir en tu evento?*
 _(ej: ${EVENT_COCKTAIL_ORDER_EXAMPLE})_`;
+
+/**
+ * getEventCocktailSingleExample: Un sabor + litraje válido del formato.
+ *
+ * @param {'dispensador'|'muro'|string} [formatKey='dispensador']
+ * @returns {string}
+ */
+export function getEventCocktailSingleExample(formatKey = 'dispensador') {
+  const [small] = getAllowedLitrages(formatKey);
+  return `${small || '10L'} Mojito`;
+}
+
+/**
+ * getEventCocktailOrderExample: Par de sabores con litrajes válidos del formato.
+ *
+ * @param {'dispensador'|'muro'|string} [formatKey='dispensador']
+ * @returns {string}
+ */
+export function getEventCocktailOrderExample(formatKey = 'dispensador') {
+  const allowed = getAllowedLitrages(formatKey);
+  const small = allowed[0] || '10L';
+  const large = allowed[1] || allowed[allowed.length - 1] || small;
+  const second = formatKey === 'muro' ? 'Aperol Spritz' : 'Aperol';
+  return `${small} Mojito y ${large} ${second}`;
+}
+
+/**
+ * buildAskEventCocktails: Pregunta de cócteles con ejemplo según formato.
+ *
+ * @param {'dispensador'|'muro'|string} [formatKey='dispensador']
+ * @returns {string}
+ */
+export function buildAskEventCocktails(formatKey = 'dispensador') {
+  return `*¿Qué cócteles te gustaría incluir en tu evento?*
+_(ej: ${getEventCocktailOrderExample(formatKey)})_`;
+}
+
+/**
+ * buildEventFormatAiContext: Bloque de contexto Dispensador/Muro para prompts IA.
+ *
+ * @param {object} [session]
+ * @returns {string}
+ */
+export function buildEventFormatAiContext(session = {}) {
+  const formatKey = getEventFormatKey(session.eventoFormato);
+  const label = session.eventoFormato
+    || (formatKey === 'muro' ? 'Muro de Coctelería' : 'Dispensador Portátil');
+  const litrages = getAllowedLitrages(formatKey).join(', ');
+  const minL = getMinLitersForFormat(formatKey);
+  const install = formatKey === 'muro'
+    ? 'Instalación Muro ~$50.000 (se suma al cerrar la cotización).'
+    : 'Instalación Dispensador incluida (sin costo).';
+  return `Formato: ${label}. Litrajes válidos: ${litrages}. Mínimo ${minL}L. ${install}`;
+}
 
 /**
  * parseCelebrationType: Detecta qué celebra el cliente (matrimonio, cumpleaños, etc.).
@@ -564,9 +618,6 @@ export function asksEventCartPriceQuestion(messageText) {
   if (/\b(otro\s+valor|m[aá]s\s+caro|en\s+la\s+(lista|carta|imagen)|no\s+coincide|precio\s+diferente)\b/i.test(lower)) {
     return true;
   }
-  if (/\?/.test(trimmed) && /\b(precio|valor|cu[aá]nto|cuesta)\b/i.test(lower)) {
-    return true;
-  }
   return false;
 }
 
@@ -606,6 +657,13 @@ export function parseBareQuantityWithoutUnit(messageText) {
   const n = parseInt(numbers[0], 10);
   return n >= 1 && n <= 20 ? n : null;
 }
+
+/** Palabras de conversación: no son nombres de cóctel. */
+const FLAVOR_PARSE_STOP_TOKENS = new Set([
+  'para', 'con', 'son', 'una', 'unos', 'quiero', 'queria', 'dame', 'pon', 'agrega', 'y', 'el', 'la',
+  'de', 'un', 'unos', 'barril', 'barriles', 'litro', 'litros', 'pero', 'los', 'las', 'que', 'este',
+  'esta', 'estos', 'estas', 'manten', 'anterior', 'anteriores', 'pedido', 'tambien', 'tambien'
+]);
 
 /**
  * matchCocktailNamesInText: Nombres del catálogo presentes en el mensaje (fuzzy).
@@ -647,10 +705,7 @@ export function matchCocktailNamesInText(messageText, catalogNames) {
     }
   }
 
-  const stop = new Set([
-    'para', 'con', 'son', 'una', 'unos', 'quiero', 'dame', 'pon', 'agrega', 'y', 'el', 'la',
-    'de', 'un', 'unos', 'barril', 'barriles', 'litro', 'litros'
-  ]);
+  const stop = FLAVOR_PARSE_STOP_TOKENS;
   const tokens = norm
     .replace(/\b\d+\s*(?:l|lt|lts|litros?)\b/g, ' ')
     .split(/[\s,;/+x×]+/)
@@ -723,10 +778,7 @@ function findCatalogNameHits(messageText, catalogNames) {
   }
 
   // 2) Tokens sueltos con fuzzy (solo zonas aún libres)
-  const stop = new Set([
-    'para', 'con', 'son', 'una', 'unos', 'quiero', 'dame', 'pon', 'agrega', 'y', 'el', 'la',
-    'de', 'un', 'unos', 'barril', 'barriles', 'litro', 'litros'
-  ]);
+  const stop = FLAVOR_PARSE_STOP_TOKENS;
   const tokenRe = /[a-z0-9]{3,}/g;
   let tm;
   while ((tm = tokenRe.exec(norm)) !== null) {
@@ -1276,6 +1328,25 @@ export function formatEventLitersSummaryLine(quote, opts = {}) {
 }
 
 /**
+ * formatEventCartValuePitchLine: Contexto de valor (cócteles + promedio por copa).
+ * Va en carrito manual y sugerida para que el cliente dimensione el precio.
+ *
+ * @param {{ subtotal?: number, totalDrinks?: number, totalLiters?: number }} quote
+ * @returns {string} Vacío si no hay subtotal o cócteles estimables
+ */
+export function formatEventCartValuePitchLine(quote) {
+  const subtotal = Number(quote?.subtotal) || 0;
+  const drinks = Number(quote?.totalDrinks);
+  const approxDrinks = Number.isFinite(drinks) && drinks > 0
+    ? drinks
+    : (Number(quote?.totalLiters) || 0) * 5;
+  if (subtotal <= 0 || approxDrinks <= 0) return '';
+
+  const perGlass = Math.round(subtotal / approxDrinks);
+  return `💡 Con esta cotización son ~*${approxDrinks} cócteles* (vaso ~200 ml); en promedio, *${formatPrice(perGlass)} por copa*.`;
+}
+
+/**
  * formatEventCartTotalsLine: Subtotal; debajo resumen corto de litros/cócteles/por persona.
  * El mínimo del formato ya se dijo antes: no se repite aquí.
  *
@@ -1285,8 +1356,126 @@ export function formatEventLitersSummaryLine(quote, opts = {}) {
  */
 export function formatEventCartTotalsLine(quote, opts = {}) {
   const litersLine = formatEventLitersSummaryLine(quote, opts);
-  return `*Subtotal:* ${formatPrice(quote?.subtotal || 0)}
+  const valuePitch = formatEventCartValuePitchLine(quote);
+  const base = `*Subtotal:* ${formatPrice(quote?.subtotal || 0)}
 ${litersLine || `_${Number(quote?.totalLiters) || 0}L_`}`;
+  return valuePitch ? `${base}\n${valuePitch}` : base;
+}
+
+/**
+ * eventCartGroupedLines: Agrupa el carrito por cóctel (litros totales por sabor).
+ *
+ * @param {object} products
+ * @param {'dispensador'|'muro'|string} formatKey
+ * @returns {Array<{ name: string, totalLiters: number }>}
+ */
+function eventCartGroupedLines(products, formatKey) {
+  const lines = Object.values(products || {}).map((entry) => {
+    const unitPrice = preciosData.cocteles[entry.name]?.[formatKey]?.[entry.litrage] || 0;
+    return {
+      name: entry.name,
+      quantity: entry.quantity,
+      litrage: entry.litrage,
+      price: unitPrice,
+      lineTotal: unitPrice * (Number(entry.quantity) || 0)
+    };
+  });
+  const groups = groupCocktailLinesByName(lines);
+  const order = [];
+  const seen = new Set();
+  for (const entry of Object.values(products || {})) {
+    if (entry?.name && !seen.has(entry.name)) {
+      seen.add(entry.name);
+      order.push(entry.name);
+    }
+  }
+  return order
+    .map((name) => groups.find((g) => g.name === name))
+    .filter(Boolean);
+}
+
+/**
+ * eventCartRemoveExamplePhrase: Frase corta "quita el/la mojito" para el ejemplo.
+ *
+ * @param {string} name - Nombre del cóctel en catálogo
+ * @returns {string}
+ */
+function eventCartRemoveExamplePhrase(name) {
+  const base = String(name || '').trim().split(/\s+/)[0] || 'cóctel';
+  const lower = base.toLowerCase();
+  const article = /^sangr/i.test(base) ? 'la' : 'el';
+  return `*quita ${article} ${lower}*`;
+}
+
+/**
+ * eventCartModifyExamplePhrase: Ejemplo "10L Mojito" para ajustar litraje.
+ * Si hay tamaño mayor disponible, sugiere subir; si no, usa el litraje actual del carrito.
+ *
+ * @param {{ name: string, parts?: Array<{ size: number }> }} group
+ * @param {'dispensador'|'muro'|string} formatKey
+ * @returns {string}
+ */
+function eventCartModifyExamplePhrase(group, formatKey) {
+  const allowed = getAllowedLitrages(formatKey)
+    .map((l) => parseInt(l, 10))
+    .filter((n) => n > 0)
+    .sort((a, b) => a - b);
+  const currentSize = group?.parts?.[0]?.size || 0;
+  const upgradeSize = allowed.find((n) => n > currentSize);
+  const exampleSize = upgradeSize || currentSize || allowed[allowed.length - 1];
+  if (!exampleSize || !group?.name) return '';
+  return `"${exampleSize}L ${group.name}"`;
+}
+
+/**
+ * buildEventCartOkAsk: Pregunta *ok* con ejemplos según los sabores del carrito.
+ *
+ * @param {object} products - session.orderBuilder.products
+ * @param {'dispensador'|'muro'|string} formatKey
+ * @returns {string}
+ */
+export function buildEventCartOkAsk(products, formatKey) {
+  const groups = eventCartGroupedLines(products, formatKey);
+  if (!groups.length) {
+    return `*¿Todo bien con el pedido?*
+_(ej: escribe *ok* para el resumen)_`;
+  }
+
+  const first = groups[0];
+  const removeTarget = groups.length > 1 ? groups[groups.length - 1] : groups[0];
+  const literExample = eventCartModifyExamplePhrase(first, formatKey);
+  const removeExample = eventCartRemoveExamplePhrase(removeTarget.name);
+
+  if (literExample) {
+    return `*¿Todo bien con el pedido?*
+_(ej: *ok* para seguir, o ${literExample} / ${removeExample})_`;
+  }
+  return `*¿Todo bien con el pedido?*
+_(ej: *ok* para seguir, o ${removeExample})_`;
+}
+
+/**
+ * buildEventCartRemoveExamples: Ejemplos de qué quitar (según sabores en carrito).
+ *
+ * @param {object} products
+ * @returns {string}
+ */
+export function buildEventCartRemoveExamples(products) {
+  const names = [];
+  const seen = new Set();
+  for (const entry of Object.values(products || {})) {
+    if (entry?.name && !seen.has(entry.name)) {
+      seen.add(entry.name);
+      names.push(entry.name);
+    }
+  }
+  if (names.length >= 2) {
+    return `${eventCartRemoveExamplePhrase(names[0])} o ${eventCartRemoveExamplePhrase(names[names.length - 1])}`;
+  }
+  if (names.length === 1) {
+    return eventCartRemoveExamplePhrase(names[0]);
+  }
+  return '*quita un cóctel*';
 }
 
 /**
@@ -1305,19 +1494,16 @@ export function getEventPriceListImage(formatKey, caption = 'Aquí va la lista d
 }
 
 /**
- * buildMenuEntryReplies: Imagen de precios + pregunta de cócteles (2 burbujas).
- * La orientación de litros/invitados ya se mostró al salir de RECOGIDA_DATOS.
+ * buildMenuEntryReplies: Menú de sabores (sin imagen de precios).
+ * La carta de precios se envía solo si el cliente pregunta el valor.
  *
  * @param {object} session
  * @param {string} formatKey
  * @returns {Array<string|{ type: 'image', file: string, caption?: string }>}
  */
 export function buildMenuEntryReplies(session, formatKey) {
-  return [
-    getEventPriceListImage(formatKey),
-    // Orientación de litros ya vino tras indicar invitados; acá pedimos sabores
-    ASK_EVENT_COCKTAILS
-  ];
+  void session;
+  return [buildAskEventCocktails(formatKey)];
 }
 
 /**
@@ -1364,13 +1550,13 @@ export function buildEventQuoteFromSession(session) {
  * @returns {string}
  */
 function askEventosFlavorsAfterMiss(session = {}) {
+  const formatKey = getEventFormatKey(session.eventoFormato);
   const hasCart = session.orderBuilder?.products
     && Object.keys(session.orderBuilder.products).length > 0;
   if (hasCart) {
-    return `*¿Todo bien con el pedido?*
-_(ej: escribe *ok* para el resumen, o "20L Mojito" / *quita el aperol*)_`;
+    return buildEventCartOkAsk(session.orderBuilder.products, formatKey);
   }
-  return ASK_EVENT_COCKTAILS;
+  return buildAskEventCocktails(formatKey);
 }
 
 /**

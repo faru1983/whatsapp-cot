@@ -1,0 +1,87 @@
+---
+description: Cómo interpretar pedidos de cambio, selecciones de terminal test:local y dónde tocar código
+alwaysApply: true
+---
+
+# Flujo de trabajo para cambios (agente + usuario)
+
+## Cómo pide cambios el usuario (patrón habitual)
+
+El usuario suele:
+1. Correr `npm run test:local` y avanzar el flujo manualmente.
+2. **Seleccionar** en el terminal el texto del bot (o líneas `[TEST]`).
+3. Pedir el cambio en lenguaje natural (“cambia por…”, “debería decir…”).
+
+**El agente debe leer la selección como contexto completo**, no solo la frase resaltada.
+
+## Leer el terminal `test:local`
+
+| Línea | Significado | Acción del agente |
+|---|---|---|
+| `[TEST] paso actual: EVENTOS_ELECCION_MENU` | Estado **antes** de procesar el mensaje | Abrir `src/flows/eventos/states/EVENTOS_ELECCION_MENU.js` |
+| `Tú: sugerida` | Input del cliente | Buscar handler que matchea ese input en el estado |
+| `[TEST] paso OK (success)` | `validateAndProcess` → `success: true` | El cambio va en ese estado o helper que arma la respuesta |
+| `[TEST] paso OK (success, progreso parcial)` | `flowProgress: true` (p. ej. carrito armado, mismo estado) | Revisar `customReplies` / helpers de carrito o pack |
+| `[TEST] Estado: A → B` | Transición | Si el copy es al **entrar** a B, editar estado B; si es respuesta al input en A, editar A |
+| `Bot (1/2):` … `Bot (2/2):` | `customReplies[0]` y `customReplies[1]` | Burbuja 1 = lista/resumen; burbuja 2 = pregunta CTA |
+| `[TEST] sesión en mute` | Handoff / cierre | `CERRADO` o SOS; no confundir con copy de venta |
+
+**Sin `[TEST] paso actual`:** hacer `grep` del texto del bot en `src/` → el archivo que lo define es el punto de partida.
+
+## Mapa rápido estado → archivo
+
+Convención: `ID_DEL_ESTADO` → `src/flows/<flujo>/states/ID_DEL_ESTADO.js`
+
+| Flujo | Estados (orden happy path) |
+|---|---|
+| **Router** | `ESPERANDO_INTENCION` |
+| **Barriles** | `BARRILES_FILTRO_CANAL` → `BARRILES_INTRO_MENU` → `BARRILES_RECOGIDA_PRODUCTOS` → `BARRILES_RECOGIDA_DATOS` → `BARRILES_REVISION_COTIZACION` → `BARRILES_ROUTER_MODIFICACION` / `BARRILES_DATOS_CONTACTO` → `BARRILES_CONFIRMAR_COMPRA` → `CERRADO` |
+| **Eventos** | `EVENTOS_ELECCION_FORMATO` → `EVENTOS_RECOGIDA_DATOS` (tipo → invitados → p/p) → `EVENTOS_INTRO_MENU` → `EVENTOS_ELECCION_MENU` → `EVENTOS_DATOS_CONTACTO` → `EVENTOS_CONFIRMAR_ENVIO` → `CERRADO` |
+
+`EVENTOS_ESTILO_MENU` existe como fallback si falta `eventosDrinksPerGuest`; el happy path actual recoge p/p en RECOGIDA.
+
+## Dónde vive el copy (no todo está en el .js del estado)
+
+| Si el mensaje es… | Buscar primero en… |
+|---|---|
+| Pitch formato / p/p / intro eventos | `src/logic/eventos-intro.js` |
+| Volumen recomendado, catálogo sabores, `sugerida`, packs | `src/logic/eventos-style-pack.js` |
+| Resumen carrito, subtotal, “¿Todo bien con el pedido?” | `src/logic/eventos-helpers.js` (`formatEventCartSummary`, `buildEventCartOkAsk`) |
+| Lógica al elegir sabores / carrito / ok | `src/flows/eventos/states/EVENTOS_ELECCION_MENU.js` |
+| Contacto / confirmación envío eventos | `EVENTOS_DATOS_CONTACTO.js`, `cot-eventos-contact.js`, `views/templates.js` |
+| Barriles productos / cotización | estados `BARRILES_*` + `order-builder.js` |
+| Texto compartido 2+ flujos (admin, cotización genérica) | `src/views/templates.js` |
+| Solo prompt global | `src/views/prompts.js` (`readPrompt`) |
+
+**Regla:** un paso = un archivo de estado; si el copy se repite o es bloque grande de eventos, vive en `logic/eventos-*.js`.
+
+## Reglas vs IA (qué esperar del bot)
+
+| Capa | Cuándo | Dónde |
+|---|---|---|
+| **Reglas / parsers** | Menús, fechas, comunas, carrito, keywords, precios | `validateAndProcess`, `validators/`, `keyword-intent`, helpers |
+| **NLU (IA)** | Intención ambigua en menús sí/no; extraer productos del texto | `nlu-intent.js`, `llm.js` extractores |
+| **FAQ** | Pregunta lateral con dato pendiente (máx. 1 por dato) | `db/faq.json` + `responderFAQ` en engine |
+| **Fallback LLM** | `success: false` sin FAQ; respuesta corta contextual | `aiContextPrompt` del estado + `llm.js` |
+| **SOS / mute** | 2 strikes, humano, mirón, anti-loop | `engine.js`, `flow-stall.js` |
+
+**No** usar menú numerado + `resolveDecisionIntent` en pasos de datos libres (fecha, cócteles, contacto).
+
+## Checklist al implementar un cambio de copy/UX
+
+1. Identificar **flujo + estado** desde `[TEST] paso actual` o grep del texto.
+2. Editar **solo** el estado o helper correcto (ver tabla arriba).
+3. Si cambia texto, burbujas, assets o transiciones → actualizar `scripts/verify-flows.mjs`.
+4. Correr `npm run verify` antes de cerrar.
+5. Avisar si hace falta **reiniciar** `test:local` (sesión CLI cachea estado/copy viejo).
+
+## Filosofía de copy (Eventos — acordada en sesiones recientes)
+
+- Asesor simple: confirmar datos, un dato a la vez, sin abrumar con litros/barriles antes de tiempo.
+- Precios de carta **on-demand** en elección de sabores (no imagen al entrar; sí imagen si pregunta precios/valores, con o sin carrito/sugerida).
+- Carrito manual: “Te confirmo los cócteles seleccionados”.
+- Selección `sugerida` / `sugerencia` / recomendación / populares: mismo formato de líneas que carrito, encabezado de **sugerencia con populares**, misma pregunta “¿Todo bien con el pedido?”.
+- CTA sugerida en menú sabores: `escribe *sugerida*`.
+- Sinónimos cubiertos por keywords + NLU (`quiere_sugerencia`) en `EVENTOS_ELECCION_MENU`.
+
+**Reglas completas de implementación:** ver `eventos-implementation.mdc` (paridad formatos, helpers, precios on-demand, strikes, checklist y tests).

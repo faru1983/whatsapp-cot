@@ -10,13 +10,17 @@ import {
   partitionLitersIntoBarrels,
   formatBarrelPartsLabel,
   getCoctelesByCategoria,
-  getCoctelesNamesCatalogCompact
+  getCoctelesNamesCatalogCompact,
+  hasProductOrderSignal
 } from './utils.js';
 import {
   getMinLitersForFormat,
   getAllowedLitrages,
   ensureEventOrderBuilder,
-  EVENT_COCKTAIL_ORDER_EXAMPLE
+  getEventPriceListImage,
+  formatEventCartSummary,
+  formatEventCartTotalsLine,
+  buildEventCartOkAsk
 } from './eventos-helpers.js';
 import { OrderBuilder } from './order-builder.js';
 import { formatMenuBlock, MENU_WRITE_CTA } from './flow-rails.js';
@@ -90,6 +94,17 @@ export function litersForCocktails(cocktails) {
 }
 
 /**
+ * formatBarrelYieldLabel: Rendimiento de un barril según datos.json (tabla rendimientos_barriles).
+ *
+ * @param {number} sizeL - Tamaño del barril en litros (5, 10, 20, 30)
+ * @returns {string} Ej. "~25 cócteles"
+ */
+export function formatBarrelYieldLabel(sizeL) {
+  const drinks = cocktailsForLiters(Number(sizeL) || 0);
+  return `~${drinks} cócteles`;
+}
+
+/**
  * roundLitersToFormatStep: Sube al múltiplo del barril más chico y al mínimo del formato.
  *
  * @param {number} liters
@@ -107,8 +122,8 @@ export function roundLitersToFormatStep(liters, formatKey) {
 }
 
 /**
- * calculateEventBaseline: Cuenta clara N p/p para el pitch de venta.
- * Por defecto 2 p/p; se puede subir (ej. 3) si pide “más cantidad”.
+ * calculateEventBaseline: Litros según invitados × p/p (5 cócteles/L).
+ * Usado en el pitch de volumen, sugerida, carrito automático y cotización.
  *
  * @param {number|string|null|undefined} guests
  * @param {'dispensador'|'muro'|string} formatKey
@@ -261,8 +276,8 @@ function buildFlavorDistributionTips(totalLiters, allowedLitrages) {
 }
 
 /**
- * buildVolumeRecommendation: Pitch de vendedor — volumen + cómo repartir sabores/tamaños.
- * Tras p/p guiamos al cliente antes de mostrar precios.
+ * buildVolumeRecommendation: Tras p/p — cálculo simple + qué viene (elegir favoritos).
+ * Sin desglose de barriles ni tabla de tamaños: eso se arma cuando ya hay sabores.
  *
  * @param {object} session
  * @param {'dispensador'|'muro'|string} formatKey
@@ -271,21 +286,23 @@ function buildFlavorDistributionTips(totalLiters, allowedLitrages) {
  */
 export function buildVolumeRecommendation(session, formatKey, per) {
   const baseline = calculateEventBaseline(session?.guests, formatKey, per);
-  const allowed = getAllowedLitrages(formatKey);
-  const sizesLine = allowed
-    .map((l) => {
-      const n = parseInt(l, 10);
-      return `*${l}* (~${cocktailsForLiters(n)} cócteles)`;
-    })
-    .join(' · ');
-  const tips = buildFlavorDistributionTips(baseline.totalLiters, allowed);
+  const ack = nextEventosAck(session);
+  const type = session?.celebrationType;
 
-  return `Con *${baseline.guests}* invitados y *${per}* cócteles por persona (${baseline.mathLine}) te sugiero pedir unos *${baseline.totalLiters}L* en total.
+  let lead = `${ack}.`;
+  if (type && baseline.guests) {
+    lead = `${ack}: *${type}* con *${baseline.guests}* invitados y *${per}* cócteles por persona.`;
+  } else if (baseline.guests) {
+    lead = `${ack}: *${baseline.guests}* invitados y *${per}* cócteles por persona.`;
+  } else if (type) {
+    lead = `${ack}: *${type}* y *${per}* cócteles por persona.`;
+  }
 
-${tips}
+  return `${lead}
 
-📦 Barriles del formato: ${sizesLine}.
-Cuando veas los precios eliges los sabores y cómo repartirlos 👌`;
+Con esos datos te calculo ${baseline.mathLine} → unos *${baseline.totalLiters}L*. Ese es el volumen de tu cotización.
+
+En el siguiente paso te muestro la *lista de cócteles* y me indicas *cuáles son tus favoritos* — con este volumen lo más conveniente es *2 o 3 sabores*.`;
 }
 
 /**
@@ -324,6 +341,59 @@ export function splitLitersAcrossFlavors(totalLiters, flavorCount, allowedLitrag
     remaining -= share;
   }
   return shares;
+}
+
+/**
+ * getFlavorReferencePricePerLiter: Precio por litro en el barril más chico del formato (comparar sabores).
+ *
+ * @param {string} name - Nombre exacto del catálogo
+ * @param {'dispensador'|'muro'|string} formatKey
+ * @returns {number}
+ */
+export function getFlavorReferencePricePerLiter(name, formatKey) {
+  const allowed = getAllowedLitrages(formatKey);
+  const ref = allowed[0] || '5L';
+  const refLiters = parseInt(ref, 10) || 5;
+  const prices = preciosData.cocteles?.[name]?.[formatKey] || {};
+  const direct = prices[ref];
+  if (direct > 0) return direct / refLiters;
+
+  let best = Infinity;
+  for (const lit of allowed) {
+    const L = parseInt(lit, 10);
+    const p = prices[lit];
+    if (p > 0 && L > 0) best = Math.min(best, p / L);
+  }
+  return Number.isFinite(best) ? best : Infinity;
+}
+
+/**
+ * mapSharesToFlavorsByEconomy: Asigna litros mayores a los sabores más baratos (mismo total).
+ * Así un 10L no queda en el último de la lista si es el más premium.
+ *
+ * @param {string[]} flavorNames - Orden del pedido del cliente
+ * @param {number[]} shares - Litros a repartir (ej. [5, 5, 10])
+ * @param {'dispensador'|'muro'|string} formatKey
+ * @returns {number[]} Litros alineados a flavorNames
+ */
+export function mapSharesToFlavorsByEconomy(flavorNames, shares, formatKey) {
+  const names = Array.isArray(flavorNames) ? flavorNames : [];
+  const pool = Array.isArray(shares) ? [...shares] : [];
+  if (names.length === 0) return [];
+  if (pool.length === 0) return names.map(() => 0);
+
+  const shareSorted = [...pool].sort((a, b) => b - a);
+  const economyOrder = [...names].sort((a, b) => {
+    const priceDiff = getFlavorReferencePricePerLiter(a, formatKey) - getFlavorReferencePricePerLiter(b, formatKey);
+    if (priceDiff !== 0) return priceDiff;
+    return a.localeCompare(b, 'es');
+  });
+
+  const litersByName = new Map();
+  for (let i = 0; i < economyOrder.length; i++) {
+    litersByName.set(economyOrder[i], shareSorted[i] || 0);
+  }
+  return names.map((name) => litersByName.get(name) || 0);
 }
 
 /**
@@ -394,12 +464,13 @@ export function buildPackFromFlavorNames(flavorNames, guests, formatKey, drinksP
     .filter((n) => n && catalog[n]);
   const useNames = names.length > 0 ? names : resolveStylePackNames('CLASICOS');
   const allowed = getAllowedLitrages(formatKey);
-  const shares = splitLitersAcrossFlavors(baseline.totalLiters, useNames.length, allowed);
+  const rawShares = splitLitersAcrossFlavors(baseline.totalLiters, useNames.length, allowed);
+  const assignedLiters = mapSharesToFlavorsByEconomy(useNames, rawShares, formatKey);
 
   const flavorLiters = [];
   const products = [];
   for (let i = 0; i < useNames.length; i++) {
-    const liters = shares[i] || 0;
+    const liters = assignedLiters[i] || 0;
     if (liters <= 0) continue;
     flavorLiters.push({
       name: useNames[i],
@@ -432,6 +503,69 @@ export function messageOmitsEventLitrage(messageText) {
 }
 
 /**
+ * getMinBarrelLiters: Litros del barril más chico del formato (5 o 10).
+ *
+ * @param {'dispensador'|'muro'|string} formatKey
+ * @returns {number}
+ */
+export function getMinBarrelLiters(formatKey) {
+  const allowed = getAllowedLitrages(formatKey);
+  const step = Math.min(...allowed.map((l) => parseInt(l, 10)).filter((n) => n > 0));
+  return Number.isFinite(step) && step > 0 ? step : 5;
+}
+
+/**
+ * buildMinBarrelLinesForFlavors: Un barril chico por sabor (el total puede superar el baseline).
+ *
+ * @param {string[]} flavorNames
+ * @param {'dispensador'|'muro'|string} formatKey
+ * @returns {Array<{ name: string, quantity: number, litrage: string }>}
+ */
+export function buildMinBarrelLinesForFlavors(flavorNames, formatKey) {
+  const catalog = preciosData.cocteles || {};
+  const names = [];
+  for (const raw of flavorNames || []) {
+    const n = String(raw || '').trim();
+    if (n && catalog[n] && !names.includes(n)) names.push(n);
+  }
+  if (names.length === 0) return [];
+
+  const allowed = getAllowedLitrages(formatKey);
+  const step = getMinBarrelLiters(formatKey);
+  const products = [];
+  for (const name of names) {
+    products.push(...litersToProductLines(name, step, allowed));
+  }
+  return products;
+}
+
+/**
+ * buildProductLinesForFlavorSelection: Reparto inicial sin tamaños (carrito vacío).
+ * 4+ sabores o N×mínimo > baseline → barril chico c/u; si no, reparte baseline con economía.
+ *
+ * @param {string[]} flavorNames
+ * @param {number} baselineLiters
+ * @param {'dispensador'|'muro'|string} formatKey
+ * @returns {Array<{ name: string, quantity: number, litrage: string }>}
+ */
+export function buildProductLinesForFlavorSelection(flavorNames, baselineLiters, formatKey) {
+  const catalog = preciosData.cocteles || {};
+  const names = [];
+  for (const raw of flavorNames || []) {
+    const n = String(raw || '').trim();
+    if (n && catalog[n] && !names.includes(n)) names.push(n);
+  }
+  if (names.length === 0) return [];
+
+  const step = getMinBarrelLiters(formatKey);
+  const target = Number(baselineLiters) || 0;
+  if (names.length >= 4 || names.length * step > target) {
+    return buildMinBarrelLinesForFlavors(names, formatKey);
+  }
+  return buildProductLinesForTargetLiters(names, target, formatKey);
+}
+
+/**
  * buildProductLinesForTargetLiters: Reparte un total de litros entre sabores (barriles válidos).
  *
  * @param {string[]} flavorNames
@@ -449,10 +583,11 @@ export function buildProductLinesForTargetLiters(flavorNames, targetLiters, form
   if (names.length === 0) return [];
 
   const allowed = getAllowedLitrages(formatKey);
-  const shares = splitLitersAcrossFlavors(Number(targetLiters) || 0, names.length, allowed);
+  const rawShares = splitLitersAcrossFlavors(Number(targetLiters) || 0, names.length, allowed);
+  const assignedLiters = mapSharesToFlavorsByEconomy(names, rawShares, formatKey);
   const products = [];
   for (let i = 0; i < names.length; i++) {
-    const liters = shares[i] || 0;
+    const liters = assignedLiters[i] || 0;
     if (liters <= 0) continue;
     products.push(...litersToProductLines(names[i], liters, allowed));
   }
@@ -460,14 +595,15 @@ export function buildProductLinesForTargetLiters(flavorNames, targetLiters, form
 }
 
 /**
- * applyBaselineLitersIfNamesOnly: Si hay p/p y el mensaje no trae tamaños, reparte litros del baseline.
- * Carrito vacío / corrección: reparte el total. “Agrega …” con carrito: reparte lo que falta.
+ * applyBaselineLitersIfNamesOnly: Si hay p/p y el mensaje no trae tamaños, asigna litros.
+ * - Carrito vacío: reparte baseline (o barril chico c/u si son muchos sabores).
+ * - Carrito con ítems + sabores nuevos: solo barril chico a los nuevos (no borra lo anterior).
  *
  * @param {Array<{ name: string, quantity?: number, litrage?: string }>} extractedList
  * @param {string} messageText
  * @param {object} session
  * @param {string} formatKey
- * @param {{ cartLiters?: number, isAdd?: boolean, isCorrection?: boolean }} [opts]
+ * @param {{ cartLiters?: number, isAdd?: boolean, inCartNames?: string[], preserveCart?: boolean }} [opts]
  * @returns {Array<{ name: string, quantity: number, litrage: string }>}
  */
 export function applyBaselineLitersIfNamesOnly(extractedList, messageText, session, formatKey, opts = {}) {
@@ -486,18 +622,34 @@ export function applyBaselineLitersIfNamesOnly(extractedList, messageText, sessi
   const per = Number(session.eventosDrinksPerGuest) || EVENT_DRINKS_PER_GUEST;
   const baseline = calculateEventBaseline(session.guests, formatKey, per);
   const cartLiters = Number(opts.cartLiters) || 0;
-  const isAdd = Boolean(opts.isAdd);
+  const inCart = Array.isArray(opts.inCartNames) ? opts.inCartNames : [];
+  const preserveCart = Boolean(opts.preserveCart) || Boolean(opts.isAdd);
+  const newNames = names.filter((n) => !inCart.includes(n));
+
+  // Sumar al carrito: solo barril chico a sabores que aún no estaban
+  if (cartLiters > 0 && preserveCart && newNames.length > 0) {
+    return buildMinBarrelLinesForFlavors(newNames, formatKey);
+  }
+
+  // Carrito con ítems pero solo nombra sabores nuevos (sin “agrega” explícito)
+  if (cartLiters > 0 && newNames.length > 0 && newNames.length === names.length) {
+    return buildMinBarrelLinesForFlavors(newNames, formatKey);
+  }
+
+  // Re-lista mezclada (viejos + nuevos) sin intención de sumar → nuevo reparto total
+  if (cartLiters > 0 && !preserveCart && newNames.length > 0 && newNames.length < names.length) {
+    return buildProductLinesForFlavorSelection(names, baseline.totalLiters, formatKey);
+  }
 
   // “Agrega X” sin tamaño: completar lo que falta para el p/p (mínimo 1 barril chico)
-  if (isAdd && cartLiters > 0) {
-    const allowed = getAllowedLitrages(formatKey);
-    const step = Math.min(...allowed.map((l) => parseInt(l, 10)).filter((n) => n > 0)) || 5;
+  if (preserveCart && cartLiters > 0 && newNames.length === 0) {
+    const step = getMinBarrelLiters(formatKey);
     const remaining = Math.max(step, baseline.totalLiters - cartLiters);
     return buildProductLinesForTargetLiters(names, remaining, formatKey);
   }
 
-  // Primera elección / lista de sabores / corrección: repartir el total del p/p
-  return buildProductLinesForTargetLiters(names, baseline.totalLiters, formatKey);
+  // Primera elección o reemplazo total: reparto según cantidad de sabores
+  return buildProductLinesForFlavorSelection(names, baseline.totalLiters, formatKey);
 }
 
 /**
@@ -656,14 +808,50 @@ export function applyStylePackToSession(session, styleKey, formatKey, drinksPerG
 }
 
 /**
- * formatPackFlavorLines: Líneas “cócteles primero, litros entre paréntesis”.
+ * packFlavorLineTotal: Precio de un sabor del pack (carrito o litros → barriles).
+ *
+ * @param {{ name: string, liters: number }} flavor
+ * @param {'dispensador'|'muro'|string} formatKey
+ * @param {object} [products] - session.orderBuilder.products
+ * @returns {number}
+ */
+function packFlavorLineTotal(flavor, formatKey, products = {}) {
+  const name = flavor?.name;
+  if (!name || !formatKey) return 0;
+
+  const fromCart = Object.values(products || {}).filter((e) => e?.name === name);
+  if (fromCart.length > 0) {
+    return fromCart.reduce((sum, e) => {
+      const unit = preciosData.cocteles?.[e.name]?.[formatKey]?.[e.litrage] || 0;
+      return sum + unit * (Number(e.quantity) || 0);
+    }, 0);
+  }
+
+  const parts = partitionLitersIntoBarrels(Number(flavor.liters) || 0, getAllowedLitrages(formatKey));
+  if (!parts) return 0;
+  return parts.reduce((sum, p) => {
+    const litrage = `${p.size}L`;
+    const unit = preciosData.cocteles?.[name]?.[formatKey]?.[litrage] || 0;
+    return sum + unit * (Number(p.count) || 0);
+  }, 0);
+}
+
+/**
+ * formatPackFlavorLines: Líneas con cócteles, litros y precio por sabor.
  *
  * @param {Array<{ name: string, liters: number, cocktails: number }>} flavorLiters
+ * @param {'dispensador'|'muro'|string} [formatKey]
+ * @param {object} [products]
  * @returns {string}
  */
-export function formatPackFlavorLines(flavorLiters) {
+export function formatPackFlavorLines(flavorLiters, formatKey, products = {}) {
   return (flavorLiters || [])
-    .map((f) => `- *${f.name}* — ${f.cocktails} cócteles *(${f.liters}L)*`)
+    .map((f) => {
+      let line = `- *${f.name}* — ${f.cocktails} cócteles *(${f.liters}L)*`;
+      const total = formatKey ? packFlavorLineTotal(f, formatKey, products) : 0;
+      if (total > 0) line += `: *${formatPrice(total)}*`;
+      return line;
+    })
     .join('\n');
 }
 
@@ -708,27 +896,120 @@ _(ej: 2, 3 o más)_`;
 }
 
 /**
- * buildFlavorCatalogBlock: Lista corta de sabores por categoría (el catálogo de precios va en imagen).
+ * buildFormatSizesYieldLine: Tamaños del formato + rendimiento oficial (datos.json).
+ * Ej. 5L (~25 cócteles).
  *
+ * @param {'dispensador'|'muro'|string} [formatKey='dispensador']
  * @returns {string}
  */
-export function buildFlavorCatalogBlock() {
-  return `Te recuerdo los sabores:
+export function buildFormatSizesYieldLine(formatKey = 'dispensador') {
+  const isMuro = formatKey === 'muro';
+  const sizes = isMuro ? [10, 20, 30] : [5, 10];
+  const parts = sizes.map((size) => `*${size}L* (${formatBarrelYieldLabel(size)})`);
+  const joinerLabel = (list) => {
+    if (list.length <= 1) return list[0] || '';
+    if (list.length === 2) return `${list[0]} o ${list[1]}`;
+    return `${list.slice(0, -1).join(', ')} o ${list[list.length - 1]}`;
+  };
+  const noun = isMuro ? 'Muro' : 'Dispensador';
+  return `En el *${noun}* vienen en ${joinerLabel(parts)}.
+_(rendimiento calculado en un vaso con hielo y 200 ml de cóctel)_`;
+}
+
+/**
+ * buildFlavorCatalogBlock: Rendimiento del formato + menú de sabores (sin carta de precios).
+ *
+ * @param {'dispensador'|'muro'|string} [formatKey='dispensador']
+ * @returns {string}
+ */
+export function buildFlavorCatalogBlock(formatKey = 'dispensador') {
+  return `${buildFormatSizesYieldLine(formatKey)}
+
+Estos son los sabores:
 
 ${getCoctelesNamesCatalogCompact()}`;
 }
 
 /**
- * buildFlavorPickQuestion: Pregunta abierta de sabores (+ soft CTA sugerida).
+ * buildFlavorPickQuestion: Favoritos o selección sugerida (precios van después).
  * Sin pie HUMANO: va en burbuja propia después de la lista.
  *
  * @returns {string}
  */
 export function buildFlavorPickQuestion() {
-  return `*¿Cuáles te gustaría incluir?*
-_(ej: Mojito y Sangría — o ${EVENT_COCKTAIL_ORDER_EXAMPLE})_
+  return `*¿Cuáles son tus favoritos?*
+_(ej: Mojito y Sangría)_
 
-Si prefieres, te armo una *selección sugerida* y la ajustamos 😊`;
+Si prefieres, escribe *sugerida* y te armo una cotización con los más populares y la ajustamos 😊`;
+}
+
+/**
+ * asksEventCatalogPriceList: ¿Pide la carta / precios por sabor y litraje?
+ * En EVENTOS_ELECCION_MENU la lista de nombres NO trae precios; esto dispara la imagen.
+ * Cubre carrito vacío, favoritos manuales o propuesta sugerida (mismo paso).
+ *
+ * @param {string} messageText
+ * @returns {boolean}
+ */
+export function asksEventCatalogPriceList(messageText) {
+  const raw = String(messageText || '').trim();
+  if (!raw) return false;
+  const t = raw.toLowerCase();
+
+  if (/\b(mi\s+pedido|lo\s+que\s+llevo|subtotal|total\s+del\s+pedido)\b/i.test(t)
+      && !/\b(carta|cat[aá]logo|todos?\s+los|lista)\b/i.test(t)) {
+    return false;
+  }
+
+  if (/\b(precio|precios|valor|valores|vale[n]?|cuestan|cuesta|costo)\b/i.test(t)) return true;
+  if (/\b(carta|cat[aá]logo|lista)\s+(de\s+)?(precios?|valores?|c[oó]cteles?)?\b/i.test(t)) return true;
+  if (/\b(todos?\s+los|todos\s+los|cada)\b/i.test(t) && /\b(c[oó]cteles?|precios?|valores?)\b/i.test(t)) return true;
+  if (/\bcu[aá]nto\s+(valen|vale|cuestan|cuesta|salen|sale)\b/i.test(t)) return true;
+  if (/\bver\s+(precios?|la\s+carta|cat[aá]logo|valores?)\b/i.test(t)) return true;
+  return false;
+}
+
+/**
+ * asksEventPricesSpecifically: Alias de asksEventCatalogPriceList (compat tests/callers).
+ *
+ * @param {string} messageText
+ * @returns {boolean}
+ */
+export function asksEventPricesSpecifically(messageText) {
+  return asksEventCatalogPriceList(messageText);
+}
+
+/**
+ * buildEventPriceListAskReplies: Carta de precios on-demand + CTA según carrito.
+ * Mismo paso para favoritos manuales o sugerida: la lista de sabores no trae precios.
+ *
+ * @param {'dispensador'|'muro'|string} formatKey
+ * @param {{ session?: object }} [options]
+ * @returns {Array}
+ */
+export function buildEventPriceListAskReplies(formatKey, { session } = {}) {
+  const products = session?.orderBuilder?.products || {};
+  const hasCart = Object.keys(products).length > 0;
+
+  let followUp = `${buildFormatSizesYieldLine(formatKey)}\n\n`;
+  followUp += `Arriba va la *carta con precios* por sabor y litraje.\n\n`;
+
+  if (hasCart) {
+    const orderBuilder = new OrderBuilder(formatKey, preciosData);
+    orderBuilder.products = products;
+    const quote = orderBuilder.calculateQuote();
+    followUp += `Tu pedido actual:\n${formatEventCartSummary(products, formatKey)}\n`;
+    followUp += `${formatEventCartTotalsLine(quote, { guests: session?.guests })}\n\n`;
+    followUp += `${buildEventCartOkAsk(products, formatKey)} 🍸`;
+  } else {
+    // Solo buildFlavorPickQuestion: ya incluye favoritos + CTA sugerida (no duplicar arriba).
+    followUp += buildFlavorPickQuestion();
+  }
+
+  return [
+    getEventPriceListImage(formatKey, 'Carta con *precios* del formato 👆'),
+    followUp
+  ];
 }
 
 /**
@@ -782,7 +1063,7 @@ ${buildPerPersonAsk()}`];
 }
 
 /**
- * buildFlavorPickEntryReplies: Tras Ver Precios → lista de sabores + pregunta (sin re-confirmar p/p).
+ * buildFlavorPickEntryReplies: Menú de sabores + CTA favoritos (sin imagen de precios).
  *
  * @param {object} session
  * @param {string} formatKey
@@ -794,10 +1075,11 @@ export function buildFlavorPickEntryReplies(session, formatKey, per) {
   session.eventosFlavorMode = 'free';
   session.eventosStyleKey = null;
   session.eventosPackProposed = false;
-  void formatKey;
 
   return [
-    buildFlavorCatalogBlock(),
+    `${buildFlavorCatalogBlock(formatKey)}
+
+Los *valores y el detalle* te los armo en el siguiente paso, cuando ya tenga los sabores.`,
     buildFlavorPickQuestion()
   ];
 }
@@ -832,6 +1114,7 @@ export function parsePerPersonChoice(messageText) {
 
 /**
  * wantsSuggestedSelection: ¿Pide que le armemos la selección sugerida?
+ * Acepta sinónimos: sugerida, sugerencia, recomendación, populares, "tú eliges", etc.
  *
  * @param {string} messageText
  * @returns {boolean}
@@ -841,16 +1124,49 @@ export function wantsSuggestedSelection(messageText) {
   if (!raw) return false;
   const t = raw.toLowerCase();
 
-  if (/^(sugerid[oa]|recomienda|recomendaci[oó]n|armame|ármame)$/i.test(raw)) return true;
+  if (/^(sugerencia|sugerencias|sugerid[oa]|recomienda|recomendaci[oó]n|armame|ármame)$/i.test(raw)) return true;
   if (/\bselecci[oó]n\s+sugerida\b/.test(t)) return true;
   if (/\bpack\s+sugerido\b/.test(t)) return true;
+  if (/\bsugerencia(s)?\b/.test(t)) return true;
   if (/\bsugerid[oa]\b/.test(t)) return true;
   if (/\brecomi[eé]nd/.test(t)) return true;
+  if (/\b(una|la|tu|me)\s+(sugerencia|recomendaci[oó]n|propuesta)\b/.test(t)) return true;
+  if (/\b(dame|quiero|necesito)\s+(una\s+)?(sugerencia|recomendaci[oó]n)\b/.test(t)) return true;
   if (/\barmame\b|\bármame\b/.test(t)) return true;
-  if (/\barma(me|nos)?\s+(una|la|tu)?\s*(selecci[oó]n|propuesta|pack)?\b/.test(t)) return true;
-  if (/\bt[uú]\s+(eliges?|armas?|propones?)\b/.test(t)) return true;
+  if (/\barma(me|nos)?\s+(una|la|tu)?\s*(selecci[oó]n|propuesta|pack|cotizaci[oó]n)?\b/.test(t)) return true;
+  if (/\bt[uú]\s+(eliges?|armas?|propones?|recomiendas?)\b/.test(t)) return true;
+  if (/\b(elige|escoge|elijas|escojas)\s+t[uú]\b/.test(t)) return true;
   if (/\bcomo\s+sugieres\b/.test(t)) return true;
+  if (/\b(m[aá]s\s+)?populares\b/.test(t)) return true;
+  if (/\b(lo\s+)?m[aá]s\s+(rico|pedido|vendido)\b/.test(t)) return true;
   return false;
+}
+
+/**
+ * inferSuggestedSelectionFromNlu: Red de seguridad si las keywords no matchearon.
+ *
+ * @param {{ quiere_sugerencia?: boolean, analisis?: string }} nluResult
+ * @returns {boolean}
+ */
+export function inferSuggestedSelectionFromNlu(nluResult) {
+  if (!nluResult) return false;
+  if (nluResult.quiere_sugerencia === true) return true;
+  const analisis = String(nluResult.analisis || '').toLowerCase();
+  if (!analisis) return false;
+  return /\b(sugerencia|sugerid[oa]|recomendaci[oó]n|selecci[oó]n\s+sugerida|m[aá]s\s+populares)\b/.test(analisis)
+    || /\b(pidió|pide|quiere|solicitó)\s+(una\s+)?(sugerencia|recomendaci[oó]n)\b/.test(analisis);
+}
+
+/**
+ * resolveSuggestedSelectionIntent: Keywords + NLU (sin nombres de cóctel en el mensaje).
+ *
+ * @param {string} messageText
+ * @param {{ quiere_sugerencia?: boolean, analisis?: string }|null} [nluResult]
+ * @returns {boolean}
+ */
+export function resolveSuggestedSelectionIntent(messageText, nluResult = null) {
+  if (hasProductOrderSignal(messageText)) return false;
+  return wantsSuggestedSelection(messageText) || inferSuggestedSelectionFromNlu(nluResult);
 }
 
 /**
@@ -867,7 +1183,21 @@ export function parseFlavorModeChoice(messageText) {
 }
 
 /**
- * buildPackProposalReply: Texto del pack armado + CTA a *ok* / ajustar.
+ * buildPackProposalHeader: Encabezado del resumen según tipo de pack.
+ *
+ * @param {{ styleKey?: string }} pack
+ * @returns {string}
+ */
+function buildPackProposalHeader(pack) {
+  const styleKey = String(pack?.styleKey || '').toUpperCase();
+  if (styleKey === 'SUGERIDO') {
+    return '🍹 Te armo una *sugerencia* con los más populares:\n\n';
+  }
+  return `🍹 Te armo una propuesta *${styleKeyLabel(styleKey)}*:\n\n`;
+}
+
+/**
+ * buildPackProposalReply: Pack/sugerida con el mismo formato de líneas que el carrito normal.
  *
  * @param {object} session
  * @param {string} formatKey
@@ -878,25 +1208,20 @@ export function buildPackProposalReply(session, formatKey, pack) {
   const orderBuilder = new OrderBuilder(formatKey, preciosData);
   orderBuilder.products = session.orderBuilder?.products || {};
   const quote = orderBuilder.calculateQuote();
-  const styleLabel = styleKeyLabel(pack.styleKey);
-  const celebration = session.celebrationType ? `para tu *${session.celebrationType}*` : '';
+  const totalLiters = orderBuilder.getTotalLiters();
+  const minLiters = getMinLitersForFormat(formatKey);
 
-  let reply = `Te armé una propuesta *${styleLabel}* ${celebration} 🍸\n\n`;
-  reply += formatPackFlavorLines(pack.flavorLiters);
-  reply += `\n\n≈ *${pack.baseline.totalCocktails || cocktailsForLiters(pack.baseline.totalLiters)}* cócteles`;
-  if (pack.baseline.guests) {
-    reply += ` (~${pack.baseline.drinksPerGuest} por persona)`;
-  }
-  reply += ` · *${pack.baseline.totalLiters}L* en total`;
-  reply += `\n*Subtotal cócteles:* ${formatPrice(quote.subtotal || 0)}`;
+  let reply = buildPackProposalHeader(pack);
+  reply += formatEventCartSummary(session.orderBuilder.products, formatKey);
+  reply += `\n${formatEventCartTotalsLine(quote, { guests: session.guests })}\n`;
+
   if (formatKey === 'muro' && (quote.installation || 0) > 0) {
-    reply += `\n_Instalación Muro: ${formatPrice(quote.installation)} (se suma al cerrar)_`;
+    reply += `\n_Instalación Muro: ${formatPrice(quote.installation)} (se suma al cerrar)_\n`;
   }
 
-  const followUp = `*¿Te armo la cotización formal con esto?*
-_(escribe *ok* para seguir, o dime qué sabor cambiar / agregar)_
-
-_(si quieres más tragos: *más cantidad*)_`;
+  const followUp = totalLiters >= minLiters
+    ? `${buildEventCartOkAsk(session.orderBuilder.products, formatKey)} 🍸`
+    : `Aún faltan litros para el mínimo (*${minLiters}L*). ¿Qué más agregamos? 🍸`;
 
   return { reply, followUp, quote };
 }

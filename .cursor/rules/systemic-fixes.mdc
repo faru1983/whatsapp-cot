@@ -21,6 +21,8 @@ Al reparar un error reportado (terminal, cliente, test), **no** cerrar solo ese 
 |---|---|
 | `"en diciembre"` se guardó como comuna | Rechazar **cualquier mes** en captura freeform de ubicación; fecha antes que comuna |
 | `"5 sangria"` sumó Mojito del carrito | Interceptor no debe tratar líneas de carrito como menú; exige ≥2 opciones reales |
+| Copy con `5L` en Muro | Usar `getEventCocktail*Example(formatKey)`; nunca hardcodear litraje |
+| Precios con carrito armado | `asksEventCatalogPriceList` + imagen de carta; no solo subtotal del pedido |
 | Pie de asistente en pregunta de fecha | En `DATOS_CONTACTO`, mismo tono contextual para **todos** los datos faltantes |
 | Copy raro en un paso | Revisar re-preguntas / shortQuestion / on-miss del mismo estado y estados vecinos |
 

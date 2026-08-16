@@ -123,48 +123,23 @@ ${lines.join('\n')}`;
 }
 
 /**
- * getEventLitersSuggestion: Orientación 2 p/p (complemento) + 3 p/p (barra principal).
+ * getEventLitersSuggestion: Guía corta 2 p/p vs 3+ (sin litros ni barriles).
+ * El volumen se calcula en el paso siguiente, cuando ya hay un número.
  *
- * @param {number} guests - Cantidad de invitados
- * @param {'dispensador'|'muro'|string} formatKey - Formato (define mínimo)
+ * @param {number} [_guests] - Invitados (compat; ya no se usan para cuentas)
+ * @param {'dispensador'|'muro'|string} [formatKey='dispensador']
  * @returns {string}
  */
-export function getEventLitersSuggestion(guests, formatKey) {
-  const n = Number(guests) || 0;
-  const minLiters = formatKey === 'muro' ? 30 : 10;
-  const step = formatKey === 'muro' ? 10 : 5;
-
-  /**
-   * litersForPerPerson: Redondea litros al step del formato (y al mínimo).
-   *
-   * @param {number} per - Cócteles por persona
-   * @returns {{ cocktails: number, liters: number, mathLine: string }}
-   */
-  const litersForPerPerson = (per) => {
-    const cocktails = n > 0 ? n * per : 0;
-    const rawLiters = cocktails > 0 ? Math.ceil(cocktails / 5) : 0;
-    const liters = Math.max(minLiters, Math.ceil((rawLiters || minLiters) / step) * step);
-    const mathLine = n
-      ? `${n}×${per} = *${cocktails}* cócteles (~*${liters}L*)`
-      : `*${per}* cócteles por persona`;
-    return { cocktails, liters, mathLine };
-  };
-
-  const base = litersForPerPerson(2);
-  const party = litersForPerPerson(3);
-
-  return `Una buena referencia:
-
-🍹 *Complemento de la celebración:* *2 cócteles por persona*.
-Ejemplo: ${base.mathLine}.
-
-🎉 *Si lo quieres como barra principal:* *3 o más* por persona.
-Ejemplo: ${party.mathLine}.`;
+export function getEventLitersSuggestion(_guests, formatKey = 'dispensador') {
+  const formatNoun = formatKey === 'muro' ? 'muro' : 'dispensador';
+  return `Una guía rápida:
+• *2* por persona — el cóctel acompaña (hay barra, cerveza u otra bebida).
+• *3 o más* — el ${formatNoun} es la barra principal.`;
 }
 
 /**
- * buildDrinksPerPersonAsk: Tras invitados — referencia 2/3 p/p + rendimiento + pregunta.
- * Sin catálogo de precios (eso va al elegir Ver Precios y Cotizar).
+ * buildDrinksPerPersonAsk: Tras invitados — pide p/p como último dato para cotizar.
+ * Sin litros, tabla de rendimiento ni catálogo (eso va después).
  *
  * @param {object} session
  * @param {'dispensador'|'muro'|string} formatKey
@@ -173,19 +148,26 @@ Ejemplo: ${party.mathLine}.`;
 export function buildDrinksPerPersonAsk(session, formatKey) {
   const type = session?.celebrationType;
   const guests = session?.guests;
-  let ack = nextEventosAck(session);
-  if (type) ack += `, *${type}*`;
-  if (guests) ack += ` con *${guests}* invitados`;
-  ack += `. 🍸`;
+  const ack = nextEventosAck(session);
 
-  return `${ack}
+  // Confirmamos lo que ya tenemos, sin repetir el emoji de cóctel.
+  let lead = `${ack}.`;
+  if (type && guests) {
+    lead = `${ack}: *${type}* con *${guests}* invitados.`;
+  } else if (guests) {
+    lead = `${ack}: *${guests}* invitados.`;
+  } else if (type) {
+    lead = `${ack}: *${type}*.`;
+  }
+
+  return `${lead}
+
+Con eso ya te oriento; el último dato para armarte una cotización a medida es *cuántos cócteles por persona* quieres ofrecer.
 
 ${getEventLitersSuggestion(guests, formatKey)}
 
-${buildBarrelYieldHint(formatKey)}
-
-*¿Cuántos cócteles por persona te gustaría ofrecer?*
-_(ej: 2 como complemento, o 3 si es la barra principal)_`;
+*¿Cuántos cócteles por persona calculamos?*
+_(ej: 2, 3 o más)_`;
 }
 
 /** Acuses cordiales que rotan (evita repetir el mismo en cada paso). */
@@ -221,7 +203,7 @@ export function minOrderCocktailsForFormat(formatKey) {
 }
 
 /**
- * buildFormatDesdePitch: Instalación + “desde” en cócteles (sin repetir el nombre del formato).
+ * buildFormatDesdePitch: Instalación + “desde” en cócteles o litros (sin repetir el nombre del formato).
  * El producto ya se nombró arriba; acá solo el beneficio comercial y el ancla de precio.
  *
  * @param {'dispensador'|'muro'} formatKey
@@ -231,16 +213,18 @@ export function buildFormatDesdePitch(formatKey) {
   const isMuro = formatKey === 'muro';
   const desde = formatPrice(eventFormatFromPrice(formatKey));
   const { minLiters, cocktails } = minOrderCocktailsForFormat(formatKey);
+  // Misma fórmula en Dispensador y Muro: precio ancla = cócteles o litros del mínimo.
+  const minimo = `El servicio parte desde *${desde}* — eso equivale a *${cocktails} cócteles o ${minLiters}L* (pedido mínimo).`;
 
   if (isMuro) {
     return `La *instalación* tiene un costo de *${instalacionMuroFormatted()}*; tú eliges los cócteles y pagas por lo que pidas.
 
-El servicio parte desde *${desde}* — eso equivale a *${cocktails} cócteles* (*${minLiters}L*) de un sabor (pedido mínimo).`;
+${minimo}`;
   }
 
   return `La *instalación es gratis*: solo pagas los cócteles que elijas.
 
-El servicio parte desde *${desde}* — eso equivale a *${cocktails} cócteles* (*${minLiters}L*) de un sabor (pedido mínimo).`;
+${minimo}`;
 }
 
 /**
@@ -378,12 +362,12 @@ export function eventosIntroMenuBlock() {
 }
 
 /**
- * eventosIntroMenuQuestion: Pregunta + menú tras recomendación de litros.
+ * eventosIntroMenuQuestion: Pregunta + menú tras el cálculo de volumen.
  *
  * @returns {string}
  */
 export function eventosIntroMenuQuestion() {
-  return `*¿Cómo te gustaría seguir?*
+  return `*¿Vemos la carta y eliges tus favoritos?*
 
 ${eventosIntroMenuBlock()}`;
 }

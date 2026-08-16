@@ -1407,6 +1407,19 @@ export function hasExplicitEventAddIntent(text) {
 }
 
 /**
+ * hasEventCartPreserveIntent: Quiere sumar o aclarar sin borrar lo que ya lleva en el carrito.
+ * Ej.: "quería pisco sour", "mantén los anteriores", "me faltó el mojito".
+ *
+ * @param {string} text
+ * @returns {boolean}
+ */
+export function hasEventCartPreserveIntent(text) {
+	return /\b(quer[ií]a|falt[oó]|me\s+falt|tambi[eé]n|adem[aá]s|mant[ée]n|conserva|deja\s+(lo|los|las)|anteriores|lo\s+anterior|sin\s+quitar)\b/i.test(
+		String(text || '')
+	);
+}
+
+/**
  * parseEventElimination: Detecta rechazo de un cóctel en el carrito de eventos
  * ({ "Mojito::10L": { name, quantity, litrage } }).
  * - Match: elimina todas las líneas de ese cóctel (salvo litraje/cantidad explícitos).
@@ -2057,6 +2070,12 @@ export function findClosestCatalogMatch(name, catalogNames) {
 	const normName = cleanName(name) || normalizeString(name).replace(/[¿?¡!.,;:…'"()]+/g, '').trim();
 	const cleanedNormName = cleanName(name);
 
+	// "sour" suelto → Pisco Sour (único con sour en catálogo)
+	if (cleanedNormName === 'sour' || normName === 'sour') {
+		const sourHits = catalogNames.filter((c) => /\bsour\b/i.test(c));
+		if (sourHits.length === 1) return sourHits[0];
+	}
+
 	// Categoría suelta ("mocktails", "spritz") ≠ un ítem del catálogo
 	if (GENERIC_CATALOG_QUERY_TOKENS.has(cleanedNormName) || GENERIC_CATALOG_QUERY_TOKENS.has(normName)) {
 		return null;
@@ -2069,10 +2088,20 @@ export function findClosestCatalogMatch(name, catalogNames) {
 	});
 	if (bestMatch) return bestMatch;
 
-	// 2) Substring / palabra clave principal
+	// 2) Palabra clave: "aperol" → Aperol Spritz, "margarita" → Tequila Margarita.
+	// NO substring dentro de otra palabra ("pero" ≠ Aperol).
 	bestMatch = catalogNames.find((c) => {
+		if (!cleanedNormName) return false;
 		const cleanedC = cleanName(c);
-		return cleanedNormName && (cleanedC.includes(cleanedNormName) || cleanedNormName.includes(cleanedC));
+		const cWords = cleanedC.split(/\s+/).filter(Boolean);
+		const nWords = cleanedNormName.split(/\s+/).filter(Boolean);
+		if (nWords.length === 1) {
+			const t = nWords[0];
+			return cWords.some((w) => w === t
+				|| (t.length >= 4 && w.startsWith(t))
+				|| (w.length >= 4 && t.startsWith(w)));
+		}
+		return cleanedC.includes(cleanedNormName) || cleanedNormName.includes(cleanedC);
 	});
 	if (bestMatch) return bestMatch;
 
@@ -2092,8 +2121,10 @@ export function findClosestCatalogMatch(name, catalogNames) {
 
 		for (const candidate of candidates) {
 			const dist = getLevenshteinDistance(target, candidate);
-			// Más tolerancia en tokens cortos/medios (typos típicos de WhatsApp)
-			const threshold = Math.max(2, Math.floor(candidate.length * 0.35));
+			// Palabras cortas: "pero" vs "aperol" dist=2 no debe colar
+			const threshold = target.length <= 4
+				? 1
+				: Math.max(2, Math.floor(candidate.length * 0.35));
 			if (dist <= threshold && dist < minDistance) {
 				minDistance = dist;
 				closest = catalogName;

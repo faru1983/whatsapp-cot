@@ -272,6 +272,10 @@ export function looksLikeUnrecognizedFlavorAttempt(messageText) {
   }
 
   // Preferencia genérica sin nombrar un trago concreto → lo maneja el gate “Excelente elección”
+  // o la selección sugerida en Eventos (no es un sabor inventado)
+  if (/\b(sugerencia|sugerencias|sugerid[oa]|recomendaci[oó]n|selecci[oó]n\s+sugerida|m[aá]s\s+populares)\b/i.test(cleaned)) {
+    return false;
+  }
   if (/\b(algo|sabores?|carta|cat[aá]logo|opciones|refrescante|dulce|c[ií]trico|amargo|cl[aá]sico|raro)\b/i.test(cleaned)
       && !/\b(tiene(?:n|s)?|hay|vende(?:n)?)\b/i.test(cleaned)) {
     return false;

@@ -1,11 +1,11 @@
 // ==============================================================================
-// OBJETIVO: Paso EVENTOS_INTRO_MENU — tras p/p, recomendación + Ver Precios / duda.
-// 1️⃣ envía catálogo de precios y pasa a sabores. 2️⃣ duda → SOS + mute.
+// OBJETIVO: Paso EVENTOS_INTRO_MENU — tras p/p, cálculo de volumen + Ver Precios / duda.
+// 1️⃣ pide favoritos (sin carta de precios). 2️⃣ duda → SOS + mute.
 // ==============================================================================
 import { defineState } from '../../../logic/compile-state.js';
 import { resolveDecisionIntent } from '../../../logic/decision-intent.js';
 import { rulesMenuUnoDos } from '../../../logic/keyword-intent.js';
-import { getEventFormatKey, getEventPriceListImage, tryApplyEventosIntroPriorCorrection } from '../../../logic/eventos-helpers.js';
+import { getEventFormatKey, tryApplyEventosIntroPriorCorrection } from '../../../logic/eventos-helpers.js';
 import { buildAdminSosBody } from '../../../views/templates.js';
 import { withAssistantFooter } from '../../../logic/flow-rails.js';
 import {
@@ -20,14 +20,13 @@ const MENU_Q = eventosIntroMenuQuestion();
 const SHORT_Q = withAssistantFooter(MENU_Q);
 
 const AI_PROMPT = `[SISTEMA - ESTADO: INTRO MENÚ DE EVENTO]
-El cliente ya eligió Dispensador o Muro y nos dio tipo de evento e invitados.
-Debe elegir UNA opción:
-1️⃣ Ver Precios y Cotizar — o 2️⃣ Tengo una duda.
-1. Si no eligió opción clara, pide el *número* de la opción.
-2. Si corrige invitados o tipo, confirma el cambio, actualiza la recomendación de litros y vuelve a mostrar el menú 1️⃣/2️⃣.
-3. Responde dudas breves sobre el formato (instalación, qué incluye) sin inventar precios de cócteles.
-4. NUNCA armes el pedido ni cotices totales todavía. El catálogo de precios se envía al elegir 1️⃣.
-5. Al final, recuérdale el menú 1️⃣ / 2️⃣.`;
+El cliente ya eligió formato (Dispensador o Muro), tipo, invitados y cócteles por persona.
+Usa el CONTEXTO DE FORMATO inyectado: litrajes, mínimo (10L Dispensador / 30L Muro) e instalación.
+Menú: 1️⃣ Ver Precios y Cotizar → lista de sabores (sin precios) | 2️⃣ Tengo una duda → equipo humano.
+1. Si no eligió opción clara, pide el número 1️⃣ o 2️⃣.
+2. Si corrige invitados/tipo, confirma, actualiza litros y vuelve al menú.
+3. Dudas breves de formato (instalación, qué incluye) sin inventar precios de cócteles.
+4. NUNCA armes pedido ni cotices totales aquí.`;
 
 /**
  * shortQuestionForSession: Re-pregunta según fase (menú o espera de duda).
@@ -128,27 +127,22 @@ export const EVENTOS_INTRO_MENU = defineState({
       };
     }
 
-    // 1️⃣ Ver Precios y Cotizar → catálogo de precios + sabores (p/p ya está)
+    // 1️⃣ Cotizar → menú de sabores (sin imagen de precios; esa va si pregunta precios)
     if (intent === 'COTIZAR') {
       const formatKey = getEventFormatKey(session.eventoFormato);
       const per = Number(session.eventosDrinksPerGuest) || 0;
-      const catalogImg = getEventPriceListImage(
-        formatKey,
-        'Para tu referencia te dejo el *catálogo de cócteles* 👆'
-      );
       if (per >= 1) {
-        const flavorReplies = buildFlavorPickEntryReplies(session, formatKey, per);
         return {
           success: true,
           nextState: 'EVENTOS_ELECCION_MENU',
-          customReplies: [catalogImg, ...flavorReplies],
+          customReplies: buildFlavorPickEntryReplies(session, formatKey, per),
           flowProgress: true
         };
       }
       return {
         success: true,
         nextState: 'EVENTOS_ESTILO_MENU',
-        customReplies: [catalogImg, ...buildStyleEntryReplies(session, formatKey)],
+        customReplies: buildStyleEntryReplies(session, formatKey),
         flowProgress: true
       };
     }

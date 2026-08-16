@@ -16,7 +16,8 @@ import {
 } from '../../../logic/cot-eventos-contact.js';
 import {
   formatEventCartSummary,
-  getEventFormatKey
+  getEventFormatKey,
+  getEventCocktailOrderExample
 } from '../../../logic/eventos-helpers.js';
 import {
   applyCliApiModeChoice,
@@ -33,12 +34,12 @@ Escribe *OK* para crearla y enviarte la copia formal, o dime qué quieres *modif
 _(ej: email ana@nuevo.com)_`);
 
 const AI_PROMPT = `[SISTEMA - ESTADO: CONFIRMAR COTIZACIÓN FORMAL EVENTOS]
-El cliente ya dio fecha, comuna, nombre y correo. Ve el resumen completo (pedido + totales).
-Debe escribir *OK* / *1* Confirmar, o corregir el dato (ej. "email ana@nuevo.com").
-1. Responde dudas breves sin inventar precios distintos al resumen.
-2. Si corrige un dato, confirma el cambio y vuelve a mostrar el resumen.
-3. NUNCA crees la cotización web hasta que confirme (ok / opción 1).
-4. Si quiere cambiar cócteles, indícale que puede escribirlo o escribir *corregir*.`;
+Cliente ve resumen completo (pedido + totales + contacto). CONTEXTO DE FORMATO: Dispensador/Muro, instalación.
+Debe escribir *OK* / *1* Confirmar, o corregir (ej. "email ana@nuevo.com").
+1. No inventes precios distintos al resumen mostrado.
+2. Si corrige un dato, confirma y vuelve a mostrar resumen.
+3. NUNCA crees la cotización web hasta confirmación explícita.
+4. Para cambiar cócteles: *corregir* o nombrar el ajuste.`;
 
 export const EVENTOS_CONFIRMAR_ENVIO = defineState({
   id: 'EVENTOS_CONFIRMAR_ENVIO',
@@ -66,13 +67,14 @@ export const EVENTOS_CONFIRMAR_ENVIO = defineState({
     if (wantsToChangeEventosOrder(messageText)) {
       const formatKey = getEventFormatKey(session.eventoFormato);
       const cart = formatEventCartSummary(session.orderBuilder?.products || {}, formatKey);
+      const example = getEventCocktailOrderExample(formatKey);
       return {
         success: true,
         nextState: 'EVENTOS_ELECCION_MENU',
         customReply:
           `Claro, ajustemos el menú. Actualmente tienes:\n\n${cart || '_(vacío)_'}\n\n` +
           `*¿Qué deseas cambiar?*
-_(ej: 20L Mojito y 10L Aperol / quita el aperol / agrega 5L Sangría)_`
+_(ej: ${example} / quita un sabor / agrega otro)_`
       };
     }
 

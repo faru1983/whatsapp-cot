@@ -99,6 +99,14 @@ function cliLog(message) {
 }
 
 /**
+ * REMOVED_STATE_ALIASES: Estados eliminados del mapa → paso actual equivalente.
+ * Si una sesión SQLite quedó en un id viejo, la migramos antes de procesar el mensaje.
+ */
+const REMOVED_STATE_ALIASES = {
+  EVENTOS_COTIZACION: 'EVENTOS_ELECCION_MENU'
+};
+
+/**
  * normalizeForQuestionMatch: Deja el texto comparable (minúsculas, sin acentos ni markdown).
  * Sirve para detectar si el LLM ya escribió la pregunta del paso.
  *
@@ -400,6 +408,13 @@ async function processMessageUnlocked(sessionId, messageText, options = {}) {
   // Inicialización de la sesión si es cliente nuevo
   if (!session.currentState) {
     session.currentState = 'ESPERANDO_INTENCION';
+  }
+
+  // Sesión vieja en un estado ya eliminado → redirigir al paso equivalente
+  const removedAlias = REMOVED_STATE_ALIASES[session.currentState];
+  if (removedAlias) {
+    cliLog(`estado removido ${session.currentState} → ${removedAlias}`);
+    session.currentState = removedAlias;
   }
 
   const currentStateId = session.currentState;

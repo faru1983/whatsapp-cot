@@ -571,7 +571,7 @@ export function buildEventosContactIntro(session) {
   }
   return `Perfecto 🥂
 
-Para armar tu *cotización formal* y enviarte una *copia al correo*, te pediré unos datos *uno por uno*.
+Para armar tu *cotización formal* y enviarte una *copia al correo*, te pediré unos datos.
 
 ${askEventosContactPhase(phase, session)}`;
 }

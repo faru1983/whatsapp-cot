@@ -16,6 +16,7 @@ import {
   isBareEventEliminationRequest,
   hasEventEliminationIntent,
   hasExplicitEventAddIntent,
+  hasEventCartPreserveIntent,
   detectFlavorListRequest,
   asksCocktailFlavorList,
   asksAvailableCocktailsList,
@@ -28,7 +29,6 @@ import {
 import {
   wantsAdvanceProductsOrder,
   isOnlyAdvanceProductsOrder,
-  asksPriceOrCatalog,
   isGreetingOrNoise
 } from '../../../logic/interruptions.js';
 import { extractEventProductsWithAI } from '../../../core/llm.js';
@@ -45,14 +45,16 @@ import {
   ensureEventOrderBuilder,
   formatEventCartSummary,
   formatEventCartTotalsLine,
-  getEventPriceListImage,
-  asksEventCartPriceQuestion,
+  buildEventCartOkAsk,
+  buildEventCartRemoveExamples,
+  getEventCocktailSingleExample,
+  getEventCocktailOrderExample,
+  buildAskEventCocktails,
   parseLitrageOnlyMessage,
   parseCocktailNamesWithoutLitrage,
   parseEventProductsProgrammatic,
   parseBareQuantityWithoutUnit,
   validateEventProductLines,
-  ASK_EVENT_COCKTAILS,
   asksDeliveryOrDispatchQuestion,
   REPLY_DISPATCH_SIDEBAR_EVENTOS,
   stripDeliveryQuestionForCart,
@@ -70,6 +72,7 @@ import {
   wantsMoreEventQuantity,
   wantsSelfBuildEventMenu,
   wantsSuggestedSelection,
+  resolveSuggestedSelectionIntent,
   applyBaselineLitersIfNamesOnly,
   messageOmitsEventLitrage,
   EVENT_DRINKS_PER_GUEST_PARTY,
@@ -79,21 +82,20 @@ import {
   buildMocktailsInfoReply,
   detectSideStyleFromText,
   buildFlavorPickQuestion,
-  buildFlavorCatalogBlock
+  buildFlavorCatalogBlock,
+  asksEventCatalogPriceList,
+  buildEventPriceListAskReplies
 } from '../../../logic/eventos-style-pack.js';
 import { nextEventosAck } from '../../../logic/eventos-intro.js';
 
-const ASK_COCKTAILS = ASK_EVENT_COCKTAILS;
-const ASK_OK_AFTER_CART = `*¿Todo bien con el pedido?*
-_(ej: escribe *ok* para el resumen, o "20L Mojito" / *quita el aperol*)_`;
+const AI_PROMPT = `[SISTEMA - ESTADO: ELECCIÓN DE SABORES (EVENTOS)]
+Un solo paso: el cliente elige cócteles (favoritos manuales, *sugerida*, o ajustando un pedido ya armado).
+La lista de sabores NO incluye precios. Usa el CONTEXTO DE FORMATO inyectado (Dispensador/Muro, litrajes, mínimo, instalación).
 
-const AI_PROMPT = `[SISTEMA - ESTADO: PREGUNTAS SOBRE EL MENÚ O LOGÍSTICA DE EVENTOS]
-El cliente está armando el pedido de cócteles (Dispensador o Muro).
-1. Responde su duda de forma breve y amigable.
-2. REGLA DE LOGÍSTICA: La instalación y logística de eventos la coordina el equipo, y para el Dispensador es gratis, y para el Muro cuesta $50.000. NUNCA inventes tarifas de envío adicionales.
-3. NUNCA cotices ni calcules precios finales todavía.
-4. Si corrige invitados o tipo (ej. "son 80 invitados") sin pedir cócteles, confirma el cambio y vuelve a pedir sabor + litraje o *ok*.
-5. Si aún no eligió cócteles: pide sabor + litraje. Solo si ya tiene pedido, sugiere escribir *ok* para el resumen.`;
+1. Dudas breves (logística, rendimiento, mocktails). Precios/valores de carta → imagen de precios del formato (no inventes cifras).
+2. Con pedido armado: ajustar sabores o *ok* para cotización formal.
+3. Corrige invitados/tipo sin cócteles → confirma y vuelve a pedir sabores o *sugerida*.
+4. Dispensador: instalación gratis. Muro: instalación ~$50.000. No inventes envíos extra.`;
 
 /**
  * eventCartLineCount: Cuántas líneas de cóctel hay en el carrito Eventos.
@@ -130,10 +132,11 @@ function shortQuestionForSession(session) {
   const hasCart = session.orderBuilder?.products
     && Object.keys(session.orderBuilder.products).length > 0;
   if (hasCart) {
-    return withAssistantFooter(ASK_OK_AFTER_CART);
+    const formatKey = getEventFormatKey(session.eventoFormato);
+    return withAssistantFooter(buildEventCartOkAsk(session.orderBuilder.products, formatKey));
   }
   // Sin carrito: misma pregunta abierta (sin re-listar todo el catálogo)
-  return withAssistantFooter(ASK_COCKTAILS);
+  return withAssistantFooter(buildFlavorPickQuestion());
 }
 
 /**
@@ -146,13 +149,17 @@ function shortQuestionForSession(session) {
  */
 function askWhatToRemoveReply(session, formatKey) {
   const cart = formatEventCartSummary(session.orderBuilder.products, formatKey) || '_Vacío_\n';
+  const removeExamples = buildEventCartRemoveExamples(session.orderBuilder.products);
+  const okAsk = buildEventCartOkAsk(session.orderBuilder.products, formatKey);
+  const literMatch = okAsk.match(/"(\d+L [^"]+)"/);
+  const literHint = literMatch ? literMatch[1] : 'cambia los litros de un sabor';
   return `Claro 😊
 
 ${cart}
 *¿Qué quieres quitar de tu pedido?*
-_(ej: quita el aperol o quita el mojito)_
+_(ej: ${removeExamples})_
 
-_(si quieres cambiar cantidad: 20L Mojito y 10L Aperol)_`;
+_(si quieres cambiar cantidad: ${literHint})_`;
 }
 
 /**
@@ -181,7 +188,7 @@ function namesAlreadyInCart(products) {
 function applyProductsToCart(session, products, opts = {}) {
   const forceReplace = Boolean(opts.forceReplace);
   const messageText = opts.messageText || '';
-  const explicitAdd = hasExplicitEventAddIntent(messageText);
+  const explicitAdd = Boolean(opts.explicitAdd) || hasExplicitEventAddIntent(messageText);
   const inCart = namesAlreadyInCart(session.orderBuilder.products);
 
   // Por cada cóctel del mensaje: si ya estaba y no dijo "agrega", borramos sus líneas
@@ -244,15 +251,34 @@ function buildCartReply({ session, formatKey, minLiters, header, invalidLitrages
 
   // Burbuja 2: confirmar *ok* o pedir más litros si falta el mínimo
   const followUp = totalLiters >= minLiters
-    ? `${ASK_OK_AFTER_CART} 🍸`
+    ? `${buildEventCartOkAsk(session.orderBuilder.products, formatKey)} 🍸`
     : `Aún faltan litros para el mínimo (*${minLiters}L*). ¿Qué más agregamos? 🍸`;
 
   return { reply, followUp, totalLiters };
 }
 
+/**
+ * buildSuggestedSelectionTurn: Arma la cotización sugerida (pack populares).
+ *
+ * @param {object} session
+ * @param {string} formatKey
+ * @param {number} linesBefore - Líneas de carrito antes (CRM)
+ * @returns {object} Resultado para validateAndProcess
+ */
+function buildSuggestedSelectionTurn(session, formatKey, linesBefore) {
+  const pack = applySuggestedSelectionToSession(session, formatKey);
+  const { reply, followUp } = buildPackProposalReply(session, formatKey, pack);
+  return withFirstCocktailCrmEngage(linesBefore, session, {
+    success: true,
+    nextState: 'EVENTOS_ELECCION_MENU',
+    customReplies: [reply, followUp],
+    flowProgress: true
+  });
+}
+
 export const EVENTOS_ELECCION_MENU = defineState({
   id: 'EVENTOS_ELECCION_MENU',
-  promptQuestion: () => ASK_COCKTAILS,
+  promptQuestion: () => buildFlavorPickQuestion(),
   shortQuestion: shortQuestionForSession,
   aiPrompt: AI_PROMPT,
 
@@ -271,18 +297,10 @@ export const EVENTOS_ELECCION_MENU = defineState({
     // Selección sugerida (opcional) o pack propuesto: más cantidad / atajos
     // ------------------------------------------------------------------
     if (
-      wantsSuggestedSelection(messageText)
-      && !hasProductOrderSignal(messageText)
+      resolveSuggestedSelectionIntent(messageText)
       && eventCartLineCount(session) === 0
     ) {
-      const pack = applySuggestedSelectionToSession(session, formatKey);
-      const { reply, followUp } = buildPackProposalReply(session, formatKey, pack);
-      return withFirstCocktailCrmEngage(linesBefore, session, {
-        success: true,
-        nextState: 'EVENTOS_ELECCION_MENU',
-        customReplies: [reply, withAssistantFooter(followUp)],
-        flowProgress: true
-      });
+      return buildSuggestedSelectionTurn(session, formatKey, linesBefore);
     }
 
     if (session.eventosPackProposed && wantsMoreEventQuantity(messageText) && session.eventosStyleKey) {
@@ -300,7 +318,7 @@ export const EVENTOS_ELECCION_MENU = defineState({
         nextState: 'EVENTOS_ELECCION_MENU',
         customReplies: [
           `${nextEventosAck(session)}, lo subimos a ~*${EVENT_DRINKS_PER_GUEST_PARTY} por persona* (más fiesta) 🎉\n\n${reply}`,
-          withAssistantFooter(followUp)
+          followUp
         ],
         flowProgress: true
       });
@@ -311,7 +329,7 @@ export const EVENTOS_ELECCION_MENU = defineState({
         success: true,
         nextState: 'EVENTOS_ELECCION_MENU',
         customReplies: [
-          buildFlavorCatalogBlock(),
+          buildFlavorCatalogBlock(formatKey),
           buildFlavorPickQuestion()
         ],
         flowProgress: true
@@ -334,7 +352,7 @@ export const EVENTOS_ELECCION_MENU = defineState({
       return withFirstCocktailCrmEngage(linesBefore, session, {
         success: true,
         nextState: 'EVENTOS_ELECCION_MENU',
-        customReplies: [reply, withAssistantFooter(followUp)],
+        customReplies: [reply, followUp],
         flowProgress: true
       });
     }
@@ -428,7 +446,6 @@ _(ej: ${allowedLitrages[0]} — disponibles: ${allowedLitrages.join(', ')})_`
 
     const cartEmpty = Object.keys(session.orderBuilder.products).length === 0;
     const cartHasItems = !cartEmpty;
-    const wantsPriceList = /precio|precios|cu[aá]nto|cuanto|valor|cat[aá]logo|lista|menu|men[uú]/i.test(messageText);
 
     // "sin alcohol" / "mocktail" (con o sin sabor en el mismo mensaje, ej. "mojito sin
     // alcohol") → sugerimos el Mocktail de ese sabor o de lo que ya tiene en el carrito;
@@ -449,23 +466,12 @@ _(ej: ${allowedLitrages[0]} — disponibles: ${allowedLitrages.join(', ')})_`
       }
     }
 
-    // Duda de precio con carrito (no re-parsear cócteles ni error de litraje)
-    if (cartHasItems && (asksEventCartPriceQuestion(messageText)
-        || (asksPriceOrCatalog(messageText) && !hasDrinkSelection(messageText)))) {
-      const orderBuilder = new OrderBuilder(formatKey, preciosData);
-      orderBuilder.products = session.orderBuilder.products;
-      const quote = orderBuilder.calculateQuote();
+    // Catálogo de precios on-demand (mismo paso: favoritos, sugerida o carrito ya armado)
+    if (asksEventCatalogPriceList(messageText) && !hasDrinkSelection(messageText)) {
       return {
         success: true,
         nextState: 'EVENTOS_ELECCION_MENU',
-        customReply: `Los precios de la carta son por *cóctel y litraje* en ${session.eventoFormato} (*${allowedLitrages.join(', ')}*).
-
-Tu pedido actual:
-${formatEventCartSummary(session.orderBuilder.products, formatKey)}
-
-${formatEventCartTotalsLine(quote, { guests: session.guests })}
-
-Si en la imagen viste otro valor, suele ser otro tamaño de barril o formato. ¿Quieres cambiar algo o seguimos con *ok*? 🍸`
+        customReplies: buildEventPriceListAskReplies(formatKey, { session })
       };
     }
 
@@ -508,18 +514,6 @@ _(ej: Mojito ${allowedLitrages[0]})_`
       }
     }
 
-    // Pide lista/precios sin nombrar cócteles → imagen de la carta del formato actual
-    if (wantsPriceList && !hasDrinkSelection(messageText)) {
-      return {
-        success: true,
-        nextState: 'EVENTOS_ELECCION_MENU',
-        customReplies: [
-          getEventPriceListImage(formatKey),
-          ASK_COCKTAILS
-        ]
-      };
-    }
-
     // Rama: eliminar productos ("quita el aperol") — NUNCA caer al flujo de agregar
     if (cartHasItems && isBareEventEliminationRequest(messageText)) {
       return {
@@ -540,7 +534,7 @@ _(ej: Mojito ${allowedLitrages[0]})_`
 Tu pedido actual:
 ${cart}
 *¿Qué quieres quitar o agregar?*
-_(ej: quita el mojito o 5L Aperol)_`
+_(ej: quita el mojito o ${getEventCocktailSingleExample(formatKey)})_`
       };
     }
 
@@ -571,7 +565,7 @@ _(ej: quita el mojito o 5L Aperol)_`
       reply += formatEventCartSummary(session.orderBuilder.products, formatKey) || '_Vacío_\n';
       reply += `\n${formatEventCartTotalsLine(quote, { guests: session.guests })}\n\n`;
       if (Object.keys(session.orderBuilder.products).length === 0) {
-        reply += ASK_COCKTAILS;
+        reply += buildFlavorPickQuestion();
       } else if (totalLiters >= minLiters) {
         reply += `*¿Quieres eliminar otro o agregar más?*
 _(ej: escribe *ok* si está listo)_ 🍸`;
@@ -579,7 +573,7 @@ _(ej: escribe *ok* si está listo)_ 🍸`;
         reply += `Aún faltan litros para el mínimo (*${minLiters}L*).
 
 *¿Qué más agregamos?*
-_(ej: 5L Mojito)_ 🍸`;
+_(ej: ${getEventCocktailSingleExample(formatKey)})_ 🍸`;
       }
       return { success: true, nextState: 'EVENTOS_ELECCION_MENU', customReply: reply };
     }
@@ -610,7 +604,7 @@ _(ej: 5L Mojito)_ 🍸`;
         nextState: 'EVENTOS_ELECCION_MENU',
         customReplies: [
           getCoctelesNamesCatalog(),
-          ASK_COCKTAILS
+          buildFlavorPickQuestion()
         ]
       };
     }
@@ -624,8 +618,7 @@ _(ej: 5L Mojito)_ 🍸`;
           nextState: 'EVENTOS_ELECCION_MENU',
           customReply: `Aún no hay cócteles en el pedido 😊
 
-*¿Qué cócteles te gustaría incluir?*
-_(ej: 5L de mojito)_
+${buildAskEventCocktails(formatKey)}
 
 _(o escribe *lista* para ver precios)_`
         };
@@ -641,7 +634,7 @@ _(o escribe *lista* para ver precios)_`
 
 ${formatEventCartSummary(session.orderBuilder.products, formatKey)}
 *¿Qué cóctel o litraje agregamos para llegar al mínimo?*
-_(ej: 5L Mojito)_ 🍸`
+_(ej: ${getEventCocktailSingleExample(formatKey)})_ 🍸`
         };
       }
       session.eventosContactPhase = null;
@@ -669,6 +662,31 @@ _(ej: 5L Mojito)_ 🍸`
     let dudas = [];
     let quiere_avanzar = false;
 
+    const cartHasItemsEarly = eventCartLineCount(session) > 0;
+    const preserveCartEarly = hasExplicitEventAddIntent(messageText) || hasEventCartPreserveIntent(messageText);
+    if (
+      preserveCartEarly
+      && cartHasItemsEarly
+      && messageOmitsEventLitrage(messageText)
+      && parseCocktailNamesWithoutLitrage(messageText, catalogNames).length === 0
+    ) {
+      const { reply, followUp } = buildCartReply({
+        session,
+        formatKey,
+        minLiters,
+        header: 'Perfecto, mantengo tu pedido tal como está 😊'
+      });
+      return withFirstCocktailCrmEngage(linesBefore, session, {
+        success: true,
+        nextState: 'EVENTOS_ELECCION_MENU',
+        customReplies: [
+          `${reply}\n\n¿Qué sabor quieres *sumar* a lo anterior?`,
+          followUp
+        ],
+        flowProgress: true
+      });
+    }
+
     // Multi-intent: pedido + despacho → parseamos/NLU sin la pregunta
     const hasDispatchQ = asksDeliveryOrDispatchQuestion(messageText);
     const extractText = hasDispatchQ ? stripDeliveryQuestionForCart(messageText) : messageText;
@@ -694,6 +712,12 @@ _(ej: 5L Mojito)_ 🍸`
       return { success: false };
     } else {
       const result = await extractEventProductsWithAI(extractText || messageText, catalogNames, formatKey, lastBotMessage);
+      if (
+        eventCartLineCount(session) === 0
+        && resolveSuggestedSelectionIntent(extractText || messageText, result)
+      ) {
+        return buildSuggestedSelectionTurn(session, formatKey, linesBefore);
+      }
       extractedList = result.productos;
       dudas = result.dudas;
       quiere_avanzar = result.quiere_avanzar;
@@ -713,8 +737,7 @@ _(ej: 5L Mojito)_ 🍸`
         nextState: 'EVENTOS_ELECCION_MENU',
         customReply: `Aún no hay cócteles en el pedido 😊
 
-*¿Qué cócteles te gustaría incluir?*
-_(ej: 5L de mojito)_
+${buildAskEventCocktails(formatKey)}
 
 _(o escribe *lista* para ver precios)_`
       };
@@ -727,7 +750,7 @@ _(o escribe *lista* para ver precios)_`
 
 ${formatEventCartSummary(session.orderBuilder.products, formatKey)}
 *¿Qué cóctel o litraje agregamos para llegar al mínimo?*
-_(ej: 5L Mojito)_ 🍸`;
+_(ej: ${getEventCocktailSingleExample(formatKey)})_ 🍸`;
         return { success: true, nextState: 'EVENTOS_ELECCION_MENU', customReply: reply };
       }
       session.eventosContactPhase = null;
@@ -760,13 +783,14 @@ _(ej: 5L Mojito)_ 🍸`;
       extractedList = extractedList.filter(p => !todasLasOpcionesDudosas.includes(p.name));
     }
 
-    // Si ya fijó cócteles p/p y solo nombró sabores (sin 5L/10L), repartimos el total
+    // Si ya fijó cócteles p/p y solo nombró sabores (sin 5L/10L), repartimos litros
     const cartLitersBeforeExtract = (() => {
       const b = new OrderBuilder(formatKey, preciosData);
       b.products = session.orderBuilder.products;
       return b.getTotalLiters();
     })();
-    const isAddIntent = hasExplicitEventAddIntent(messageText);
+    const inCartNames = [...namesAlreadyInCart(session.orderBuilder.products)];
+    const preserveCart = hasExplicitEventAddIntent(messageText) || hasEventCartPreserveIntent(messageText);
     if (
       extractedList.length > 0
       && session.eventosDrinksPerGuest
@@ -777,11 +801,13 @@ _(ej: 5L Mojito)_ 🍸`;
         extractText || messageText,
         session,
         formatKey,
-        { cartLiters: cartLitersBeforeExtract, isAdd: isAddIntent }
+        { cartLiters: cartLitersBeforeExtract, isAdd: preserveCart, inCartNames, preserveCart }
       );
       if (scaled.length > 0) {
-        // Lista sin tamaños = pedido completo (no sumar encima de un carrito viejo)
-        if (!isAddIntent && cartLitersBeforeExtract > 0) {
+        const isFullReselect = !preserveCart && cartLitersBeforeExtract > 0
+          && scaled.some((p) => inCartNames.includes(p.name));
+        // Vaciar solo en corrección o re-lista completa (no al sumar sabores nuevos)
+        if ((isEventMenuCorrection(messageText) || isFullReselect) && cartLitersBeforeExtract > 0) {
           session.orderBuilder.products = {};
         }
         extractedList = scaled;
@@ -793,7 +819,13 @@ _(ej: 5L Mojito)_ 🍸`;
     );
 
     const isCorrection = isEventMenuCorrection(messageText);
-    const cartOpts = { forceReplace: isCorrection, messageText };
+    const allNewFlavors = parsedProducts.length > 0
+      && parsedProducts.every((p) => !inCartNames.includes(p.name));
+    const cartOpts = {
+      forceReplace: isCorrection,
+      messageText,
+      explicitAdd: preserveCart || (cartLitersBeforeExtract > 0 && allNewFlavors)
+    };
 
     if (dudas?.length > 0) {
       // Listar opciones: no aplicar productos parciales en una pregunta de sabores
@@ -825,7 +857,7 @@ _(ej: 5L Mojito)_ 🍸`;
       session.pendingEventCocktails = null;
       const inCartBefore = namesAlreadyInCart(session.orderBuilder.products);
       const replacing = isCorrection || (
-        !hasExplicitEventAddIntent(messageText)
+        !preserveCart && !allNewFlavors
         && parsedProducts.some((p) => inCartBefore.has(p.name))
       );
       applyProductsToCart(session, parsedProducts, cartOpts);
@@ -890,10 +922,9 @@ ${formatMenuBlock([
 
       session.pendingEventCocktails = pending;
 
-      let reply = `Para *${session.eventoFormato}* los barriles son: *${allowedLitrages.join(', ')}*`;
-      if (formatKey === 'muro') reply += ` (no hay 5L)`;
-      reply += `.\n\nAnoté: *${pending.join('*, *')}*.`;
-      reply += `\n¿Con qué litraje los quieres? Puedes decir *10L* para todos, o por ejemplo: _"5L Mojito y 10L Aperol"_`;
+      let reply = `Para *${session.eventoFormato}* los barriles son: *${allowedLitrages.join(', ')}*.\n\n`;
+      reply += `Anoté: *${pending.join('*, *')}*.`;
+      reply += `\n¿Con qué litraje los quieres? Puedes decir *${allowedLitrages[0]}* para todos, o por ejemplo: _"${getEventCocktailOrderExample(formatKey)}"_`;
       return { success: true, nextState: 'EVENTOS_ELECCION_MENU', customReply: reply };
     }
 

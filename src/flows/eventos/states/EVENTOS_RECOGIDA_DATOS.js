@@ -58,7 +58,7 @@ _(ej: 50 o unas 80)_`;
 
 const AI_PROMPT = `[SISTEMA - ESTADO: DATOS DEL EVENTO (formato ya elegido)]
 Eres el asistente virtual de Cocktails on Tap. El cliente YA eligió Dispensador o Muro.
-Orden: (A) tipo de evento, (B) invitados, (C) cócteles por persona + rendimiento de barriles.
+Orden: (A) tipo de evento, (B) invitados, (C) cócteles por persona (guía 2 vs 3+, sin litros).
 Si el cliente NO tiene evento y solo quiere precios/info a futuro → invitar a la web (Cotizar), no insistir con datos.
 0. NO digas "hola" ni te presentes como asistente virtual.
 1. Responde dudas breves y amigables.
@@ -67,7 +67,7 @@ Si el cliente NO tiene evento y solo quiere precios/info a futuro → invitar a 
 4. RENDIMIENTO / VASOS: responde SOLO según el formato elegido. Dispensador: 5L≈25 y 10L≈50 cócteles (vaso 200ml). Muro: 10L≈50, 20L≈100, 30L≈150. PROHIBIDO hablar de Barriles Desechables.
 5. NUNCA cotices ni calcules precios finales todavía. NO envíes el catálogo de precios hasta que elija Ver Precios y Cotizar.
 6. Puedes mencionar www.cocktailsontap.cl/eventos si pregunta precios; no lo presentes como menú obligatorio.
-7. Si faltan invitados, pídelos. Si ya hay invitados y faltan cócteles p/p, pregunta p/p y muestra el rendimiento.
+7. Si faltan invitados, pídelos. Si ya hay invitados y faltan cócteles p/p, pide el número (2 complemento / 3+ barra). NO listes litros ni rendimiento de barriles en ese paso.
 8. Al final, re-pregunta solo el dato pendiente (tipo, invitados o cócteles por persona).`;
 
 /**
@@ -177,7 +177,7 @@ function goInfoOnlyWeb() {
 }
 
 /**
- * goIntroMenu: Tras p/p → recomendación de litros + menú Ver Precios / duda.
+ * goIntroMenu: Tras p/p → cálculo de volumen + menú Ver Precios / duda.
  * El catálogo de precios se envía recién cuando elige cotizar.
  *
  * @param {object} session
@@ -196,7 +196,7 @@ function goIntroMenu(session) {
 }
 
 /**
- * askDrinksPhase: Tras invitados → rendimiento + pregunta de cócteles p/p (sin imagen de precios).
+ * askDrinksPhase: Tras invitados → guía 2/3 p/p + pregunta (sin litros ni imagen de precios).
  *
  * @param {object} session
  * @returns {object}

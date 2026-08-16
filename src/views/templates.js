@@ -22,6 +22,9 @@ import { quoteCatalogShipping, quoteBarrilesDirectShipping, enrichLocationFromCa
 // 1. DESPEDIDAS Y ACLARACIONES COMPARTIDAS
 // ==============================================================================
 
+/** Etiqueta de logística en cotizaciones Eventos (alineado al wizard web). */
+export const EVENT_SHIPPING_LINE_LABEL = 'Traslados';
+
 export { HANDOFF_CLIENT_REPLY, ASSISTANT_FOOTER, withAssistantFooter } from '../logic/flow-rails.js';
 
 /**
@@ -228,23 +231,23 @@ export function getEventQuotationTemplate(sessionData, quote, deliveryCost, isRM
     text += `  Instalación Dispensador: ${formatPrice(0)}\n`;
   }
 
-  // Logística: con comuna RM → precio; sin comuna o fuera de RM → pendiente (no inventamos)
+  // Traslados: con comuna RM → precio; sin comuna o fuera de RM → pendiente (no inventamos)
   if (deliveryCost != null) {
-    text += `  Despacho/Logística (${location}): ${formatPrice(deliveryCost)}\n`;
+    text += `  ${EVENT_SHIPPING_LINE_LABEL} (${location}): ${formatPrice(deliveryCost)}\n`;
     text += `  -----------------------\n`;
     text += `  *TOTAL: ${formatPrice(quote.total)}*\n`;
   } else if (!location) {
-    text += `  Despacho/Logística: *Pendiente* (falta comuna)\n`;
+    text += `  ${EVENT_SHIPPING_LINE_LABEL}: *Pendiente* (falta comuna)\n`;
     text += `  -----------------------\n`;
     text += `  *TOTAL: ${formatPrice(quote.subtotal + (quote.installation || 0))}*\n`;
-    text += `  _+ logística por confirmar al agendar_\n`;
+    text += `  _+ traslados por confirmar al agendar_\n`;
   } else if (isRM === false) {
-    text += `  Despacho/Logística: Por confirmar (fuera de RM)\n`;
+    text += `  ${EVENT_SHIPPING_LINE_LABEL}: Por confirmar (fuera de RM)\n`;
     text += `  -----------------------\n`;
     text += `  *TOTAL: ${formatPrice(quote.subtotal + (quote.installation || 0))}*\n`;
-    text += `  + Costo Envío/Logística (Por Confirmar)\n`;
+    text += `  + ${EVENT_SHIPPING_LINE_LABEL} (por confirmar)\n`;
   } else {
-    text += `  Despacho/Logística: Por confirmar\n`;
+    text += `  ${EVENT_SHIPPING_LINE_LABEL}: Por confirmar\n`;
     text += `  -----------------------\n`;
     text += `  *TOTAL: ${formatPrice(quote.subtotal + (quote.installation || 0))}*\n`;
   }
@@ -413,7 +416,7 @@ export function getEventFormatPitch(formatKey) {
 ⏰ Instalamos horas antes del evento y retiramos como máximo al día siguiente.`;
 }
 
-/** Re-export: vive en eventos-intro (junto al ask p/p + rendimiento). */
+/** Re-export: vive en eventos-intro (guía corta 2 vs 3+ p/p). */
 export { getEventLitersSuggestion } from '../logic/eventos-intro.js';
 
 /**
@@ -451,7 +454,7 @@ _(ej: son 80 invitados / es en Providencia)_`
 export function getEventosContactIntroAsk() {
   return `Perfecto 🥂
 
-Para armar tu *cotización formal* y enviarte una *copia al correo*, te pediré unos datos *uno por uno*.
+Para armar tu *cotización formal* y enviarte una *copia al correo*, te pediré unos datos.
 
 *¿Me confirmas la fecha del evento?*
 _(ej: 15 de mayo o 15/05/2026)_`;
@@ -553,16 +556,16 @@ export function getEventosQuoteSummary(session) {
   }
 
   if (deliveryCost != null) {
-    text += `Despacho/Logística (${session.location}): ${formatPrice(deliveryCost)}\n`;
+    text += `${EVENT_SHIPPING_LINE_LABEL} (${session.location}): ${formatPrice(deliveryCost)}\n`;
     text += `====================\n`;
     text += `*TOTAL: ${formatPrice(quote.total)}*`;
   } else if (isRM === false) {
-    text += `Despacho/Logística: _por confirmar_ (fuera de RM)\n`;
+    text += `${EVENT_SHIPPING_LINE_LABEL}: _por confirmar_ (fuera de RM)\n`;
     text += `====================\n`;
     text += `*TOTAL: ${formatPrice(quote.subtotal + (quote.installation || 0))}*\n`;
-    text += `_(+ logística por confirmar)_`;
+    text += `_(+ traslados por confirmar)_`;
   } else {
-    text += `Despacho/Logística: _por confirmar al agendar_\n`;
+    text += `${EVENT_SHIPPING_LINE_LABEL}: _por confirmar al agendar_\n`;
     text += `====================\n`;
     text += `*TOTAL: ${formatPrice(quote.subtotal + (quote.installation || 0))}*`;
   }

@@ -9,7 +9,7 @@ import { CERRADO } from './cerrado.js';
 // ==============================================================================
 
 /**
- * statesMap: Diccionario de estados disponibles (19 claves).
+ * statesMap: Diccionario de estados disponibles (18 claves).
  */
 export const statesMap = {
   ESPERANDO_INTENCION,

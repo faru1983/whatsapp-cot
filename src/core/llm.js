@@ -217,7 +217,7 @@ ${catalogNames.join('\n')}`;
  * @param {Array<string>} catalogNames - Nombres válidos del catálogo
  * @param {string} formatType - 'dispensador' | 'muro' (define litrajes válidos)
  * @param {string} lastBotMessage - Último mensaje del bot (contexto)
- * @returns {Promise<{productos: Array<{name: string, quantity: number, litrage: string}>, dudas: Array, quiere_avanzar: boolean}>}
+ * @returns {Promise<{productos: Array<{name: string, quantity: number, litrage: string}>, dudas: Array, quiere_avanzar: boolean, quiere_sugerencia: boolean, analisis: string}>}
  */
 export async function extractEventProductsWithAI(userMessage, catalogNames, formatType = 'dispensador', lastBotMessage = "") {
   const env = getEnv();
@@ -242,7 +242,7 @@ Formato del evento: "${formatType}".
 Litrajes VÁLIDOS para este formato: ${allowedLitrages.join(', ')}.
 Litrage por defecto si el cliente NO indica tamaño: ${defaultLitrage}.
 
-El formato debe ser un objeto JSON con 4 llaves: "analisis", "productos", "dudas" y "quiere_avanzar".
+El formato debe ser un objeto JSON con 5 llaves: "analisis", "productos", "dudas", "quiere_avanzar" y "quiere_sugerencia".
 1. "analisis": Breve razonamiento de lo que pidió el usuario.
 2. "productos": Array de objetos con "name", "quantity" y "litrage".
    - "name": nombre EXACTO del catálogo.
@@ -250,6 +250,7 @@ El formato debe ser un objeto JSON con 4 llaves: "analisis", "productos", "dudas
    - "litrage": tamaño del barril como string ("5L", "10L", "20L" o "30L").
 3. "dudas": Array de objetos con "mencionado" y "opciones" (nombres exactos del catálogo) si hay ambigüedad o solicitud de sabores.
 4. "quiere_avanzar": true SOLO si el usuario indica que NO quiere más, que está listo, o escribe "no" / "solo estos" / "listo" / "seguimos".
+5. "quiere_sugerencia": true si pide una selección/cotización sugerida o recomendada (ej. "sugerencia", "sugerida", "los más populares", "tú eliges", "recomiéndame") SIN nombrar cócteles concretos del catálogo. En ese caso productos=[] y dudas=[].
 
 REGLAS CRÍTICAS DE EXTRACCIÓN Y SINTAXIS:
 - DUDAS Y SABORES DE MOJITO: Si el usuario menciona "mojito sabores", "mojitos de sabores", "mojito de sabor" o pide ver/elegir sabores de mojito, DEBES generar un objeto en "dudas" con:
@@ -267,7 +268,8 @@ Ejemplo 1: {"analisis":"Pidió 1 mojito de 10L.","productos":[{"name":"Mojito","
 Ejemplo 2: {"analisis":"Pidió mojito sabores (ambigüedad de sabores).","productos":[],"dudas":[{"mencionado":"mojito sabores","opciones":["Mojito Maracuyá","Mojito Frambuesa","Mojito Mango"]}],"quiere_avanzar":false}
 Ejemplo 3: {"analisis":"Pidió 2 10L mojito y pisco sour clásico 10L.","productos":[{"name":"Mojito","quantity":2,"litrage":"10L"},{"name":"Pisco Sour","quantity":1,"litrage":"10L"}],"dudas":[],"quiere_avanzar":false}
 Ejemplo 4: {"analisis":"Pidió pisco sour clásico 10L y solicitó mojito sabores 10L.","productos":[{"name":"Pisco Sour","quantity":1,"litrage":"10L"}],"dudas":[{"mencionado":"mojito sabores 10L","opciones":["Mojito Maracuyá","Mojito Frambuesa","Mojito Mango"]}],"quiere_avanzar":false}
-Ejemplo 5: {"analisis":"Dijo que solo esos.","productos":[],"dudas":[],"quiere_avanzar":true}
+Ejemplo 5: {"analisis":"Dijo que solo esos.","productos":[],"dudas":[],"quiere_avanzar":true,"quiere_sugerencia":false}
+Ejemplo 6: {"analisis":"Pidió una sugerencia con los más populares.","productos":[],"dudas":[],"quiere_avanzar":false,"quiere_sugerencia":true}
 
 REGLA CRÍTICA DE ORTOGRAFÍA / NOMBRES INCOMPLETOS:
 - Corrige typos y nombres cortos al ítem MÁS CERCANO del catálogo cuando haya un único match claro.
@@ -332,11 +334,13 @@ ${catalogNames.join('\n')}`;
     return {
       productos,
       dudas: (parsed && Array.isArray(parsed.dudas)) ? parsed.dudas : [],
-      quiere_avanzar: (parsed && typeof parsed.quiere_avanzar === 'boolean') ? parsed.quiere_avanzar : false
+      quiere_avanzar: (parsed && typeof parsed.quiere_avanzar === 'boolean') ? parsed.quiere_avanzar : false,
+      quiere_sugerencia: (parsed && typeof parsed.quiere_sugerencia === 'boolean') ? parsed.quiere_sugerencia : false,
+      analisis: (parsed && typeof parsed.analisis === 'string') ? parsed.analisis : ''
     };
   } catch (err) {
     console.error(`[bot] Error en NLU Eventos (extractEventProductsWithAI):`, err.message);
-    return { productos: [], dudas: [], quiere_avanzar: false };
+    return { productos: [], dudas: [], quiere_avanzar: false, quiere_sugerencia: false, analisis: '' };
   }
 }
 

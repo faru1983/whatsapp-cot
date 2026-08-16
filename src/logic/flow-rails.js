@@ -2,6 +2,12 @@
 // OBJETIVO: Contrato de rieles conversacionales (copy on-miss, handoff, FAQ budget).
 // El engine y los estados usan estos helpers para guiar al cliente sin improvisar.
 // ==============================================================================
+import {
+  getEventFormatKey,
+  getEventCocktailOrderExample,
+  getEventCocktailSingleExample,
+  buildEventCartOkAsk
+} from './eventos-helpers.js';
 
 /**
  * HANDOFF_CLIENT_REPLY: Mensaje al cliente cuando el bot pasa a un humano por anti-loop.
@@ -194,8 +200,7 @@ _(ej: 2 mojitos — o escribe *lista*)_`,
 _(ej: 2, 3 o más)_`,
     flavor_mode: 'Escribe los cócteles que quieres o pide una *selección sugerida*.',
     doubt: 'Escríbeme tu duda y te conectamos con el equipo.',
-    cart: `*¿Qué cócteles te gustaría incluir?*
-_(ej: 5L Mojito — o elige un estilo si aún no tienes pack)_`,
+    // El hint 'cart' se resuelve abajo con ejemplo según formato (no 5L fijo en Muro)
     confirm_quote: '¿Te parece bien? Escribe *1* *Confirmar* o *2* *Modificar*.',
     contact: `*¿Me compartes tu nombre y correo?*
 _(ej: Ana Pérez, ana@email.com)_`,
@@ -256,6 +261,25 @@ _(ej: escribe *OK* para continuar, o "elimina el aperol, agrega 1 sangría")_`;
   // Eventos estilo: el shortQuestion ya trae el menú de la fase
   if (stateId === 'EVENTOS_ESTILO_MENU') {
     return null;
+  }
+
+  // Eventos elección menú: ejemplos según Dispensador/Muro y si ya hay carrito
+  if (stateId === 'EVENTOS_ELECCION_MENU') {
+    const formatKey = getEventFormatKey(session?.eventoFormato);
+    const hasCart = session?.orderBuilder?.products
+      && Object.keys(session.orderBuilder.products).length > 0;
+    if (hasCart) {
+      return buildEventCartOkAsk(session.orderBuilder.products, formatKey);
+    }
+    return `*¿Qué cócteles te gustaría incluir?*
+_(ej: ${getEventCocktailOrderExample(formatKey)} — o escribe *sugerida*)_`;
+  }
+
+  // Hint genérico "cart": el ejemplo de litraje debe seguir el formato (no 5L fijo en Muro)
+  if (key === 'cart') {
+    const formatKey = getEventFormatKey(session?.eventoFormato);
+    return `*¿Qué cócteles te gustaría incluir?*
+_(ej: ${getEventCocktailSingleExample(formatKey)} — o elige un estilo si aún no tienes pack)_`;
   }
 
   if (key && hints[key]) return hints[key];
