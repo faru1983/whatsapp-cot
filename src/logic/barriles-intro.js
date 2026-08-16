@@ -14,7 +14,8 @@ import {
   hasDrinkSelection,
   wantsNonAlcoholicOption,
   getCoctelesByCategoria,
-  asksAvailableCocktailsList
+  asksAvailableCocktailsList,
+  detectNamedCatalogCategory
 } from './utils.js';
 import { findMentionedCocktail, asksPriceOrCatalog, isGreetingOrNoise } from './interruptions.js';
 import { formatMenuBlock } from './flow-rails.js';
@@ -276,6 +277,7 @@ export function looksLikeUnrecognizedFlavorAttempt(messageText) {
   if (/\b(sugerencia|sugerencias|sugerid[oa]|recomendaci[oó]n|selecci[oó]n\s+sugerida|m[aá]s\s+populares)\b/i.test(cleaned)) {
     return false;
   }
+  if (detectNamedCatalogCategory(trimmed)) return false;
   if (/\b(algo|sabores?|carta|cat[aá]logo|opciones|refrescante|dulce|c[ií]trico|amargo|cl[aá]sico|raro)\b/i.test(cleaned)
       && !/\b(tiene(?:n|s)?|hay|vende(?:n)?)\b/i.test(cleaned)) {
     return false;

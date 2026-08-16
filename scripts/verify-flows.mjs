@@ -344,6 +344,8 @@ assert(findLocationByFuzzyMatch('no') == null, `"no" sigue sin ser comuna`);
   assert(parseCocktailNamesWithoutLitrage('pero manten los anteriores', catalogNames).length === 0, 'conservar pedido no parsea sabores');
   assert(findClosestCatalogMatch('mocktails', catalogNames) == null, 'mocktails (categoría) ≠ un cóctel concreto');
   assert(findClosestCatalogMatch('mocktail', catalogNames) == null, 'mocktail (categoría) ≠ un cóctel concreto');
+  assert(findClosestCatalogMatch('Clásicos', catalogNames) == null, 'Clásicos (categoría) ≠ un cóctel concreto');
+  assert(findClosestCatalogMatch('combinados', catalogNames) == null, 'combinados (categoría) ≠ un cóctel concreto');
   const progRam = parseBarrilesProductsProgrammatic('ramazzoti', catalogNames);
   assert(progRam.some((p) => p.name === 'Ramazzotti Spritz'), 'programático reconoce ramazzoti');
 }
@@ -514,7 +516,8 @@ const {
   partitionLitersIntoBarrels,
   fixEventLitrageShorthand,
   asksAvailableCocktailsList,
-  getCoctelesNamesCatalog
+  getCoctelesNamesCatalog,
+  detectNamedCatalogCategory
 } = await import('../src/logic/utils.js');
 const catalogNames = Object.keys(datosPrecios.cocteles || {});
 
@@ -613,8 +616,14 @@ assert(
 
   assert(asksEventCombinadosInfo('tienen combinados?'), 'detecta pregunta combinados');
   assert(detectSideStyleFromText('tienen combinados?') === null, 'pregunta info NO arma pack');
-  assert(detectSideStyleFromText('combinados') === 'COMBINADOS', '“combinados” solo → pack');
-  assert(detectSideStyleFromText('sin alcohol') === 'MOCKTAILS', '“sin alcohol” → pack mocktails');
+  assert(detectSideStyleFromText('combinados') === null, '“combinados” solo ≠ pack (es categoría)');
+  assert(detectSideStyleFromText('sin alcohol') === null, '“sin alcohol” solo ≠ pack (es categoría)');
+  assert(detectSideStyleFromText('armame combinados') === 'COMBINADOS', 'armame combinados → pack');
+  assert(detectNamedCatalogCategory('Clásicos') === 'CLÁSICOS', 'detecta categoría Clásicos');
+  assert(detectNamedCatalogCategory('los clasicos') === 'CLÁSICOS', 'detecta los clásicos');
+  assert(detectNamedCatalogCategory('combinados') === 'COMBINADOS', 'detecta categoría Combinados');
+  assert(detectNamedCatalogCategory('sin alcohol') === 'MOCKTAILS', 'detecta categoría Mocktails');
+  assert(detectNamedCatalogCategory('armame combinados') === null, 'armame pack no es categoría suelta');
 
   const {
     parsePerPersonChoice,
@@ -625,6 +634,7 @@ assert(
     buildFlavorPickQuestion,
     buildFlavorCatalogBlock,
     buildFlavorPickEntryReplies,
+    buildCategoryFlavorAsk,
     asksEventPricesSpecifically,
     asksEventCatalogPriceList,
     buildEventPriceListAskReplies
@@ -640,9 +650,19 @@ assert(
   assert(parsePerPersonChoice('2')?.per === 2, '"2" → 2 p/p');
   assert(parsePerPersonChoice('3')?.per === 3, '"3" → 3 p/p');
   assert(parsePerPersonChoice('1')?.per === 1, '"1" → 1 p/p');
+  assert(parsePerPersonChoice('2 cóctel')?.per === 2, '"2 cóctel" → 2 p/p');
+  assert(parsePerPersonChoice('2 cóctel por persona')?.per === 2, '"2 cóctel por persona" → 2 p/p');
+  assert(parsePerPersonChoice('2 cóctel por persona 🙅‍♂️')?.per === 2, '"2 cóctel por persona" + emoji → 2 p/p');
+  assert(parsePerPersonChoice('dos')?.per === 2, '"dos" → 2 p/p');
+  assert(parsePerPersonChoice('dos cócteles')?.per === 2, '"dos cócteles" → 2 p/p');
+  assert(parsePerPersonChoice('tres por persona')?.per === 3, '"tres por persona" → 3 p/p');
+  assert(parsePerPersonChoice('tengo cervezas yo')?.per === 2, '"tengo cervezas" → complemento 2 p/p');
+  assert(parsePerPersonChoice('hay cerveza')?.per === 2, '"hay cerveza" → 2 p/p');
   assert(parsePerPersonChoice('complemento')?.per === 2, 'texto complemento → 2 p/p');
   assert(parsePerPersonChoice('barra principal')?.per === 3, 'texto barra principal → 3 p/p');
   assert(parsePerPersonChoice('4 por persona')?.per === 4, '4 por persona → 4');
+  assert(parsePerPersonChoice('50') == null, '"50" invitados ≠ p/p');
+  assert(parsePerPersonChoice('50 invitados y 2 por persona')?.per === 2, 'invitados + 2 p/p en el mismo texto');
   assert(/\*\¿.+\?\*\n_\(ej: /s.test(buildPerPersonAsk()), 'ask p/p: *pregunta?* + _(ej:)_');
   assert(/2, 3 o m[aá]s/.test(buildPerPersonAsk()), 'ask p/p abierto a 2, 3 o más');
   assert(buildFlavorCatalogBlock().includes('CLÁSICOS'), 'bloque catálogo lista categorías');
@@ -655,6 +675,14 @@ assert(
   assert(!buildFlavorCatalogBlock().includes('catálogo con precios'), 'bloque no mete precios en el menú de nombres');
   assert(buildFlavorPickQuestion().includes('*sugerida*'), 'ask menciona escribir sugerida');
   assert(/favoritos/.test(buildFlavorPickQuestion()), 'ask pide favoritos');
+  assert(/nombres/.test(buildFlavorPickQuestion()), 'ask pide nombres no categoría');
+  assert(/por \*nombre\*/.test(buildFlavorCatalogBlock()), 'catálogo aclara elegir por nombre');
+  {
+    const catAsk = buildCategoryFlavorAsk('CLÁSICOS', 'dispensador');
+    assert(/CLÁSICOS/.test(catAsk) && /por nombre/i.test(catAsk), 'categoría Clásicos pide nombres');
+    assert(/Mojito/.test(catAsk) && /Sangr/.test(catAsk), 'categoría Clásicos da ejemplos de esa carta');
+    assert(!/\*Subtotal:\*/.test(catAsk), 'categoría no arma cotización');
+  }
   assert(/m[aá]s populares/.test(buildFlavorPickQuestion()), 'ask ofrece los más populares');
   assert(!buildFlavorPickQuestion().includes('CLÁSICOS'), 'pregunta no re-lista catálogo');
   assert(buildFlavorPickAsk() === buildFlavorPickQuestion(), 'ask corto = pregunta');
@@ -1812,6 +1840,8 @@ try {
     // Bug reportado: "sin alcohol" NO debe tratarse como sabor inventado (categoría
     // Mocktails real). Cubrimos el patrón general, no solo el string del reporte.
     assert(!looksLikeUnrecognizedFlavorAttempt('Sin alcohol'), '"sin alcohol" ≠ sabor inexistente (hay categoría Mocktails)');
+    assert(!looksLikeUnrecognizedFlavorAttempt('Clásicos'), '"Clásicos" ≠ sabor inexistente (es categoría)');
+    assert(!looksLikeUnrecognizedFlavorAttempt('combinados'), '"combinados" ≠ sabor inexistente (es categoría)');
     assert(!looksLikeUnrecognizedFlavorAttempt('no alcohólico'), '"no alcohólico" ≠ sabor inexistente');
     assert(!looksLikeUnrecognizedFlavorAttempt('cero alcohol'), '"cero alcohol" ≠ sabor inexistente');
     assert(!looksLikeUnrecognizedFlavorAttempt('mocktail'), '"mocktail" ≠ sabor inexistente');
@@ -2324,7 +2354,7 @@ try {
     }
   ]);
 
-  await runCase('Eventos estilo: p/p → combinados info + pack sin alcohol', [
+  await runCase('Eventos estilo: p/p → combinados info + categoría sin alcohol', [
     { input: 'evento', expectState: 'EVENTOS_ELECCION_FORMATO' },
     { input: '1', expectState: 'EVENTOS_RECOGIDA_DATOS' },
     { input: 'matrimonio', expectState: 'EVENTOS_RECOGIDA_DATOS' },
@@ -2334,13 +2364,33 @@ try {
     {
       input: 'tienen combinados?',
       expectState: 'EVENTOS_ELECCION_MENU',
-      expectIncludes: ['Combinados', 'Piscola', 'combinados'],
+      expectIncludes: ['Combinados', 'Piscola'],
       expectNotIncludes: ['Subtotal cócteles']
     },
     {
       input: 'sin alcohol',
       expectState: 'EVENTOS_ELECCION_MENU',
-      expectIncludes: ['Mocktail', 'Todo bien con el pedido', 'ok']
+      expectIncludes: ['MOCKTAILS', 'por nombre'],
+      expectNotIncludes: ['Subtotal']
+    }
+  ]);
+
+  await runCase('Eventos: 2 cóctel + Clásicos pide nombres (no arma Pisco Sour)', [
+    { input: 'evento', expectState: 'EVENTOS_ELECCION_FORMATO' },
+    { input: '1', expectState: 'EVENTOS_RECOGIDA_DATOS' },
+    { input: 'cumpleaños', expectState: 'EVENTOS_RECOGIDA_DATOS' },
+    { input: '30 invitados', expectState: 'EVENTOS_RECOGIDA_DATOS' },
+    {
+      input: '2 cóctel',
+      expectState: 'EVENTOS_INTRO_MENU',
+      expectIncludes: ['15L', '60']
+    },
+    { input: '1', expectState: 'EVENTOS_ELECCION_MENU' },
+    {
+      input: 'Clásicos',
+      expectState: 'EVENTOS_ELECCION_MENU',
+      expectIncludes: ['CLÁSICOS', 'por nombre', 'Mojito'],
+      expectNotIncludes: ['Subtotal', 'Pisco Sour']
     }
   ]);
 

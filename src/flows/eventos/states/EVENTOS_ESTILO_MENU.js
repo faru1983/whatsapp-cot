@@ -14,7 +14,7 @@ import {
   buildFlavorPickQuestion,
   buildFlavorCatalogBlock,
   buildFlavorPickEntryReplies,
-  parsePerPersonChoice,
+  resolveDrinksPerPersonChoice,
   getEventosEstiloPhase,
   calculateEventBaseline
 } from '../../../logic/eventos-style-pack.js';
@@ -109,7 +109,7 @@ ${buildFlavorCatalogBlock(formatKey)}`,
     // ------------------------------------------------------------------
     // Cócteles por persona (pregunta abierta) → ELECCION_MENU
     // ------------------------------------------------------------------
-    const choice = parsePerPersonChoice(messageText);
+    const choice = await resolveDrinksPerPersonChoice(messageText, session);
     if (choice?.per) {
       return {
         success: true,

@@ -7,6 +7,7 @@
 export {
   classifyStepIntent,
   extractCelebrationTypeWithAI,
+  extractDrinksPerPersonWithAI,
   classifyEventosInfoOnlyWithAI,
   extractEventLogisticsWithAI
 } from '../core/llm.js';

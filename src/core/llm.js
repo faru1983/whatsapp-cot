@@ -252,6 +252,10 @@ El formato debe ser un objeto JSON con 5 llaves: "analisis", "productos", "dudas
 4. "quiere_avanzar": true SOLO si el usuario indica que NO quiere más, que está listo, o escribe "no" / "solo estos" / "listo" / "seguimos".
 5. "quiere_sugerencia": true si pide una selección/cotización sugerida o recomendada (ej. "sugerencia", "sugerida", "los más populares", "tú eliges", "recomiéndame") SIN nombrar cócteles concretos del catálogo. En ese caso productos=[] y dudas=[].
 
+REGLA CRÍTICA DE CATEGORÍAS (NO son un cóctel):
+- Si el usuario dice solo "clásicos", "combinados", "mocktails" o "sin alcohol" SIN nombrar un sabor concreto del catálogo, productos=[] y dudas=[].
+- PROHIBIDO mapear "clásicos" / "clásico" suelto a "Pisco Sour" ni a ningún ítem. Eso es el título de una sección de la carta, no un pedido.
+
 REGLAS CRÍTICAS DE EXTRACCIÓN Y SINTAXIS:
 - DUDAS Y SABORES DE MOJITO: Si el usuario menciona "mojito sabores", "mojitos de sabores", "mojito de sabor" o pide ver/elegir sabores de mojito, DEBES generar un objeto en "dudas" con:
   {"mencionado": "mojito sabores", "opciones": ["Mojito Maracuyá", "Mojito Frambuesa", "Mojito Mango"]}
@@ -597,6 +601,98 @@ Ejemplo miss: {"celebrationType":null,"skip":false,"confidence":"low"}`;
     return { celebrationType: label, skip: false };
   } catch (err) {
     console.error(`[bot] Error en extractCelebrationTypeWithAI:`, err.message);
+    return null;
+  }
+}
+
+/**
+ * extractDrinksPerPersonWithAI: NLU para cócteles por persona (paso de dato).
+ * El parser local cubre número/palabras/frases; esto es el respaldo cuando
+ * el cliente responde en lenguaje natural ("tengo cervezas", "2 cóctel 🙅‍♂️").
+ *
+ * @param {string} userMessage
+ * @param {string} [lastBotMessage]
+ * @returns {Promise<{ per: number }|null>}
+ */
+export async function extractDrinksPerPersonWithAI(userMessage, lastBotMessage = '') {
+  const text = String(userMessage || '').trim();
+  if (!text || text.length < 2) return null;
+
+  const env = getEnv();
+  const { provider, apiKey, model } = env;
+  const config = { temperature: 0.1, maxOutputTokens: 80 };
+
+  const systemInstruction = `Eres un extractor NLU estricto para un bot de cotizaciones de eventos (Chile).
+El bot preguntó CUÁNTOS CÓCTELES POR PERSONA calcular (no invitados, no litros).
+
+Último mensaje del bot:
+"${lastBotMessage || '(no disponible)'}"
+
+Guía que ya le dimos al cliente:
+- 2 por persona = el cóctel acompaña (hay cerveza, vino, barra u otra bebida).
+- 3 o más = el dispensador/muro es la barra principal.
+
+Responde SOLO JSON válido:
+{"per":2,"confidence":"high"|"medium"|"low"}
+
+REGLAS:
+1. Extrae el número de cócteles por persona (entero 1 a 10). "2 cóctel", "dos", "2 por persona", "2 tragos p/p" → per=2.
+2. Si dice que YA TIENE / pondrá cerveza, vino, barra u otra bebida (el cóctel acompaña) SIN otro número → per=2.
+3. Si dice que el cóctel ES la barra principal / "más fiesta" / solo cócteles → per=3.
+4. Duda, saludo, invitados, fecha, comuna, o texto que NO responde al paso → per=null, confidence low.
+5. PROHIBIDO inventar. PROHIBIDO usar el número de invitados como p/p.
+6. PROHIBIDO texto fuera del JSON.
+
+Ejemplo: {"per":2,"confidence":"high"}
+Ejemplo miss: {"per":null,"confidence":"low"}`;
+
+  try {
+    let rawText = '';
+
+    if (provider === 'gemini') {
+      const client = new GoogleGenerativeAI(apiKey);
+      const genModel = client.getGenerativeModel({ model, systemInstruction });
+      const result = await genModel.generateContent({
+        contents: [{ role: 'user', parts: [{ text }] }],
+        generationConfig: {
+          temperature: config.temperature,
+          maxOutputTokens: config.maxOutputTokens,
+          responseMimeType: 'application/json'
+        }
+      });
+      rawText = result.response?.text?.().trim() || '';
+    }
+
+    if (provider === 'nvidia') {
+      const openai = new OpenAI({ apiKey, baseURL: 'https://integrate.api.nvidia.com/v1' });
+      const completion = await openai.chat.completions.create({
+        model,
+        messages: [
+          { role: 'system', content: systemInstruction },
+          { role: 'user', content: text }
+        ],
+        temperature: config.temperature,
+        max_tokens: config.maxOutputTokens,
+        response_format: { type: 'json_object' },
+        stream: false
+      });
+      rawText = completion.choices?.[0]?.message?.content?.trim() || '';
+    }
+
+    if (!rawText) return null;
+
+    const cleaned = rawText.replace(/^```(?:json)?\s*/i, '').replace(/\s*```$/i, '').trim();
+    const parsed = JSON.parse(cleaned);
+    const confidence = String(parsed?.confidence || '').trim().toLowerCase();
+    const per = parseInt(parsed?.per, 10);
+
+    testLog(`NLU cócteles p/p: per=${parsed?.per} confidence=${confidence}`);
+
+    if (confidence !== 'high' && confidence !== 'medium') return null;
+    if (!Number.isFinite(per) || per < 1 || per > 10) return null;
+    return { per };
+  } catch (err) {
+    console.error(`[bot] Error en extractDrinksPerPersonWithAI:`, err.message);
     return null;
   }
 }

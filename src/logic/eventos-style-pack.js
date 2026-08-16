@@ -1,8 +1,8 @@
 // ==============================================================================
 // OBJETIVO: Cierre guiado de Eventos — p/p + elección de sabores (abierta).
 // Tras la cantidad, el cliente elige cócteles con catálogo por categoría.
-// La “selección sugerida” es opcional (orden comercial), no un menú 1️⃣/2️⃣.
-// Combinados / sin alcohol siguen como atajos si los piden.
+// Nombrar la categoría (Clásicos / Combinados) no arma el pedido: pide nombres.
+// Pack Combinados / sin alcohol solo si lo piden explícito (armame / pack).
 // ==============================================================================
 import {
   preciosData,
@@ -11,8 +11,12 @@ import {
   formatBarrelPartsLabel,
   getCoctelesByCategoria,
   getCoctelesNamesCatalogCompact,
-  hasProductOrderSignal
+  hasProductOrderSignal,
+  detectNamedCatalogCategory,
+  EVENT_CATALOG_CATEGORIES
 } from './utils.js';
+import { isGreetingOrNoise } from './interruptions.js';
+import { extractDrinksPerPersonWithAI, lastBotText } from './nlu-intent.js';
 import {
   getMinLitersForFormat,
   getAllowedLitrages,
@@ -20,7 +24,8 @@ import {
   getEventPriceListImage,
   formatEventCartSummary,
   formatEventCartTotalsLine,
-  buildEventCartOkAsk
+  buildEventCartOkAsk,
+  extractGuestsFromMessage
 } from './eventos-helpers.js';
 import { OrderBuilder } from './order-builder.js';
 import { formatMenuBlock, MENU_WRITE_CTA } from './flow-rails.js';
@@ -925,7 +930,7 @@ _(rendimiento calculado en un vaso con hielo y 200 ml de cóctel)_`;
 export function buildFlavorCatalogBlock(formatKey = 'dispensador') {
   return `${buildFormatSizesYieldLine(formatKey)}
 
-Estos son los sabores:
+Estos son los sabores (elige por *nombre*, no por categoría):
 
 ${getCoctelesNamesCatalogCompact()}`;
 }
@@ -938,9 +943,63 @@ ${getCoctelesNamesCatalogCompact()}`;
  */
 export function buildFlavorPickQuestion() {
   return `*¿Cuáles son tus favoritos?*
-_(ej: Mojito y Sangría)_
+_(indica los *nombres* de los cócteles, no la categoría; ej: Mojito y Sangría)_
 
 Si prefieres, escribe *sugerida* y te armo una cotización con los más populares y la ajustamos 😊`;
+}
+
+/**
+ * getCategoryPickExamples: 2 nombres de la categoría + un ejemplo con litraje del formato.
+ *
+ * @param {'CLÁSICOS'|'COMBINADOS'|'MOCKTAILS'} categoryKey
+ * @param {'dispensador'|'muro'|string} formatKey
+ * @returns {{ namesLine: string, litersLine: string }}
+ */
+export function getCategoryPickExamples(categoryKey, formatKey = 'dispensador') {
+  const cats = getCoctelesByCategoria();
+  const items = categoryKey === 'CLÁSICOS'
+    ? cats['CLÁSICOS']
+    : categoryKey === 'COMBINADOS'
+      ? cats.COMBINADOS
+      : cats.MOCKTAILS;
+  const available = (items || []).map((c) => c.name);
+  const preferred = {
+    'CLÁSICOS': ['Mojito', 'Sangría'],
+    COMBINADOS: ['Piscola Alto 35°', 'Whiskcola J.W. Black'],
+    MOCKTAILS: ['Mojito Mocktail', 'Sangría Mocktail']
+  };
+  const wanted = preferred[categoryKey] || [];
+  const pair = [];
+  for (const name of wanted) {
+    if (available.includes(name) && !pair.includes(name)) pair.push(name);
+  }
+  for (const name of available) {
+    if (pair.length >= 2) break;
+    if (!pair.includes(name)) pair.push(name);
+  }
+  const allowed = getAllowedLitrages(formatKey);
+  const small = allowed[0] || '10L';
+  return {
+    namesLine: pair.slice(0, 2).join(' y ') || 'Mojito y Sangría',
+    litersLine: pair[0] ? `${small} ${pair[0]}` : `${small} Mojito`
+  };
+}
+
+/**
+ * buildCategoryFlavorAsk: El cliente nombró una categoría; pedimos sabores concretos.
+ *
+ * @param {'CLÁSICOS'|'COMBINADOS'|'MOCKTAILS'} categoryKey
+ * @param {'dispensador'|'muro'|string} formatKey
+ * @returns {string}
+ */
+export function buildCategoryFlavorAsk(categoryKey, formatKey = 'dispensador') {
+  const label = EVENT_CATALOG_CATEGORIES[categoryKey]?.label || categoryKey;
+  const { namesLine, litersLine } = getCategoryPickExamples(categoryKey, formatKey);
+  return `La categoría *${label}* tiene varios sabores: elige tus favoritos *por nombre* (no la categoría entera).
+
+_(ej: ${namesLine} — o ${litersLine})_
+
+Si prefieres, escribe *sugerida* y te armo una cotización con los más populares 😊`;
 }
 
 /**
@@ -1090,7 +1149,9 @@ export function buildPerPersonConfirmReplies(session, formatKey, per) {
 }
 
 /**
- * parsePerPersonChoice: Número suelto o frase (“2”, “3 por persona”, “complemento”).
+ * parsePerPersonChoice: Número, palabra o frase de cócteles p/p.
+ * Cubre “2”, “dos”, “2 cóctel”, “2 cóctel por persona 🙅‍♂️”, “complemento”,
+ * “tengo cervezas”. No usa el número de invitados.
  *
  * @param {string} messageText
  * @returns {{ per: number }|null}
@@ -1098,17 +1159,80 @@ export function buildPerPersonConfirmReplies(session, formatKey, per) {
 export function parsePerPersonChoice(messageText) {
   const raw = String(messageText || '').trim();
   if (!raw) return null;
-  const lower = raw.toLowerCase();
+
+  const lower = raw
+    .replace(/[\u{1F300}-\u{1FAFF}\u{2600}-\u{27BF}]/gu, ' ')
+    .replace(/[¡!.,;:…'"()¿?]/g, ' ')
+    .replace(/\s+/g, ' ')
+    .trim()
+    .toLowerCase();
+  if (!lower) return null;
 
   if (/\bcomplemento\b/i.test(lower)) return { per: 2 };
   if (/\bbarra\s+principal\b/i.test(lower) || /\bm[aá]s\s+fiesta\b/i.test(lower)) return { per: 3 };
 
-  const m = lower.match(/^(\d{1,2})\s*(?:por\s+persona|p\/?p|pp|c[oó]cteles?)?\.?$/i)
-    || lower.match(/\b(\d{1,2})\s*(?:por\s+persona|p\/?p|pp)\b/i);
-  if (m) {
-    const n = parseInt(m[1], 10);
-    if (n >= 1 && n <= 10) return { per: n };
+  // Ya hay otra bebida (la guía del paso: 2 = el cóctel acompaña)
+  const hasOtherDrinks = /\b(cerveza|cervezas|vino|vinos|bebestibles|otra\s+bebida|otras\s+bebidas)\b/i.test(lower)
+    || (/\bbarra\b/i.test(lower) && !/\bbarra\s+principal\b/i.test(lower));
+  const saysHasOther = /\b(tengo|hay|ponemos|pondr[eé]|tambi[eé]n|adem[aá]s)\b/i.test(lower);
+  if (hasOtherDrinks && saysHasOther && !/\b(solo|solamente|sin)\b/i.test(lower)) {
+    return { per: 2 };
   }
+
+  const WORD_TO_NUM = {
+    un: 1, uno: 1, una: 1,
+    dos: 2, tres: 3, cuatro: 4, cinco: 5,
+    seis: 6, siete: 7, ocho: 8, nueve: 9, diez: 10
+  };
+  const wordAlt = Object.keys(WORD_TO_NUM).join('|');
+  const unit = '(?:c[oó]ctel(?:es)?|tragos?|copas?|vasos?)';
+  const perPerson = '(?:por\\s+persona|p\\/?p|pp)';
+
+  const toPer = (token) => {
+    if (token == null) return null;
+    const n = WORD_TO_NUM[token] ?? parseInt(token, 10);
+    return n >= 1 && n <= 10 ? n : null;
+  };
+
+  // 1) Número/palabra pegado a unidad o “por persona” (gana sobre un “50 invitados” en el mismo texto)
+  const attached = lower.match(new RegExp(`\\b(\\d{1,2}|${wordAlt})\\s*${unit}(?:\\s*${perPerson})?\\b`, 'i'))
+    || lower.match(new RegExp(`\\b(\\d{1,2}|${wordAlt})\\s*${perPerson}\\b`, 'i'));
+  if (attached) {
+    const n = toPer(attached[1].toLowerCase());
+    if (n) return { per: n };
+  }
+
+  // 2) Mensaje que es esencialmente el número (1–10)
+  const mostlyNumber = new RegExp(
+    `^(?:unas?|como|ser[ií]an?|ser[aá]n?|calcula(?:mos)?)?\\s*(\\d{1,2}|${wordAlt})\\s*$`,
+    'i'
+  ).exec(lower);
+  if (mostlyNumber) {
+    const n = toPer(mostlyNumber[1].toLowerCase());
+    if (n) return { per: n };
+  }
+  return null;
+}
+
+/**
+ * resolveDrinksPerPersonChoice: Parser local primero; si falla, NLU del paso.
+ * Misma regla que otros datos (tipo de evento, sabores): no dejar una frase
+ * válida sin entender solo porque no coincidió el regex.
+ *
+ * @param {string} messageText
+ * @param {object} [session]
+ * @returns {Promise<{ per: number }|null>}
+ */
+export async function resolveDrinksPerPersonChoice(messageText, session = {}) {
+  const parsed = parsePerPersonChoice(messageText);
+  if (parsed?.per) return parsed;
+  if (isGreetingOrNoise(messageText)) return null;
+  // Un “50” de invitados no es p/p: no llamar NLU (inventaría 2)
+  const looksLikeGuestsOnly = extractGuestsFromMessage(messageText) != null
+    && !/(c[oó]ctel|trago|copa|vaso|por\s+persona|p\/?p|\bpp\b)/i.test(messageText);
+  if (looksLikeGuestsOnly) return null;
+  const fromAi = await extractDrinksPerPersonWithAI(messageText, lastBotText(session));
+  if (fromAi?.per >= 1 && fromAi.per <= 10) return fromAi;
   return null;
 }
 
@@ -1297,7 +1421,7 @@ ${list}
 Van muy bien si el público es más de piscola que de cóctel elaborado. Si quieres, te armo el pack con *Combinados* (mismo cálculo de 2 p/p).`;
 
   if (includeStyleMenu) {
-    text += `\n\nEscribe *combinados* para esa propuesta, o dime los cócteles que prefieres 😊`;
+    text += `\n\nDime el *nombre* que quieres (ej: Piscola Alto 35°), o escribe *sugerida* 😊`;
   }
   return text;
 }
@@ -1323,7 +1447,7 @@ ${list}
 Si quieres, te armo la propuesta completa *sin alcohol* con el mismo cálculo de 2 p/p.`;
 
   if (includeStyleMenu) {
-    text += `\n\nEscribe *sin alcohol* para esa propuesta, o el nombre del Mocktail que quieres 🍹`;
+    text += `\n\nDime el *nombre* del Mocktail que quieres, o escribe *sugerida* 🍹`;
   }
   return text;
 }
@@ -1351,16 +1475,11 @@ export function wantsMoreEventQuantity(text) {
  */
 export function detectSideStyleFromText(text) {
   const t = String(text || '').toLowerCase();
-  // Pedido de armar / quiero esos (no solo “qué son”)
-  const wantsPack = /\b(quiero|armame|ármame|arme|dale|esa\s+opci[oó]n|pack|propuesta|cotiz)/i.test(t)
-    || /^(combinados?|sin\s+alcohol|mocktails?)$/i.test(t.trim());
+  // Pedido explícito de armar el pack (no basta nombrar la categoría)
+  const wantsPack = /\b(quiero|armame|ármame|arme|dale|esa\s+opci[oó]n|pack|propuesta|cotiz)/i.test(t);
 
-  if (asksEventMocktailsInfo(text) && wantsPack) return 'MOCKTAILS';
-  if (asksEventCombinadosInfo(text) && wantsPack) return 'COMBINADOS';
-
-  // Mensaje corto solo con la categoría → lo tratamos como elección de pack
-  if (/^(combinados?|piscola|piscolas)$/i.test(t.trim())) return 'COMBINADOS';
-  if (/^(sin\s+alcohol|mocktails?|mocktail)$/i.test(t.trim())) return 'MOCKTAILS';
+  if (asksEventMocktailsInfo(text) && wantsPack && !detectNamedCatalogCategory(text)) return 'MOCKTAILS';
+  if (asksEventCombinadosInfo(text) && wantsPack && !detectNamedCatalogCategory(text)) return 'COMBINADOS';
 
   return null;
 }

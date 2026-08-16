@@ -78,12 +78,29 @@ Favoritos manuales, `sugerida`/`sugerencia` y carrito ya armado son **la misma v
 - Carrito &lt; mínimo → pedir más litros con `getEventCocktailSingleExample(formatKey)`.
 - Miss producto: `registerEventosProductOrderMiss` (strikes; ver abajo).
 
-## Reglas vs IA en Eventos
+## Parsers de datos: variantes + NLU (obligatorio)
+
+En **pasos de dato** (p/p, tipo de evento, sabores, invitados) el cliente responde con número, palabra, frase o emoji. Contrato:
+
+1. **Parser local** primero: dígitos, palabras (`dos`/`tres`), frases (`2 cóctel`, `tengo cerveza`) y ruido (emoji).
+2. Si el parser no cubre → **extractor NLU del paso** con el último mensaje del bot como contexto (`extractDrinksPerPersonWithAI`, `extractCelebrationTypeWithAI`, `extractEventProductsWithAI`).
+3. Si la IA tampoco tiene certeza → re-pregunta. Nunca fingir un valor.
+
+No cerrar un miss solo porque el regex no coincidió con el ejemplo del `_(ej:)_`.
+
+## Categoría ≠ sabor
+
+La carta muestra secciones (*CLÁSICOS*, *COMBINADOS*, *MOCKTAILS*). El cliente suele copiar el título.
+
+- Copy: pedir **nombres** de cócteles, no la categoría (`buildFlavorPickQuestion`, `buildFlavorCatalogBlock`).
+- Si nombra solo la categoría → `detectNamedCatalogCategory` + `buildCategoryFlavorAsk` (ejemplos de esa sección). **No** armar carrito ni mapear “Clásicos” a Pisco Sour.
+- Pack Combinados/Mocktails solo con pedido explícito (`armame`, `pack`, `propuesta`), no con el título suelto.
 
 | Situación | Capa |
 |---|---|
 | Menús 1/2, confirmar | Keywords → `resolveDecisionIntent` |
-| Pedido de cócteles | Parsers → `extractEventProductsWithAI` (con `formatKey` + `lastBotMessage`) |
+| Cócteles p/p | `parsePerPersonChoice` → `extractDrinksPerPersonWithAI` |
+| Pedido de cócteles | Parsers → categoría suelta (`detectNamedCatalogCategory`) → `extractEventProductsWithAI` |
 | Sugerida no detectada por keyword | NLU `quiere_sugerencia` |
 | Pregunta lateral con dato pendiente | FAQ (máx. 1) → `engine.js` |
 | Off-topic sin FAQ | `aiPrompt` del estado + formato inyectado |

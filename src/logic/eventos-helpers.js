@@ -662,7 +662,8 @@ export function parseBareQuantityWithoutUnit(messageText) {
 const FLAVOR_PARSE_STOP_TOKENS = new Set([
   'para', 'con', 'son', 'una', 'unos', 'quiero', 'queria', 'dame', 'pon', 'agrega', 'y', 'el', 'la',
   'de', 'un', 'unos', 'barril', 'barriles', 'litro', 'litros', 'pero', 'los', 'las', 'que', 'este',
-  'esta', 'estos', 'estas', 'manten', 'anterior', 'anteriores', 'pedido', 'tambien', 'tambien'
+  'esta', 'estos', 'estas', 'manten', 'anterior', 'anteriores', 'pedido', 'tambien', 'tambien',
+  'clasico', 'clasicos', 'combinado', 'combinados', 'mocktail', 'mocktails', 'categoria'
 ]);
 
 /**

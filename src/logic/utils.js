@@ -2043,11 +2043,61 @@ function getLevenshteinDistance(a, b) {
 }
 
 /**
- * Tokens genéricos de categoría: NO son un cóctel concreto.
- * Si el cliente dice solo "mocktails" / "spritz", no debemos mapear al primer
- * "Mojito Mocktail" o "Aperol Spritz" del catálogo (rompe la carta de Mocktails).
+ * Tokens genéricos de categoría / familia: NO son un cóctel concreto.
+ * Si el cliente dice solo "clásicos" / "mocktails" / "spritz", no debemos
+ * mapear al primer ítem del catálogo (rompe la carta y arma un pedido falso).
  */
-const GENERIC_CATALOG_QUERY_TOKENS = new Set(['mocktail', 'mocktails', 'spritz', 'sour']);
+const GENERIC_CATALOG_QUERY_TOKENS = new Set([
+	'mocktail', 'mocktails', 'spritz', 'sour',
+	'clasico', 'clasicos', 'combinado', 'combinados'
+]);
+
+/**
+ * Categorías de la carta de Eventos (las mismas secciones que ve el cliente).
+ * Nombrar la categoría ≠ elegir un cóctel.
+ */
+export const EVENT_CATALOG_CATEGORIES = {
+	'CLÁSICOS': { label: 'CLÁSICOS', aliases: ['clasico', 'clasicos'] },
+	COMBINADOS: { label: 'COMBINADOS', aliases: ['combinado', 'combinados'] },
+	MOCKTAILS: { label: 'MOCKTAILS', aliases: ['mocktail', 'mocktails', 'sin alcohol'] }
+};
+
+/**
+ * detectNamedCatalogCategory: ¿El mensaje nombra una categoría de la carta
+ * (Clásicos / Combinados / Mocktails) sin un sabor concreto?
+ * Los clientes copian el título de sección; eso no es un pedido.
+ *
+ * @param {string} messageText
+ * @returns {'CLÁSICOS'|'COMBINADOS'|'MOCKTAILS'|null}
+ */
+export function detectNamedCatalogCategory(messageText) {
+	const raw = String(messageText || '').trim();
+	if (!raw) return null;
+	const norm = normalizeString(raw)
+		.replace(/[\u{1F300}-\u{1FAFF}\u{2600}-\u{27BF}]/gu, ' ')
+		.replace(/[¿?¡!.,;:…'"()]+/g, ' ')
+		.replace(/\s+/g, ' ')
+		.trim();
+	if (!norm) return null;
+
+	// "armame el pack de combinados" sigue siendo atajo de pack, no este detector
+	if (/\b(armame|arme|pack|propuesta)\b/.test(norm)) return null;
+
+	let rest = norm
+		.replace(/^(quiero|dame|ponme|prefiero|me gustan?|agrega)\s+/, '')
+		.replace(/^(los?|las?)\s+/, '')
+		.replace(/^categor[ia]+\s+(de\s+)?/, '')
+		.replace(/\b(porfa|porfis|please|gracias)\b/g, ' ')
+		.replace(/\s+/g, ' ')
+		.trim();
+
+	if (!rest) return null;
+
+	if (/^(clasicos?)$/.test(rest)) return 'CLÁSICOS';
+	if (/^(combinados?)$/.test(rest)) return 'COMBINADOS';
+	if (/^(mocktails?|sin alcohol)$/.test(rest)) return 'MOCKTAILS';
+	return null;
+}
 
 /**
  * findClosestCatalogMatch: Mapea un nombre (a menudo mal escrito) al catálogo oficial.
@@ -2063,7 +2113,7 @@ export function findClosestCatalogMatch(name, catalogNames) {
 
 	const cleanName = (str) => normalizeString(str)
 		.replace(/[¿?¡!.,;:…'"()]+/g, ' ')
-		.replace(/\b(clasico|clasica|tradicional|original|sabores|sabor)\b/gi, '')
+		.replace(/\b(clasicos?|clasica|tradicional|original|sabores|sabor|combinados?)\b/gi, '')
 		.replace(/\s+/g, ' ')
 		.trim();
 

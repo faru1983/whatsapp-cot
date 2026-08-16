@@ -28,7 +28,8 @@ El bot guía cotizaciones de Meta Ads: **dato pendiente primero**, re-pregunta c
 - Un archivo por paso: textos + `aiPrompt` + `validateAndProcess`.
 - `shortQuestion` con `withAssistantFooter()` de `flow-rails.js`.
 - **Decisiones:** menú con emojis numéricos (`1️⃣`/`2️⃣`/`3️⃣` vía `formatMenuBlock` / `matchesMenuOption`). Keywords: emoji, dígito o sinónimo → NLU si falla.
-- **Datos** (fecha, comuna, cócteles, contacto): texto libre + parsers; no menú numerado.
+- **Datos** (fecha, comuna, cócteles, p/p, contacto): texto libre + parser de **variantes** (número, palabras, frase); si el parser falla → **NLU del paso** con contexto; si no hay certeza → re-pregunta. No menú numerado.
+- Categoría de carta (Clásicos / Combinados / Mocktails) ≠ un sabor: pedir nombres concretos.
 - En `ESPERANDO_INTENCION` no se usa NLU: solo reglas claras abren Eventos/Barriles.
 - Primer texto sin intención en `ESPERANDO_INTENCION` → muestra el menú una vez.
 - Segunda respuesta sin opción válida → `CERRADO` + mute + SOS admin, sin mensaje al cliente.

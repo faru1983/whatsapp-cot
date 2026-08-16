@@ -24,7 +24,8 @@ import {
   getProductFamilyBase,
   getCatalogFamilyFlavorOptions,
   wantsNonAlcoholicOption,
-  isMocktailName
+  isMocktailName,
+  detectNamedCatalogCategory
 } from '../../../logic/utils.js';
 import {
   wantsAdvanceProductsOrder,
@@ -84,7 +85,8 @@ import {
   buildFlavorPickQuestion,
   buildFlavorCatalogBlock,
   asksEventCatalogPriceList,
-  buildEventPriceListAskReplies
+  buildEventPriceListAskReplies,
+  buildCategoryFlavorAsk
 } from '../../../logic/eventos-style-pack.js';
 import { nextEventosAck } from '../../../logic/eventos-intro.js';
 
@@ -94,8 +96,9 @@ La lista de sabores NO incluye precios. Usa el CONTEXTO DE FORMATO inyectado (Di
 
 1. Dudas breves (logística, rendimiento, mocktails). Precios/valores de carta → imagen de precios del formato (no inventes cifras).
 2. Con pedido armado: ajustar sabores o *ok* para cotización formal.
-3. Corrige invitados/tipo sin cócteles → confirma y vuelve a pedir sabores o *sugerida*.
-4. Dispensador: instalación gratis. Muro: instalación ~$50.000. No inventes envíos extra.`;
+3. Si nombra una CATEGORÍA (Clásicos, Combinados, Mocktails) sin un sabor concreto: NO elijas un cóctel por él. Pide nombres de esa categoría.
+4. Corrige invitados/tipo sin cócteles → confirma y vuelve a pedir sabores o *sugerida*.
+5. Dispensador: instalación gratis. Muro: instalación ~$50.000. No inventes envíos extra.`;
 
 /**
  * eventCartLineCount: Cuántas líneas de cóctel hay en el carrito Eventos.
@@ -336,6 +339,22 @@ export const EVENTOS_ELECCION_MENU = defineState({
       };
     }
 
+    // Nombró una categoría (Clásicos / Combinados / Mocktails) sin un sabor concreto.
+    // Con carrito, "sin alcohol" sigue el flujo de sugerir Mocktail de la familia.
+    const namedCategory = detectNamedCatalogCategory(messageText);
+    if (
+      namedCategory
+      && !hasProductOrderSignal(messageText)
+      && eventCartLineCount(session) === 0
+    ) {
+      return {
+        success: true,
+        nextState: 'EVENTOS_ELECCION_MENU',
+        customReply: buildCategoryFlavorAsk(namedCategory, formatKey),
+        flowProgress: true
+      };
+    }
+
     // Pack lateral: combinados / sin alcohol — solo si aún no hay carrito manual,
     // o si viene de un pack y elige explícito (mensaje corto).
     const sideStyle = detectSideStyleFromText(messageText);
@@ -361,7 +380,7 @@ export const EVENTOS_ELECCION_MENU = defineState({
         success: true,
         nextState: 'EVENTOS_ELECCION_MENU',
         customReply: buildCombinadosInfoReply(false)
-          + '\n\nSi quieres ese pack, escribe *combinados*. Si no, dime un cóctel o *ok* si ya tienes pedido 😊',
+          + '\n\nDime el *nombre* que quieres (ej: Piscola Alto 35°), o escribe *sugerida* 😊',
         flowProgress: true
       };
     }
@@ -376,7 +395,7 @@ export const EVENTOS_ELECCION_MENU = defineState({
         success: true,
         nextState: 'EVENTOS_ELECCION_MENU',
         customReply: buildMocktailsInfoReply(false)
-          + '\n\nEscribe *sin alcohol* para armarte el pack, o el nombre del Mocktail que quieres 🍹',
+          + '\n\nDime el *nombre* del Mocktail que quieres, o escribe *sugerida* 🍹',
         flowProgress: true
       };
     }
