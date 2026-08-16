@@ -56,9 +56,35 @@ function formatPriceTable(priceTable) {
 }
 
 /**
+ * looksLikeInternalPromptLeak: ¿El texto es un prompt / razonamiento interno, no copy de venta?
+ * Cubre el patrón de pegar "CONTEXTO DEL CLIENTE", "PROHIBIDO inventar", "Si EVENTOS:…".
+ * Si es true, no se envía al cliente (el engine usa copy programático o NO_FAQ).
+ *
+ * @param {string|null|undefined} text
+ * @returns {boolean}
+ */
+export function looksLikeInternalPromptLeak(text) {
+	const t = String(text || '');
+	if (!t.trim()) return false;
+	return /CONTEXTO DEL CLIENTE|CONTEXTO DE SESI[OÓ]N|CONTEXTO DEL CHAT/i.test(t)
+		|| /\bPROHIBIDO\b/.test(t)
+		|| /Usa el CONTEXTO/i.test(t)
+		|| /Si EVENTOS\s*(\(|:)/i.test(t)
+		|| /Si BARRILES\s*:/i.test(t)
+		|| /Si no est[aá] definido/i.test(t)
+		|| /Responde SOLO seg[uú]n/i.test(t)
+		|| /NUNCA (copies|escribas|pegues|inventes|menciones)/i.test(t)
+		|| /Habla SOLO/i.test(t)
+		|| /\bfaq\.json\b|\bdatos\.json\b/i.test(t)
+		|| /systemInstruction|system prompt/i.test(t)
+		|| /REGLAS DE CONTEXTO|ANTI-JERGA INTERNA/i.test(t);
+}
+
+/**
  * sanitizeCustomerFacingReply: Quita jerga interna que a veces filtra el LLM
  * (nombres de archivos, "DATOS OFICIALES", "FAQ", etc.) antes de mandar el texto al cliente.
  * No cambia el sentido de la respuesta; solo limpia meta-referencias del prompt.
+ * Si el modelo pegó el prompt entero, devolvemos vacío (no un recorte a medias).
  *
  * @param {string|null|undefined} text - Respuesta cruda de FAQ o IA
  * @returns {string} Texto listo para WhatsApp (o string vacío si no había texto)
@@ -105,7 +131,8 @@ export function sanitizeCustomerFacingReply(text) {
 		.replace(/\n{3,}/g, '\n\n')
 		.trim();
 
-	// Si el modelo filtró razonamiento interno, no enviamos nada (el engine usará plantilla o NO_FAQ)
+	// Si el modelo filtró razonamiento interno o pegó el prompt, no enviamos nada
+	if (looksLikeInternalPromptLeak(out)) return '';
 	if (/\bno puedo determinar\b|\bel cliente est[aá] (preguntando|cotizando)\b|\bproporcionar m[aá]s contexto\b|\bpreguntar si el cliente\b|\bdebes preguntar\b|\bno est[aá] claro si\b/i.test(out)) {
 		return '';
 	}

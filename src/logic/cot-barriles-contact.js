@@ -400,7 +400,7 @@ export async function submitBarrilesSaleConfirmed(session) {
       success: true,
       nextState: 'BARRILES_CONFIRMAR_COMPRA',
       customReply: withAssistantFooter(
-        `No pude generar la compra web todavía (${result.error}).\n` +
+        `No pude generar la compra web todavía.\n` +
         `¿Revisamos los datos o prefieres escribir *HUMANO*?`
       ),
       flowProgress: true

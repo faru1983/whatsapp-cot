@@ -89,9 +89,11 @@ Cada estado exporta (vía `defineState`):
 `customReplies` (array) = varias burbujas; puede incluir `img(...)` o `vid(...)`.
 `customReply` = un mensaje.
 
-**Decisiones de menú / sí-no:** `resolveDecisionIntent` = keywords → NLU. Si fallan → `success: false` → engine: FAQ → LLM corto / plantilla → SOS. **No** usar ese patrón en pasos de datos (fecha, comuna, cócteles).
+**Decisiones de menú / sí-no:** `resolveDecisionIntent` = keywords → NLU. Si fallan → `success: false` → engine: FAQ → LLM corto / plantilla → SOS. **No** usar ese patrón en pasos de datos (fecha, comuna, cócteles, p/p).
 
-**Interrupciones (prioridad en filtros):** mirón/`después` → mute; precio/lista → dato o carta **sin** fingir CHAT; saludo/ruido → re-pregunta sin strike; off-topic raro → SOS.
+**Datos libres:** parser de variantes (número, palabras, frase) → extractor NLU del paso (JSON / número, no prosa) → re-pregunta. Detalle: `conversational-rails.mdc`.
+
+**Interrupciones (prioridad en filtros):** mirón/`después` → mute; precio/lista → dato o carta **sin** fingir CHAT; “qué incluye el servicio” → FAQ / copy de incluido (nunca NLU de productos); saludo/ruido → re-pregunta sin strike; off-topic raro → SOS.
 
 **Estado `CERRADO`:** `customReply` + `mute: true` al entrar; refuerza mute si llega otro mensaje.
 
@@ -110,7 +112,7 @@ IDs semánticos (`BARRILES_*` / `EVENTOS_*`); transiciones reales en cada `nextS
 - **Mute:** intervención humana real, SOS, anti-loop, cierre de venta / mirón.
 - **Mute por humano:** solo texto/multimedia real del vendedor; **no** por `protocolMessage`, stubs, reacciones ni ecos del bot.
 - **Ephemeral:** desempaquetar con `normalizeMessageContent`.
-- **Fallback `success: false`:** ruido → re-pregunta; FAQ OK resetea strikes; sin FAQ → plantilla / LLM corto / SOS.
+- **Fallback `success: false`:** ruido → re-pregunta sin IA; FAQ OK (máx. 1 por dato pendiente); sin FAQ → plantilla o LLM corto (2 frases) → 2 strikes SOS.
 - **Admin WhatsApp:** `/detenerbot`, `/iniciarbot`, `/reiniciarbot` + número, desde chat admin / “Mensaje para ti mismo”.
 - **Labels Business:** engaged → `clientePotencial` (id 4, ensure=false); cierre cotización/venta → `nuevoPedido` (id 6, ensure=false); SOS → `asistencia` (ensure=true).
 - **CLI:** `/reset`, `/mute`, `/unmute`, `/exit`.
@@ -124,7 +126,7 @@ IDs semánticos (`BARRILES_*` / `EVENTOS_*`); transiciones reales en cada `nextS
 
 Ver también **`coding-standards.mdc`**.
 
-1. Híbrido reglas + IA: validación programática primero.
+1. Híbrido reglas + IA: validación programática primero; la IA extrae el casillero del paso o responde una ficha FAQ, no cotiza por su cuenta.
 2. Minimizar scope: tocar solo el estado/archivo del flujo afectado.
 3. Sesión: mutar en `validateAndProcess`; persistir desde `engine.js`.
 4. Precios: solo desde `datos.json` / `preciosData`.
@@ -151,6 +153,6 @@ Ver también **`coding-standards.mdc`**.
 - `npm run test:flows` — integridad `statesMap` + smoke conversacional
 - `npm run verify` — `check` + `test:flows` (usar antes de dar por terminado un cambio de flujos)
 
-## Guía rápida para cambios (ver también `agent-workflow.mdc` y `eventos-implementation.mdc`)
+## Guía rápida para cambios (ver también `agent-workflow.mdc`, `eventos-implementation.mdc` y `conversational-rails.mdc`)
 
 Cuando el usuario pega una selección de `test:local`, **`[TEST] paso actual: <ID>`** indica el archivo `src/flows/*/states/<ID>.js`. El copy puede estar en helpers (`eventos-intro.js`, `eventos-style-pack.js`, `eventos-helpers.js`). Tras cambiar texto visible → `scripts/verify-flows.mjs` + `npm run verify`. En Eventos: paridad Dispensador/Muro vía helpers de `eventos-helpers.js`.

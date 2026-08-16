@@ -316,7 +316,87 @@ export function wantsUnknownGuestsCount(messageText) {
 }
 
 /**
+ * Palabras de cantidad en español (invitados). No incluye 1–10 sueltos:
+ * esos chocan con cócteles p/p (“dos”, “tres”).
+ */
+const SPANISH_GUEST_ONES = {
+  uno: 1, una: 1, un: 1,
+  dos: 2, tres: 3, cuatro: 4, cinco: 5,
+  seis: 6, siete: 7, ocho: 8, nueve: 9
+};
+const SPANISH_GUEST_UNITS = {
+  ...SPANISH_GUEST_ONES,
+  diez: 10, once: 11, doce: 12, trece: 13, catorce: 14, quince: 15,
+  dieciseis: 16, dieciséis: 16, diecisiete: 17, dieciocho: 18, diecinueve: 19,
+  veinte: 20, veintiuno: 21, veintidos: 22, veintidós: 22, veintitres: 23, veintitrés: 23,
+  veinticuatro: 24, veinticinco: 25, veintiseis: 26, veintiséis: 26,
+  veintisiete: 27, veintiocho: 28, veintinueve: 29,
+  treinta: 30, cuarenta: 40, cincuenta: 50, sesenta: 60,
+  setenta: 70, ochenta: 80, noventa: 90, cien: 100, ciento: 100
+};
+const SPANISH_GUEST_TENS = {
+  veinte: 20, treinta: 30, cuarenta: 40, cincuenta: 50,
+  sesenta: 60, setenta: 70, ochenta: 80, noventa: 90
+};
+const GUEST_UNIT_RE = '(?:personas|invitados|pax|inv|gente)';
+
+/**
+ * parseSpanishGuestNumber: Convierte “treinta”, “cincuenta y dos”, “veinticinco”.
+ * Devuelve null si no hay cantidad clara.
+ *
+ * @param {string} token - Palabra o “treinta y cinco”
+ * @returns {number|null}
+ */
+function parseSpanishGuestNumber(token) {
+  const raw = String(token || '').toLowerCase().normalize('NFD').replace(/[\u0300-\u036f]/g, '').trim();
+  if (!raw) return null;
+  const compound = raw.match(
+    /^(veinte|treinta|cuarenta|cincuenta|sesenta|setenta|ochenta|noventa)\s+y\s+(un|uno|una|dos|tres|cuatro|cinco|seis|siete|ocho|nueve)$/
+  );
+  if (compound) {
+    return SPANISH_GUEST_TENS[compound[1]] + SPANISH_GUEST_ONES[compound[2]];
+  }
+  const n = SPANISH_GUEST_UNITS[raw];
+  return Number.isInteger(n) ? n : null;
+}
+
+/**
+ * extractSpanishGuestCount: Invitados dichos en palabras (“treinta personas”).
+ * Con unidad (personas/invitados/gente) acepta cualquier cantidad ≥ 1.
+ * Sin unidad, solo ≥ 12 para no robar “dos”/“tres” del paso p/p.
+ *
+ * @param {string} text
+ * @returns {number|null}
+ */
+function extractSpanishGuestCount(text) {
+  const lower = String(text || '').toLowerCase();
+  const wordAlt = Object.keys(SPANISH_GUEST_UNITS).sort((a, b) => b.length - a.length).join('|');
+  const tensAlt = Object.keys(SPANISH_GUEST_TENS).join('|');
+  const onesAlt = Object.keys(SPANISH_GUEST_ONES).join('|');
+  const expr = `(?:${tensAlt})\\s+y\\s+(?:${onesAlt})|(?:${wordAlt})`;
+
+  const withUnit = lower.match(new RegExp(`\\b(${expr})\\s+${GUEST_UNIT_RE}\\b`, 'i'));
+  if (withUnit) {
+    const n = parseSpanishGuestNumber(withUnit[1]);
+    if (n >= 1 && n <= 2000) return n;
+  }
+
+  // “veinte litros” / “cincuenta cócteles” no son invitados
+  if (/\b(c[oó]cteles?|tragos?|litros?|barriles?|litrage)\b/i.test(lower)) {
+    return null;
+  }
+
+  const standalone = lower.match(new RegExp(`\\b(${expr})\\b`, 'i'));
+  if (standalone) {
+    const n = parseSpanishGuestNumber(standalone[1]);
+    if (n >= 12 && n <= 2000) return n;
+  }
+  return null;
+}
+
+/**
  * extractGuestsFromMessage: Extrae el número de invitados filtrando fechas, edades, horas, etc.
+ * Acepta dígitos y palabras (“30”, “30 personas”, “treinta personas”).
  * @param {string} messageText
  * @returns {number|null}
  */
@@ -328,6 +408,9 @@ export function extractGuestsFromMessage(messageText) {
   if (explicitOriginal) {
     return parseInt(explicitOriginal[1], 10);
   }
+
+  const spanishUpFront = extractSpanishGuestCount(clean);
+  if (spanishUpFront != null) return spanishUpFront;
 
   // 1. Quitar fechas: "15 de mayo", "15 diciembre", "el 3 diciembre 2027"
   // Sin esto, "15 diciembre" deja el 15 y lo toma como invitados.
@@ -360,6 +443,9 @@ export function extractGuestsFromMessage(messageText) {
   if (explicitMatch) {
     return parseInt(explicitMatch[1], 10);
   }
+
+  const spanishAfterStrip = extractSpanishGuestCount(clean);
+  if (spanishAfterStrip != null) return spanishAfterStrip;
 
   // Si no, agarrar el primer número aislado que haya quedado
   const implicitMatch = clean.match(/\b(\d+)\b/i);

@@ -1,10 +1,14 @@
 ---
-description: Contrato de rieles conversacionales — priorizar dato pendiente, FAQ acotada, handoff hablado
+description: Contrato de rieles conversacionales — validación, tres oficios de IA, FAQ, strikes, handoff
 globs:
   - src/core/engine.js
+  - src/core/llm.js
   - src/logic/flow-stall.js
   - src/logic/flow-rails.js
+  - src/logic/nlu-intent.js
+  - src/logic/decision-intent.js
   - src/flows/**/*.js
+  - db/faq.json
   - scripts/verify-flows.mjs
 alwaysApply: false
 ---
@@ -15,27 +19,83 @@ alwaysApply: false
 
 El bot guía cotizaciones de Meta Ads: **dato pendiente primero**, re-pregunta clara, máximo **1 FAQ lateral** por dato bloqueado, y a **2 strikes** (`SECURITY_MAX_CONSECUTIVE_ERRORS=2`) → **handoff hablado** + mute + admin. Excepción: segundo miss del router inicial → SOS silencioso.
 
-## Engine (`engine.js`)
+La IA **no** es un vendedor libre. Completa el casillero del paso o contesta una ficha. Nunca inventa precios, cócteles ni avanza el flujo sin certeza.
 
-1. Orden: handoff → mirón (solo router) → estado → stall/FAQ/plantilla.
-2. `getPendingFlowRequirement` define el dato bloqueado; si hay strike previo, no FAQ/LLM libre.
-3. FAQ con dato pendiente: `session.faqSidequestByPending[pendingKey]` máx. 1; **no** resetear `consecutiveErrors`.
-4. Anti-loop / stall SOS: siempre `HANDOFF_CLIENT_REPLY` al cliente.
-5. `getOnMissHint` + `shortQuestion` en cada miss.
+## Orden en `engine.js`
+
+1. Handoff / mute / mirón (router).
+2. **Pre-FAQ** si parece pregunta (`?`, “qué incluye”, cómo/dónde…) y el paso no es `CERRADO` / `ESPERANDO_INTENCION` / menú estricto Barriles. Máx. 1 sidequest por dato pendiente.
+3. **Estado** `validateAndProcess` (parsers + NLU del paso si aplica).
+4. Si `success: false`: ruido → re-pregunta **sin** IA; precio contextual; FAQ; LLM corto (2 frases) o plantilla; 2 strikes → SOS.
+
+No FAQ/LLM libre si ya hay strike en el dato pendiente (salvo el sidequest ya permitido).
+
+## Tres oficios de la IA (no mezclar)
+
+| Oficio | Cuándo | Qué devuelve | Qué NO hace |
+|---|---|---|---|
+| **NLU del paso** | El parser local no cubre un **dato o decisión** de ese estado | Etiqueta (`WEB`/`ok`), número (p/p), tipo de evento, o `{ productos, dudas }` del catálogo | No prosa al cliente. No inventar ítems desde el ejemplo del bot (`quita el pisco`). Si no hay certeza → `null` / vacío → re-pregunta |
+| **FAQ** `responderFAQ` | Pregunta lateral (horario, incluye, cobertura, web…) | Texto de `db/faq.json` + catálogo, según carril Eventos/Barriles | No extraer carrito. Tras responder, **re-pregunta el dato pendiente** |
+| **Fallback corto** `generateResponse` | `success: false`, no FAQ, **parece pregunta real** | Máx. 2 frases + `aiPrompt` del estado | No pitch, no precios inventados. Si no es pregunta → plantilla “no te entendí” |
+
+Saludo/ruido: `success: false` **sin** NLU de productos y **sin** strike en `ELECCION_MENU`.
+
+## Validar un dato (contrato)
+
+En **pasos de dato** (p/p, tipo, invitados, sabores, fecha, comuna, contacto):
+
+1. **Parser local** de variantes: dígito, palabra (`dos`), frase (`2 cóctel`, `tengo cerveza`), emoji.
+2. Si no cubre → **extractor NLU de ese paso** con `lastBotText` (contexto). Un “50” de invitados no es p/p: no mandar NLU.
+3. Sin certeza → re-pregunta. Nunca fingir el valor.
+
+En **menús 1/2 / sí-no:** keywords (`matchesMenuOption`) → `classifyStepIntent`. No usar eso en datos libres.
+
+**No** cerrar un miss porque el regex no coincidió con el `_(ej:)_`.
+
+## Preguntas que no son pedido
+
+Antes de NLU de productos, interceptar (helper + FAQ):
+
+| Pregunta | Capa |
+|---|---|
+| Precios / carta / valores | `asksEventCatalogPriceList` / tip contextual Barriles |
+| Qué incluye el servicio, hielo, vasos, garnish, accesorios, retiro | `asksWhatServiceIncludes` + `tryProgrammaticFaqReply` (copy fijo, **sin LLM**). `faq.json` solo guarda texto de cliente, nunca instrucciones (`PROHIBIDO`, `Si EVENTOS`). `sanitizeCustomerFacingReply` vacía cualquier leak |
+| Categoría suelta (Clásicos / Combinados / Mocktails) | `detectNamedCatalogCategory` → pedir **nombres**; no armar Pisco Sour ni pack |
+| Cobertura / comunas Eventos | helper programático, no FAQ que afirme zonas fuera de RM |
+
+`looksLikeUnrecognizedFlavorAttempt` debe ser **false** en esas preguntas (si no, el engine salta FAQ y el NLU alucina).
+
+## Engine (`engine.js`) — detalle
+
+1. `getPendingFlowRequirement` = dato bloqueado.
+2. FAQ con dato pendiente: `session.faqSidequestByPending[pendingKey]` máx. 1; **no** resetear `consecutiveErrors`.
+3. Anti-loop / stall SOS: siempre `HANDOFF_CLIENT_REPLY` al cliente.
+4. `getOnMissHint` + `shortQuestion` en cada miss.
 
 ## Estados (`flows/*/states/`)
 
 - Un archivo por paso: textos + `aiPrompt` + `validateAndProcess`.
 - `shortQuestion` con `withAssistantFooter()` de `flow-rails.js`.
-- **Decisiones:** menú con emojis numéricos (`1️⃣`/`2️⃣`/`3️⃣` vía `formatMenuBlock` / `matchesMenuOption`). Keywords: emoji, dígito o sinónimo → NLU si falla.
-- **Datos** (fecha, comuna, cócteles, p/p, contacto): texto libre + parser de **variantes** (número, palabras, frase); si el parser falla → **NLU del paso** con contexto; si no hay certeza → re-pregunta. No menú numerado.
-- Categoría de carta (Clásicos / Combinados / Mocktails) ≠ un sabor: pedir nombres concretos.
-- En `ESPERANDO_INTENCION` no se usa NLU: solo reglas claras abren Eventos/Barriles.
-- Primer texto sin intención en `ESPERANDO_INTENCION` → muestra el menú una vez.
-- Segunda respuesta sin opción válida → `CERRADO` + mute + SOS admin, sin mensaje al cliente.
-- Opción `3️⃣` / `HUMANO` → mute + alerta al administrador.
-- Interrupciones locales: mirón → mute; precio → tip + re-ask del dato.
+- **Decisiones:** menú con emojis numéricos (`formatMenuBlock` / `matchesMenuOption`). Keywords → NLU si falla.
+- En `ESPERANDO_INTENCION` no se usa NLU: solo reglas abren Eventos/Barriles.
+- Primer texto sin intención → menú una vez. Segunda inválida → `CERRADO` + mute + SOS admin, sin mensaje al cliente.
+- `3️⃣` / `HUMANO` → mute + alerta admin.
+- Interrupciones: mirón → mute; precio → tip + re-ask.
+
+## Dónde vive cada extractor
+
+| Dato | Parser | NLU |
+|---|---|---|
+| Menú 1/2 | `keyword-intent` | `classifyStepIntent` |
+| Tipo de evento | `parseCelebrationType` | `extractCelebrationTypeWithAI` |
+| Invitados | `extractGuestsFromMessage` (dígitos y palabras) | sin extractor propio; miss → FAQ / re-pregunta |
+| Cócteles p/p | `parsePerPersonChoice` | `extractDrinksPerPersonWithAI` |
+| Sabores Eventos | parsers + categoría | `extractEventProductsWithAI` |
+| Sabores Barriles | `matchCocktailNamesInText` | `extractProductsWithAI` |
+| FAQ | — | `responderFAQ` + `db/faq.json` |
+
+Nueva ficha permanente → **`db/faq.json`** + detector si el NLU de productos la puede robar + assert de patrón.
 
 ## Tests
 
-Si cambia copy visible, transiciones, mute o burbujas → actualizar `scripts/verify-flows.mjs` y correr `npm run verify`.
+Si cambia copy, transiciones, mute, FAQ visible o burbujas → `scripts/verify-flows.mjs` + `npm run verify`.

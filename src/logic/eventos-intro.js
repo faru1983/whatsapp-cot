@@ -286,6 +286,23 @@ ${askGuestsCopyCanonical()}`;
 }
 
 /**
+ * getEventServiceIncludesReply: Qué va incluido en Eventos (FAQ + interceptor).
+ * Misma promesa que fase B, con el detalle que pide el cliente.
+ *
+ * @returns {string}
+ */
+export function getEventServiceIncludesReply() {
+  return `En el *Servicio para Eventos* va incluido sin costo extra:
+
+🧊 *Hielo* suficiente para todo el evento
+🍊 *Garnish* (decoraciones deshidratadas)
+🥂 *Préstamo* de vasos y/o copas
+🧰 *Accesorios de bar:* hieleras, palas, pinzas y más
+
+⏰ *Sin límite de tiempo:* instalamos horas antes y retiramos como máximo al día siguiente.`;
+}
+
+/**
  * buildFormatPhaseAReplies: Media primero + texto después (2 burbujas, sin caption).
  * Dispensador → eventos_dispensador1.webp; Muro → eventos_muro.mp4.
  *

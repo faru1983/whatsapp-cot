@@ -21,7 +21,10 @@ Al reparar un error reportado (terminal, cliente, test), **no** cerrar solo ese 
 |---|---|
 | `"en diciembre"` se guardó como comuna | Rechazar **cualquier mes** en captura freeform de ubicación; fecha antes que comuna |
 | `"2 cóctel"` / `"tengo cervezas"` no avanzó p/p | Parser de dato acepta número, palabras y frases; si falla → NLU del paso |
+| `"treinta personas"` no avanzó invitados | Mismo patrón: dígitos y palabras; “dos” suelto no es invitados (choca con p/p) |
 | `"Clásicos"` armó 15L Pisco Sour | Título de categoría ≠ sabor; pedir nombres de esa sección |
+| `"qué incluye el servicio"` sumó Pisco Sour | FAQ / detector de incluye; NLU de productos no usa ejemplos del bot |
+| `"qué incluye?"` pegó el prompt interno | Copy programático + `sanitizeCustomerFacingReply`; `faq.json` no guarda instrucciones |
 | `"5 sangria"` sumó Mojito del carrito | Interceptor no debe tratar líneas de carrito como menú; exige ≥2 opciones reales |
 | Copy con `5L` en Muro | Usar `getEventCocktail*Example(formatKey)`; nunca hardcodear litraje |
 | Precios con carrito armado | `asksEventCatalogPriceList` + imagen de carta; no solo subtotal del pedido |

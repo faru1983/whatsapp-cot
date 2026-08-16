@@ -17,7 +17,7 @@ import {
   asksAvailableCocktailsList,
   detectNamedCatalogCategory
 } from './utils.js';
-import { findMentionedCocktail, asksPriceOrCatalog, isGreetingOrNoise } from './interruptions.js';
+import { findMentionedCocktail, asksPriceOrCatalog, isGreetingOrNoise, asksWhatServiceIncludes } from './interruptions.js';
 import { formatMenuBlock } from './flow-rails.js';
 import { exampleConcreteDateHint, normalizeBotDateText } from './cot-event-quote.js';
 import { matchCocktailNamesInText } from './eventos-helpers.js';
@@ -257,6 +257,7 @@ export function looksLikeUnrecognizedFlavorAttempt(messageText) {
   // "sin alcohol" / "mocktail" NO es un sabor inventado: es un pedido válido de la
   // categoría Mocktails (la maneja wantsNonAlcoholicOption / getNonAlcoholicSuggestionReply)
   if (wantsNonAlcoholicOption(trimmed)) return false;
+  if (asksWhatServiceIncludes(trimmed)) return false;
 
   // Quitamos ¿?¡! para analizar el contenido (así "tienes X?" no se descarta solo por el ?)
   const cleaned = trimmed.replace(/[¿?¡!.,;:…]/gu, ' ').replace(/\s+/g, ' ').trim();

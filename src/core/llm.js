@@ -7,6 +7,7 @@ import OpenAI from 'openai'; // Importamos la librería OpenAI. Aunque usemos Nv
 import { GoogleGenerativeAI } from '@google/generative-ai'; // Importamos la librería oficial de Google para usar Gemini.
 import { getEnv } from './config.js'; // Función para cargar las claves API Keys y configuraciones de proveedor.
 import { buildFaqCatalogContext, sanitizeCustomerFacingReply } from '../logic/utils.js'; // Catálogo/despachos + limpieza de jerga interna.
+import { tryProgrammaticFaqReply } from '../logic/interruptions.js';
 import { testLog } from './debug-log.js';
 
 /**
@@ -280,7 +281,7 @@ REGLA CRÍTICA DE ORTOGRAFÍA / NOMBRES INCOMPLETOS:
 - Ejemplos: "ramazzoti"/"ramazoti"/"mamazoti" → "Ramazzotti Spritz"; "margarita" → "Tequila Margarita"; "monito" → "Mojito"; "aperol" → "Aperol Spritz".
 - Si no se parece a ninguno (ej. "negroni"), productos=[] y dudas=[]. Prefiere corregir typo a decir que no existe.
 
-REGLA CRÍTICA: Si el mensaje es SOLO cortesía o acuse de recibo ("gracias", "gracias por la información", "perfecto", "ok gracias", "entendí") SIN nombrar cóctel ni litraje, productos=[] y quiere_avanzar=false. NUNCA inventes un cóctel desde el ejemplo del bot.
+REGLA CRÍTICA: Si pregunta qué incluye el servicio / hielo / vasos / garnish / accesorios / hasta cuándo retiran, productos=[] y dudas=[]. NO extraigas cócteles del ejemplo del bot.
 REGLA CRÍTICA: En "name" y "opciones" usa EXACTAMENTE el nombre del catálogo. Copia y pega letra por letra.
 Catálogo válido estricto:
 ${catalogNames.join('\n')}`;
@@ -888,6 +889,14 @@ Ejemplo completo: {"skip":false,"date":"15 de mayo","location":"Las Condes","con
  * @returns {Promise<string>} Devuelve la respuesta redactada o "NO_FAQ".
  */
 export async function responderFAQ(userMessage, faqData, sessionContext = {}) {
+  // FAQs de carril (qué incluye, etc.): copy fijo. Nunca devolver el prompt de faq.json.
+  const programmatic = tryProgrammaticFaqReply(
+    userMessage,
+    sessionContext,
+    sessionContext.currentStateId
+  );
+  if (programmatic) return programmatic;
+
   const env = getEnv();
   const { provider, apiKey, model } = env;
   // Un poco más de tokens: respuestas de precio/despacho pueden listar 1–3 ítems
@@ -927,7 +936,7 @@ REGLAS DE COBERTURA:
 
 REGLAS:
 1. Responde SOLO si el mensaje es claramente una pregunta sobre:
-   - Una FAQ de la lista (horarios, envíos/regiones/cobertura/llegada, dónde entregan/despachan/van/llegan, de dónde son / de qué parte son, pago, web, Instagram, correo, teléfono, rendimiento, duración/conservación de barriles), O
+   - Una FAQ de la lista (horarios, envíos/regiones/cobertura/llegada, dónde entregan/despachan/van/llegan, de dónde son / de qué parte son, pago, web, Instagram, correo, teléfono, rendimiento, duración/conservación de barriles, qué incluye el servicio / hielo / vasos / garnish / accesorios / retiro), O
    - Precios / catálogo / carta / valor de un cóctel o extra (usar la información oficial de arriba), O
    - Ingredientes / de qué está hecho un cóctel del catálogo (usar SOLO el campo "Ingredientes" de la información oficial), O
    - Costo de despacho a una comuna de la RM (usar tabla DESPACHOS; distinguir desechable vs evento).
@@ -967,7 +976,7 @@ REGLAS:
    - Sin contexto: 1–2 líneas con ambos servicios + https://cocktailsontap.cl/cotizar. No pegues el catálogo completo.
 11. Extras o comuna concreta (con categoría clara): responde solo ese dato, amable y breve, en pesos chilenos.
 12. PROHIBIDO decir "no tengo respuesta" o disculparte cuando no hay match. En ese caso SOLO: NO_FAQ
-13. ANTI-JERGA INTERNA (crítica): NUNCA escribas al cliente palabras como "DATOS OFICIALES", "FAQ", "faq.json", "datos.json", "sección", "base de datos", "CONTEXTO DE SESIÓN" ni "consultar la tabla en...". Habla solo como vendedor: da la info útil en español chileno cordial. NUNCA pegues meta-instrucciones de la base FAQ.
+13. ANTI-JERGA INTERNA (crítica): NUNCA escribas al cliente palabras como "DATOS OFICIALES", "FAQ", "faq.json", "datos.json", "sección", "base de datos", "CONTEXTO DE SESIÓN", "CONTEXTO DEL CLIENTE" ni "consultar la tabla en...". Habla solo como vendedor: da la info útil en español chileno cordial. NUNCA pegues meta-instrucciones de la base FAQ (PROHIBIDO, Si EVENTOS, Si BARRILES, Si no está definido).
 14. ANTI-RAZONAMIENTO INTERNO (crítica): NUNCA expliques tu incertidumbre ni hables en tercera persona del cliente ("no puedo determinar si el cliente…", "debes preguntar si cotiza…"). Si no estás seguro → responde EXACTAMENTE: NO_FAQ. Si el cliente ya está cotizando EVENTOS, no vuelvas a comparar con barriles desechables salvo que lo pregunte explícitamente.
 15. DETECCIÓN DE FRUSTRACIÓN O COMPLEJIDAD (crítica): Si el mensaje denota frustración o enojo con el bot (ej. "bot tonto", "no entiendo", "mal servicio", "asesor ya"), o si consultan requerimientos de facturación, medios de pago complejos, convenios o logística muy avanzada fuera de catálogo y FAQ, responde EXACTAMENTE: SOS_HANDOFF`;
 

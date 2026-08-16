@@ -33,7 +33,7 @@
   },
   {
     "pregunta": "¿Cuánto rinden los barriles? ¿Cuántos tragos / cócteles / vasos / copas salen? ¿Hasta cuántos vasos da? (Rendimiento)",
-    "respuesta": "Responde SOLO según el contexto del chat (ver CONTEXTO DE SESIÓN). Calculando vaso/copa con hielo ≈ 200ml.\n- Si el cliente está en Barriles Desechables: un barril de 5L rinde aprox. 25 cócteles. No menciones 10L/20L/30L ni formatos de evento.\n- Si está en Eventos (Dispensador Portátil): 5L ≈ 25 cócteles | 10L ≈ 50 cócteles. No menciones 20L/30L ni barriles desechables salvo que pregunte.\n- Si está en Eventos (Muro de Coctelería): 10L ≈ 50 | 20L ≈ 100 | 30L ≈ 150 cócteles. No menciones 5L ni desechables salvo que pregunte.\n- Si Eventos sin formato aún: di Dispensador (5L/10L) y Muro (10L/20L/30L); NUNCA digas solo desechable.\n- Si no está definido: resumen breve y pregunta si cotiza desechable o evento."
+    "respuesta": "Un barril de 5L rinde aprox. 25 cócteles (vaso/copa con hielo ≈ 200 ml). En Dispensador Portátil también hay 10L ≈ 50 cócteles. En Muro de Coctelería: 10L ≈ 50, 20L ≈ 100 y 30L ≈ 150 cócteles."
   },
   {
     "pregunta": "¿Cuánto duran los barriles? ¿Qué duración tienen? ¿Cuánto tiempo se conservan? ¿Caducidad / vencimiento / vida útil? ¿Se pueden guardar en el refri? ¿Si sobra se puede volver a guardar?",
@@ -50,5 +50,9 @@
   {
     "pregunta": "¿Tienen sin alcohol? ¿Hay mocktails? ¿Opciones sin alcohol? ¿Tragos para abstemios o embarazadas? ¿Cero alcohol?",
     "respuesta": "Sí. Tenemos Mocktails (sin alcohol): versiones refrescantes como Mojito Mocktail, Sangría Mocktail, Maracuyá Spritz Mocktail y variantes de Mojito. Ideales si hay abstemios, embarazadas o quieres una estación para todos. En la cotización de eventos puedes pedir el pack sin alcohol o agregar un Mocktail concreto."
+  },
+  {
+    "pregunta": "¿Qué incluye el servicio? ¿Qué trae? ¿Viene incluido el hielo, vasos, copas, garnish o accesorios? ¿Hasta cuándo retiran? ¿Hay límite de tiempo?",
+    "respuesta": "En Servicio para Eventos va incluido sin costo extra: hielo suficiente para todo el evento; garnish (decoraciones deshidratadas); préstamo de vasos y/o copas; accesorios de bar (hieleras, palas, pinzas y más). Instalamos horas antes y retiramos como máximo al día siguiente. En Barriles Desechables de 5L el cóctel va listo para servir: hielo, vasos, garnish y accesorios no van incluidos."
   }
 ]

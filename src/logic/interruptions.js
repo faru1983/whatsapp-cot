@@ -18,7 +18,7 @@ import {
   isOnlyBrowsing,
   wantsInstagramOrSocial
 } from './utils.js';
-import { eventFormatFromPrice } from './eventos-intro.js';
+import { eventFormatFromPrice, getEventServiceIncludesReply } from './eventos-intro.js';
 
 // ==============================================================================
 // 1. SALUDO / RUIDO / ENTUSIASMO (no es decisión de menú)
@@ -162,6 +162,73 @@ export function asksCocktailPriceOrCatalog(messageText) {
   if (asksPriceOrCatalog(messageText)) return true;
   // Rendimiento / vasos / tragos (frecuente en Eventos con formato ya elegido)
   return asksYieldOrRendimiento(messageText);
+}
+
+/**
+ * asksWhatServiceIncludes: ¿Pregunta qué trae / va incluido el servicio?
+ * Ej.: "qué incluye el servicio", "viene el hielo", "traen vasos".
+ * No es un pedido de cóctel: va a FAQ / copy de incluido, nunca al NLU de productos.
+ *
+ * @param {string} messageText
+ * @returns {boolean}
+ */
+export function asksWhatServiceIncludes(messageText) {
+  const t = String(messageText || '').trim();
+  if (!t) return false;
+  const lower = t.toLowerCase();
+  if (/\bqu[eé]\s+(incluye|trae|viene|va)\b/i.test(lower)) return true;
+  if (/\b(viene|va|van)\s+incluido/i.test(lower)) return true;
+  if (/\b(incluye|incluido|incluidos|trae|traen|viene|vienen)\b/i.test(lower)
+      && /\b(servicio|hielo|garnish|vasos?|copas?|accesorios|hieleras?|pinzas?)\b/i.test(lower)) {
+    return true;
+  }
+  return false;
+}
+
+/**
+ * getBarrilesServiceIncludesReply: Qué NO incluye el barril desechable (vs Eventos).
+ *
+ * @returns {string}
+ */
+export function getBarrilesServiceIncludesReply() {
+  return `El *Barril Desechable* de 5L va *listo para servir* 🍸
+
+Hielo, vasos, garnish y accesorios de bar *no* van incluidos (eso es del *Servicio para Eventos*).`;
+}
+
+/**
+ * resolveServiceIncludesReply: Copy de “qué incluye” según el carril (sin LLM).
+ * Eventos → incluido; Barriles → no incluye hielo/vasos; sin carril → ambos + pregunta.
+ *
+ * @param {object} [session]
+ * @param {string} [currentStateId]
+ * @returns {string}
+ */
+export function resolveServiceIncludesReply(session = {}, currentStateId = '') {
+  const lane = resolveFlowLane(session, currentStateId || session.currentState);
+  if (lane === 'EVENTOS') return getEventServiceIncludesReply();
+  if (lane === 'BARRILES') return getBarrilesServiceIncludesReply();
+  return `En *Servicio para Eventos* va incluido sin costo extra: hielo, garnish, préstamo de vasos/copas y accesorios de bar. Instalamos horas antes y retiramos como máximo al día siguiente.
+
+En *Barriles Desechables* (5L) el cóctel va listo para llevar: hielo, vasos y garnish *no* van incluidos.
+
+¿Cotizas *Eventos* o *Barriles*?`;
+}
+
+/**
+ * tryProgrammaticFaqReply: FAQs que NUNCA deben pasar por el LLM (copy + carril).
+ * Si hay match, el engine/responderFAQ usan este texto; si no, null.
+ *
+ * @param {string} messageText
+ * @param {object} [session]
+ * @param {string} [currentStateId]
+ * @returns {string|null}
+ */
+export function tryProgrammaticFaqReply(messageText, session = {}, currentStateId = '') {
+  if (asksWhatServiceIncludes(messageText)) {
+    return resolveServiceIncludesReply(session, currentStateId);
+  }
+  return null;
 }
 
 /**

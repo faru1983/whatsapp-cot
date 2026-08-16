@@ -57,15 +57,19 @@ Convención: `ID_DEL_ESTADO` → `src/flows/<flujo>/states/ID_DEL_ESTADO.js`
 
 ## Reglas vs IA (qué esperar del bot)
 
+Contrato completo: `conversational-rails.mdc` (tres oficios, orden del engine, validar un dato).
+
 | Capa | Cuándo | Dónde |
 |---|---|---|
-| **Reglas / parsers** | Menús, fechas, comunas, carrito, keywords, precios | `validateAndProcess`, `validators/`, `keyword-intent`, helpers |
-| **NLU (IA)** | Intención ambigua en menús sí/no; extraer productos del texto | `nlu-intent.js`, `llm.js` extractores |
-| **FAQ** | Pregunta lateral con dato pendiente (máx. 1 por dato) | `db/faq.json` + `responderFAQ` en engine |
-| **Fallback LLM** | `success: false` sin FAQ; respuesta corta contextual | `aiContextPrompt` del estado + `llm.js` |
+| **Reglas / parsers** | Menús, fechas, comunas, p/p, carrito, keywords, precios, “incluye” | `validateAndProcess`, `validators/`, `keyword-intent`, `interruptions`, helpers |
+| **NLU del paso** | Parser no cubre el casillero (menú ambiguo, p/p, tipo, nombres de catálogo) | `nlu-intent.js`, extractores en `llm.js`. JSON / número, no prosa. Sin certeza → re-pregunta |
+| **FAQ** | Pregunta lateral con dato pendiente (máx. 1 por dato) | `db/faq.json` + `responderFAQ`; luego re-pregunta el paso |
+| **Fallback LLM** | `success: false`, parece pregunta, sin FAQ | `aiContextPrompt` del estado + `generateResponse` (máx. 2 frases) |
 | **SOS / mute** | 2 strikes, humano, mirón, anti-loop | `engine.js`, `flow-stall.js` |
 
-**No** usar menú numerado + `resolveDecisionIntent` en pasos de datos libres (fecha, cócteles, contacto).
+**No** usar menú numerado + `resolveDecisionIntent` en pasos de datos libres (fecha, cócteles, p/p, contacto).
+
+Si un fallo no está en estas reglas, **documentar el patrón** en `conversational-rails.mdc` + `systemic-fixes.mdc` en el mismo cambio.
 
 ## Checklist al implementar un cambio de copy/UX
 

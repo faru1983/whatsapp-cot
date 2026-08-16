@@ -110,7 +110,7 @@ Al agregar funcionalidad:
 
 - Cambios mínimos: solo el estado/flujo pedido.
 - Reutilizar: `normalizeString`, `parseDate`, `OrderBuilder`, `interruptions`, `resolveDecisionIntent`, `img()`, etc.
-- Validación programática primero; LLM como fallback / NLU.
+- Validación programática primero; LLM como fallback / NLU. Contrato: `conversational-rails.mdc` (parser → NLU del paso → FAQ → LLM corto; la IA no cotiza sola).
 - Decisiones: menú con emojis numéricos (`1️⃣`/`2️⃣`) + sinónimos en *negrita*; aceptar emoji o dígito en input (`matchesMenuOption`).
 - Errores: `try/catch` + `console.error`; no silenciar.
 - Sesiones: mutar en el estado; `saveSession` desde `engine.js`.

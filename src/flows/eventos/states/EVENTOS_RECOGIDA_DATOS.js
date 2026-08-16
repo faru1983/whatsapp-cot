@@ -8,6 +8,7 @@ import { getBrowseOnlyGoodbye } from '../../../views/templates.js';
 import {
   asksPriceOrCatalog,
   asksYieldOrRendimiento,
+  asksWhatServiceIncludes,
   buildContextualPriceOrCatalogTip,
   wantsBrowseOnlyClose
 } from '../../../logic/interruptions.js';
@@ -39,7 +40,8 @@ import {
   buildFormatPhaseAReplies,
   buildFormatPhaseBReplies,
   eventosIntroMenuQuestion,
-  buildDrinksPerPersonAsk
+  buildDrinksPerPersonAsk,
+  getEventServiceIncludesReply
 } from '../../../logic/eventos-intro.js';
 import { buildVolumeRecommendation, resolveDrinksPerPersonChoice, parsePerPersonChoice } from '../../../logic/eventos-style-pack.js';
 
@@ -309,6 +311,19 @@ export const EVENTOS_RECOGIDA_DATOS = defineState({
       };
     }
 
+    // "¿qué incluye el servicio?" → FAQ de incluido + dato pendiente
+    if (asksWhatServiceIncludes(messageText) && !messageLooksLikeGuests(messageText)) {
+      const pending = shortQuestionForSession(session)
+        .replace(/\n\n_\(Soy asistente virtual[^_]*\)_\s*$/i, '')
+        .trim();
+      return {
+        success: true,
+        nextState: 'EVENTOS_RECOGIDA_DATOS',
+        customReply: `${getEventServiceIncludesReply()}\n\n${pending}`,
+        flowProgress: true
+      };
+    }
+
     // Skip de tipo (“aún no lo sé”) → Por confirmar + invitados
     if (needsCelebrationType(session) && wantsSkipCelebrationType(messageText)) {
       return skipCelebrationAndAskGuests(session);
@@ -328,6 +343,7 @@ export const EVENTOS_RECOGIDA_DATOS = defineState({
     const isAskingPriceOrYieldWithoutData = (
       asksPriceOrCatalog(messageText) || asksYieldOrRendimiento(messageText)
     )
+      && !asksWhatServiceIncludes(messageText)
       && !hasGuests(session)
       && !guestsJustParsed;
     if (isAskingPriceOrYieldWithoutData) {

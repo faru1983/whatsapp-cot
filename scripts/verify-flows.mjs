@@ -9,7 +9,7 @@ import { fileURLToPath } from 'node:url';
 import { statesMap } from '../src/flows/index.js';
 import { processMessage } from '../src/core/engine.js';
 import { getSession, resetSession, closeDb, saveSession } from '../src/core/db.js';
-import { ASSETS_DIR } from '../src/core/paths.js';
+import { ASSETS_DIR, FAQ_JSON_PATH } from '../src/core/paths.js';
 import { isImagePart, isVideoPart } from '../src/logic/media.js';
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
@@ -111,6 +111,22 @@ assert(fs.existsSync(path.join(ASSETS_DIR, 'dispensador_portatil.webp')), `exist
 assert(fs.existsSync(path.join(ASSETS_DIR, 'muro_de_cocteleria.webp')), `existe asset muro_de_cocteleria.webp`);
 assert(fs.existsSync(path.join(ASSETS_DIR, 'eventos_dispensador1.webp')), `existe asset eventos_dispensador1.webp`);
 assert(fs.existsSync(path.join(ASSETS_DIR, 'eventos_muro.mp4')), `existe asset eventos_muro.mp4`);
+{
+  const faqData = JSON.parse(fs.readFileSync(FAQ_JSON_PATH, 'utf8'));
+  const { looksLikeInternalPromptLeak, sanitizeCustomerFacingReply } = await import('../src/logic/utils.js');
+  assert(faqData.some((f) => /incluye el servicio/i.test(f.pregunta)), 'FAQ registra qué incluye el servicio');
+  assert(faqData.some((f) => /hielo suficiente/i.test(f.respuesta)), 'FAQ incluye hielo suficiente');
+  for (const f of faqData) {
+    assert(
+      !looksLikeInternalPromptLeak(f.respuesta),
+      `FAQ "${String(f.pregunta).slice(0, 48)}" no guarda prompt interno`
+    );
+  }
+  const leaked = 'Usa el CONTEXTO DEL CLIENTE. - Si EVENTOS (Dispensador o Muro): PROHIBIDO inventar extras.';
+  assert(looksLikeInternalPromptLeak(leaked), 'detecta leak de prompt FAQ');
+  assert(sanitizeCustomerFacingReply(leaked) === '', 'sanitize vacía un prompt pegado');
+  assert(/Hielo/i.test(sanitizeCustomerFacingReply('En el servicio va *Hielo* suficiente.')), 'copy de venta pasa el sanitize');
+}
 
 // Helpers de *seguimos*: puro vs mezclado con pedido
 const {
@@ -118,6 +134,9 @@ const {
   wantsAdvanceProductsOrder,
   asksCocktailPriceOrCatalog,
   asksYieldOrRendimiento,
+  asksWhatServiceIncludes,
+  tryProgrammaticFaqReply,
+  resolveServiceIncludesReply,
   buildContextualPriceOrCatalogTip,
   resolveFlowLane
 } = await import('../src/logic/interruptions.js');
@@ -132,6 +151,14 @@ assert(!isOnlyAdvanceProductsOrder('aka'), `"aka" no es advance`);
 // Precio contextual: no mezclar Barriles↔Eventos según el carril
 assert(asksCocktailPriceOrCatalog('Valor de los cocteles'), `detecta valor de cócteles`);
 assert(asksYieldOrRendimiento('Hasta cuantos vasos da ?'), `detecta pregunta de vasos/rendimiento`);
+assert(asksWhatServiceIncludes('que incluye el servicio?'), `detecta qué incluye el servicio`);
+assert(asksWhatServiceIncludes('que incluye?'), `detecta "qué incluye?" corto`);
+assert(/Hielo/i.test(tryProgrammaticFaqReply('que incluye?', { userIntent: 'EVENTOS' }, 'EVENTOS_ELECCION_MENU')), `incluye Eventos es copy de venta`);
+assert(!/CONTEXTO DEL CLIENTE|PROHIBIDO/i.test(tryProgrammaticFaqReply('que incluye?', { userIntent: 'EVENTOS' }, 'EVENTOS_ELECCION_MENU')), `incluye Eventos sin prompt interno`);
+assert(/no.*van incluidos/i.test(resolveServiceIncludesReply({ userIntent: 'BARRILES' }, 'BARRILES_RECOGIDA_PRODUCTOS')), `incluye Barriles aclara que no trae hielo`);
+assert(asksWhatServiceIncludes('viene el hielo'), `detecta viene el hielo`);
+assert(asksWhatServiceIncludes('traen vasos'), `detecta traen vasos`);
+assert(!asksWhatServiceIncludes('10L Mojito'), `pedido de cóctel ≠ qué incluye`);
 assert(asksCocktailPriceOrCatalog('Hasta cuantos vasos da ?'), `vasos cuenta como tip contextual`);
 assert(!asksCocktailPriceOrCatalog('cuánto cuesta el despacho a Providencia'), `despacho ≠ tip de cócteles`);
 assert(resolveFlowLane({ userIntent: 'EVENTOS' }, 'EVENTOS_ELECCION_FORMATO') === 'EVENTOS', `carril eventos`);
@@ -422,6 +449,12 @@ assert(isValidFreeformLocationCapture('Talca'), `Talca libre sigue siendo válid
   assert(extractGuestsFromMessage('15 diciembre') == null, `fecha "15 diciembre" ≠ invitados`);
   assert(extractGuestsFromMessage('15 de diciembre') == null, `fecha "15 de diciembre" ≠ invitados`);
   assert(extractGuestsFromMessage('50 invitados') === 50, `explícito 50 invitados`);
+  assert(extractGuestsFromMessage('treinta personas') === 30, `palabras + unidad → invitados`);
+  assert(extractGuestsFromMessage('somos como cincuenta') === 50, `decena en palabras ≥12 → invitados`);
+  assert(extractGuestsFromMessage('cuarenta y cinco invitados') === 45, `treinta y cinco patrón`);
+  assert(extractGuestsFromMessage('dos') == null, `"dos" suelto no es invitados (es p/p)`);
+  assert(extractGuestsFromMessage('tres cócteles') == null, `"tres" de p/p no es invitados`);
+  assert(extractGuestsFromMessage('veinte litros') == null, `"veinte litros" ≠ invitados`);
   assert(parseCelebrationType('Es un bautizo') === 'Bautizo', `parser bautizo`);
   assert(parseCelebrationType('bautismo') === 'Bautizo', `parser bautismo`);
   assert(parseCelebrationType('Es una Rebelacion de Genero') === 'Revelación de género', `parser revelación (typo)`);
@@ -1845,7 +1878,8 @@ try {
     assert(!looksLikeUnrecognizedFlavorAttempt('no alcohólico'), '"no alcohólico" ≠ sabor inexistente');
     assert(!looksLikeUnrecognizedFlavorAttempt('cero alcohol'), '"cero alcohol" ≠ sabor inexistente');
     assert(!looksLikeUnrecognizedFlavorAttempt('mocktail'), '"mocktail" ≠ sabor inexistente');
-    assert(!looksLikeUnrecognizedFlavorAttempt('mojito sin alcohol'), '"mojito sin alcohol" ≠ sabor inexistente');
+    assert(!looksLikeUnrecognizedFlavorAttempt('que incluye el servicio?'), '"qué incluye el servicio" ≠ sabor');
+    assert(!looksLikeUnrecognizedFlavorAttempt('viene el hielo'), '"viene el hielo" ≠ sabor');
   }
 
   console.log('\n-- Sin alcohol (Mocktails): detección + sugerencia --');
@@ -3163,6 +3197,54 @@ try {
     assert(!session.orderBuilder.products['Mojito::10L'], `"saca el mojito" borra el Mojito base`);
     assert(session.orderBuilder.products['Mojito Frambuesa::10L'], `"saca el mojito" NO toca Mojito Frambuesa`);
     assert(/10L Mojito Frambuesa/i.test(t2), `Frambuesa sigue en el resumen`);
+  }
+
+  // "qué incluye el servicio" con carrito: FAQ de incluido, NO agregar Pisco Sour (NLU)
+  console.log('\n-- Eventos: qué incluye el servicio no muta el carrito --');
+  resetSession(SESSION_ID);
+  {
+    const session = getSession(SESSION_ID);
+    session.currentState = 'EVENTOS_ELECCION_MENU';
+    session.userIntent = 'EVENTOS';
+    session.eventoFormato = 'Dispensador Portátil';
+    session.guests = 100;
+    session.orderBuilder = {
+      type: 'dispensador',
+      products: { 'Mojito::10L': { name: 'Mojito', quantity: 1, litrage: '10L' } },
+      extras: {}
+    };
+    const st = statesMap.EVENTOS_ELECCION_MENU;
+    const r1 = await st.validateAndProcess('que incluye el servicio?', session);
+    const t1 = replyToText(r1.customReplies || r1.customReply);
+    assert(/Hielo/i.test(t1) && /Garnish/i.test(t1) && /vasos/i.test(t1), 'responde lo incluido');
+    assert(/d[ií]a siguiente/i.test(t1), 'menciona retiro al día siguiente');
+    assert(!/Pisco Sour/i.test(t1), 'no inventa Pisco Sour desde el ejemplo del carrito');
+    assert(session.orderBuilder.products['Mojito::10L'], 'no toca el carrito');
+    assert(!session.orderBuilder.products['Pisco Sour::5L'], 'no agrega Pisco Sour');
+    assert(Object.keys(session.orderBuilder.products).length === 1, 'sigue un solo sabor');
+  }
+
+  console.log('\n-- Eventos: "qué incluye?" por engine (pre-FAQ) no pega el prompt --');
+  resetSession(SESSION_ID);
+  {
+    const session = getSession(SESSION_ID);
+    session.currentState = 'EVENTOS_ELECCION_MENU';
+    session.userIntent = 'EVENTOS';
+    session.eventoFormato = 'Dispensador Portátil';
+    session.guests = 30;
+    session.eventosDrinksPerGuest = 2;
+    session.orderBuilder = {
+      type: 'dispensador',
+      products: { 'Mojito::10L': { name: 'Mojito', quantity: 1, litrage: '10L' } },
+      extras: {}
+    };
+    saveSession(SESSION_ID, session);
+    const reply = await processMessage(SESSION_ID, 'que incluye?');
+    const text = replyToText(reply);
+    assert(/Hielo/i.test(text) && /Garnish/i.test(text), 'engine responde lo incluido');
+    assert(!/CONTEXTO DEL CLIENTE|PROHIBIDO inventar|Si EVENTOS/i.test(text), 'engine no pega el prompt interno');
+    const after = getSession(SESSION_ID);
+    assert(after.orderBuilder.products['Mojito::10L'], 'engine no muta el carrito');
   }
 
   // Mismo patrón que en Barriles (sistémico, no un parche puntual de Barriles):

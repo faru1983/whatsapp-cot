@@ -449,6 +449,25 @@ async function startBot() {
     // 2. MENSAJES: CLIENTES, ADMIN Y EVENTOS DE SISTEMA
     // ==============================================================================
     sock.ev.on('messages.upsert', async ({ messages }) => {
+      // Red de seguridad del listener completo: un error aquí (DB, resolución de JID,
+      // etc.) no debe tirar abajo el proceso entero (unhandledRejection = bot caído).
+      try {
+        await handleIncomingMessage(messages, sock, config);
+      } catch (error) {
+        console.error('Error procesando mensaje de WhatsApp:', error?.message || error);
+      }
+    });
+
+    /**
+     * handleIncomingMessage: Cuerpo real del listener messages.upsert.
+     * Separado en función propia para poder envolverlo en un solo try/catch
+     * y no perder ningún mensaje entrante por una excepción no prevista.
+     *
+     * @param {Array} messages - Array de mensajes del evento (Baileys entrega 1 normalmente)
+     * @param {object} sock - Socket Baileys activo
+     * @param {object} config - loadBotConfig() ya resuelto para esta conexión
+     */
+    async function handleIncomingMessage(messages, sock, config) {
       const message = messages[0];
 
       if (!message || message.key.remoteJid === 'status@broadcast') {
@@ -726,7 +745,7 @@ async function startBot() {
       } catch (error) {
         console.error('Error procesando mensaje de WhatsApp:', error.message);
       }
-    });
+    }
   } catch (error) {
     // Falló antes de conectar (auth, red, etc.): liberamos flag y reintentamos
     console.error('Error iniciando socket WhatsApp:', error.message);
@@ -734,6 +753,22 @@ async function startBot() {
     scheduleReconnect(5000);
   }
 }
+
+// ==============================================================================
+// 3. RED DE SEGURIDAD DEL PROCESO
+// El bot corre 24/7 sin supervisor interactivo. Una excepción o promesa sin
+// .catch() en algún rincón (Baileys, un timer, un fire-and-forget) no debe
+// tirar abajo todo el proceso: solo la logueamos y seguimos.
+// Si pm2/systemd reinicia el proceso en cada crash, preferimos loguear y seguir
+// vivo (los mensajes de WhatsApp no esperan a un restart).
+// ==============================================================================
+process.on('unhandledRejection', (reason) => {
+  console.error('⚠️  Promesa sin manejar (unhandledRejection):', reason?.message || reason);
+});
+
+process.on('uncaughtException', (error) => {
+  console.error('⚠️  Excepción no capturada (uncaughtException):', error?.message || error);
+});
 
 // Arranque de la app.
 startBot().catch((error) => {

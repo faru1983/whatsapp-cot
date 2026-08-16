@@ -22,7 +22,7 @@ import {
   wantsNonAlcoholicOption,
   asksAvailableCocktailsList
 } from '../logic/utils.js';
-import { isGreetingOrNoise, wantsExplicitHandoff, asksCocktailPriceOrCatalog, buildContextualPriceOrCatalogTip, resolveFlowLane } from '../logic/interruptions.js';
+import { isGreetingOrNoise, wantsExplicitHandoff, asksCocktailPriceOrCatalog, buildContextualPriceOrCatalogTip, resolveFlowLane, asksWhatServiceIncludes, tryProgrammaticFaqReply } from '../logic/interruptions.js';
 import { looksLikeUnrecognizedFlavorAttempt } from '../logic/barriles-intro.js';
 import { asksCoverageAreaQuestion } from '../logic/eventos-helpers.js';
 import { getPendingFlowRequirement } from '../logic/flow-stall.js';
@@ -614,7 +614,8 @@ async function processMessageUnlocked(sessionId, messageText, options = {}) {
     && currentStateId !== 'ESPERANDO_INTENCION';
 
   const isQuestion = /\?/.test(messageText)
-    || /^(como|cómo|donde|dónde|cuando|cuándo|quien|quién|porque|por\s*qu[eé]|que\s+es|qué\s+es|tienen|tienen\s+disponibilidad|cuanto|cuánto|cuesta|cuestan|vale|valen|hacen|realizan|despachan|envian|envían|van|llegan)\b/i.test(messageText.trim());
+    || /^(como|cómo|donde|dónde|cuando|cuándo|quien|quién|porque|por\s*qu[eé]|que\s+es|qué\s+es|tienen|tienen\s+disponibilidad|cuanto|cuánto|cuesta|cuestan|vale|valen|hacen|realizan|despachan|envian|envían|van|llegan)\b/i.test(messageText.trim())
+    || asksWhatServiceIncludes(messageText);
 
   // Si ya cotiza Eventos/Barriles, el tip contextual (o el estado) responde precios de cócteles.
   // Evita que FAQ diga "elige Desechable / Dispensador / Muro" a mitad de un flujo.
@@ -647,6 +648,37 @@ async function processMessageUnlocked(sessionId, messageText, options = {}) {
     || asksAvailableCocktailsList(messageText)
   );
 
+  /**
+   * commitFaqStyleReply: Respuesta lateral + re-pregunta corta del paso (sin reset de strikes).
+   *
+   * @param {string} body - Copy ya listo para el cliente
+   * @returns {string}
+   */
+  const commitFaqStyleReply = (body) => {
+    if (pendingFlow) {
+      incrementFaqSidequest(session, pendingFlow);
+      cliLog(`FAQ sidequest (${pendingFlow}) → strikes sin reset`);
+    } else {
+      session.consecutiveErrors = 0;
+    }
+    const questionText = lastPromptPart(resolvePromptQuestion(currentState, session));
+    const shortQ = typeof currentState.shortQuestion === 'function' ? currentState.shortQuestion(session) : currentState.shortQuestion;
+    const onMissHint = getOnMissHint(currentStateId, session, pendingFlow);
+    const finalQuestion = shortQ || questionText;
+    const guidedQuestion = buildGuidedStepQuestion(finalQuestion, onMissHint);
+    const reply = appendStepQuestionIfNeeded(sanitizeCustomerFacingReply(body), guidedQuestion);
+    pushModelTextAndSave(session, sessionId, reply);
+    return reply;
+  };
+
+  // Copy fijo (qué incluye, etc.): nunca mandar el prompt de faq.json al cliente
+  const programmaticFaq = tryProgrammaticFaqReply(messageText, session, currentStateId);
+  if (programmaticFaq && canPrecheckFaq && !flowAlreadyStalling && faqSidequestAllowed
+      && !skipFaqForStrictBarrilesMenu) {
+    cliLog('FAQ PRE-CHECK: copy programático (sin LLM)');
+    return commitFaqStyleReply(programmaticFaq);
+  }
+
   // Si ya hubo un strike y el paso sigue pendiente, no usamos FAQ: dejamos que el fallback cuente el strike
   if (isQuestion && canPrecheckFaq && !flowAlreadyStalling && faqSidequestAllowed
       && !skipFaqForContextualPrice && !skipFaqForStrictBarrilesMenu
@@ -671,23 +703,7 @@ async function processMessageUnlocked(sessionId, messageText, options = {}) {
 
     if (faqResponse !== 'NO_FAQ') {
       cliLog('FAQ PRE-CHECK: Match con FAQ → respondiendo antes de extraer datos');
-      if (pendingFlow) {
-        incrementFaqSidequest(session, pendingFlow);
-        cliLog(`FAQ sidequest (${pendingFlow}) → strikes sin reset`);
-      } else {
-        session.consecutiveErrors = 0;
-      }
-
-      // Si promptQuestion es array (info + pregunta), usamos solo la última parte
-      const questionText = lastPromptPart(resolvePromptQuestion(currentState, session));
-      const shortQ = typeof currentState.shortQuestion === 'function' ? currentState.shortQuestion(session) : currentState.shortQuestion;
-      const onMissHint = getOnMissHint(currentStateId, session, pendingFlow);
-      const finalQuestion = shortQ || questionText;
-      const guidedQuestion = buildGuidedStepQuestion(finalQuestion, onMissHint);
-
-      const reply = appendStepQuestionIfNeeded(sanitizeCustomerFacingReply(faqResponse), guidedQuestion);
-      pushModelTextAndSave(session, sessionId, reply);
-      return reply;
+      return commitFaqStyleReply(faqResponse);
     }
   }
 
@@ -965,13 +981,19 @@ async function processMessageUnlocked(sessionId, messageText, options = {}) {
     if (strictBarrilesMenuMiss) {
       cliLog('FAQ: omitido (menú estricto Barriles) → disculpa de opción + strike');
     } else if (faqSidequestAllowed) {
-      cliLog('FAQ: consultando faq.json + catálogo/despachos (datos.json) con IA...');
-      const faqData = JSON.parse(fs.readFileSync(FAQ_JSON_PATH, 'utf8'));
-      faqResponse = await responderFAQ(messageText, faqData, {
-        userIntent: session.userIntent,
-        eventoFormato: session.eventoFormato,
-        currentStateId
-      });
+      const programmaticMiss = tryProgrammaticFaqReply(messageText, session, currentStateId);
+      if (programmaticMiss) {
+        cliLog('FAQ: copy programático (sin LLM)');
+        faqResponse = programmaticMiss;
+      } else {
+        cliLog('FAQ: consultando faq.json + catálogo/despachos (datos.json) con IA...');
+        const faqData = JSON.parse(fs.readFileSync(FAQ_JSON_PATH, 'utf8'));
+        faqResponse = await responderFAQ(messageText, faqData, {
+          userIntent: session.userIntent,
+          eventoFormato: session.eventoFormato,
+          currentStateId
+        });
+      }
     } else {
       cliLog(`FAQ: sidequest agotado para "${pendingFlow}" → plantilla on-miss`);
     }

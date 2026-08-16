@@ -30,7 +30,8 @@ import {
 import {
   wantsAdvanceProductsOrder,
   isOnlyAdvanceProductsOrder,
-  isGreetingOrNoise
+  isGreetingOrNoise,
+  asksWhatServiceIncludes
 } from '../../../logic/interruptions.js';
 import { extractEventProductsWithAI } from '../../../core/llm.js';
 import { OrderBuilder } from '../../../logic/order-builder.js';
@@ -88,17 +89,18 @@ import {
   buildEventPriceListAskReplies,
   buildCategoryFlavorAsk
 } from '../../../logic/eventos-style-pack.js';
-import { nextEventosAck } from '../../../logic/eventos-intro.js';
+import { nextEventosAck, getEventServiceIncludesReply } from '../../../logic/eventos-intro.js';
 
 const AI_PROMPT = `[SISTEMA - ESTADO: ELECCIÓN DE SABORES (EVENTOS)]
 Un solo paso: el cliente elige cócteles (favoritos manuales, *sugerida*, o ajustando un pedido ya armado).
 La lista de sabores NO incluye precios. Usa el CONTEXTO DE FORMATO inyectado (Dispensador/Muro, litrajes, mínimo, instalación).
 
-1. Dudas breves (logística, rendimiento, mocktails). Precios/valores de carta → imagen de precios del formato (no inventes cifras).
+1. Dudas breves (logística, qué incluye el servicio, rendimiento, mocktails). Precios/valores de carta → imagen de precios del formato (no inventes cifras).
 2. Con pedido armado: ajustar sabores o *ok* para cotización formal.
 3. Si nombra una CATEGORÍA (Clásicos, Combinados, Mocktails) sin un sabor concreto: NO elijas un cóctel por él. Pide nombres de esa categoría.
-4. Corrige invitados/tipo sin cócteles → confirma y vuelve a pedir sabores o *sugerida*.
-5. Dispensador: instalación gratis. Muro: instalación ~$50.000. No inventes envíos extra.`;
+4. Si pregunta qué incluye el servicio: responde hielo, garnish, vasos/copas, accesorios y retiro al día siguiente. NO agregues cócteles.
+5. Corrige invitados/tipo sin cócteles → confirma y vuelve a pedir sabores o *sugerida*.
+6. Dispensador: instalación gratis. Muro: instalación ~$50.000. No inventes envíos extra.`;
 
 /**
  * eventCartLineCount: Cuántas líneas de cóctel hay en el carrito Eventos.
@@ -491,6 +493,19 @@ _(ej: ${allowedLitrages[0]} — disponibles: ${allowedLitrages.join(', ')})_`
         success: true,
         nextState: 'EVENTOS_ELECCION_MENU',
         customReplies: buildEventPriceListAskReplies(formatKey, { session })
+      };
+    }
+
+    // "¿qué incluye el servicio?" → FAQ de incluido; NUNCA extraer cócteles (ni del ejemplo *quita el pisco*)
+    if (asksWhatServiceIncludes(messageText) && !hasProductOrderSignal(messageText)) {
+      return {
+        success: true,
+        nextState: 'EVENTOS_ELECCION_MENU',
+        customReplies: [
+          getEventServiceIncludesReply(),
+          shortQuestionForSession(session)
+        ],
+        flowProgress: true
       };
     }
 

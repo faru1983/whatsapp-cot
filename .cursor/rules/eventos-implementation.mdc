@@ -96,12 +96,29 @@ La carta muestra secciones (*CLÁSICOS*, *COMBINADOS*, *MOCKTAILS*). El cliente 
 - Si nombra solo la categoría → `detectNamedCatalogCategory` + `buildCategoryFlavorAsk` (ejemplos de esa sección). **No** armar carrito ni mapear “Clásicos” a Pisco Sour.
 - Pack Combinados/Mocktails solo con pedido explícito (`armame`, `pack`, `propuesta`), no con el título suelto.
 
+## Rendimiento y valor por copa
+
+- Copy y cálculos usan el rendimiento de `datos.json` (`rendimientos_barriles`) y **5 cócteles por litro**. No rangos inventados tipo 25–30 / 50–60.
+- Carta: `formatBarrelYieldLabel` → `*5L* (~25 cócteles)`.
+- Resumen carrito / sugerida: `formatEventCartValuePitchLine` vía `formatEventCartTotalsLine` (total de copas + promedio $ por copa).
+
+## Qué incluye el servicio (no es un pedido)
+
+- Detector: `asksWhatServiceIncludes` (`interruptions.js`).
+- Copy Eventos: `getEventServiceIncludesReply()` (`eventos-intro.js`) + ficha en `db/faq.json`.
+- Interceptar en `EVENTOS_ELECCION_MENU` y `EVENTOS_RECOGIDA_DATOS` **sin** mutar carrito.
+- `looksLikeUnrecognizedFlavorAttempt` debe ser false (si no, el engine salta FAQ).
+- `extractEventProductsWithAI` **no** extrae cócteles de “qué incluye” ni de ejemplos del bot (`quita el pisco`).
+
+## Reglas vs IA en Eventos
+
 | Situación | Capa |
 |---|---|
 | Menús 1/2, confirmar | Keywords → `resolveDecisionIntent` |
 | Cócteles p/p | `parsePerPersonChoice` → `extractDrinksPerPersonWithAI` |
 | Pedido de cócteles | Parsers → categoría suelta (`detectNamedCatalogCategory`) → `extractEventProductsWithAI` |
 | Sugerida no detectada por keyword | NLU `quiere_sugerencia` |
+| Qué incluye / hielo / vasos | FAQ + `asksWhatServiceIncludes` (nunca NLU de productos) |
 | Pregunta lateral con dato pendiente | FAQ (máx. 1) → `engine.js` |
 | Off-topic sin FAQ | `aiPrompt` del estado + formato inyectado |
 | 2 strikes / anti-loop | SOS + mute (`flow-stall.js`, `registerEventosProductOrderMiss`) |
@@ -128,6 +145,7 @@ La carta muestra secciones (*CLÁSICOS*, *COMBINADOS*, *MOCKTAILS*). El cliente 
 | Contacto / API cotización | `cot-eventos-contact.js`, `templates.js` (`getEventosQuoteSummary`) |
 | Hint on-miss engine | `flow-rails.js` |
 | NLU productos eventos | `llm.js` → `extractEventProductsWithAI` |
+| FAQ incluye / precios | `interruptions.js`, `eventos-intro.js`, `db/faq.json` |
 
 **No** repartir un paso entre `templates.js` + estado + otro helper sin motivo.
 
@@ -137,6 +155,7 @@ La carta muestra secciones (*CLÁSICOS*, *COMBINADOS*, *MOCKTAILS*). El cliente 
 - [ ] ¿Precios on-demand siguen mandando imagen de carta correcta?
 - [ ] ¿Sugerida y carrito manual comparten formato de líneas y CTA?
 - [ ] ¿`aiPrompt` del estado sigue alineado con el paso?
+- [ ] ¿Preguntas de “incluye” / precios no caen en extractor de productos?
 - [ ] ¿Assert de **patrón** en `verify-flows.mjs` (no solo el string del reporte)?
 - [ ] ¿`npm run verify` pasa?
 

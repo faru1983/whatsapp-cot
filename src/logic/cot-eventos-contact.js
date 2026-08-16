@@ -424,7 +424,7 @@ export async function submitEventosQuoteConfirmed(session) {
       success: true,
       nextState: 'EVENTOS_CONFIRMAR_ENVIO',
       customReply: withAssistantFooter(
-        `No pude crear la cotización web todavía (${result.error}).\n` +
+        `No pude crear la cotización web todavía.\n` +
         `¿Revisamos los datos o prefieres escribir *HUMANO*?`
       ),
       flowProgress: true
