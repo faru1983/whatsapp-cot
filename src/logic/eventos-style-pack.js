@@ -25,10 +25,12 @@ import {
   formatEventCartSummary,
   formatEventCartTotalsLine,
   buildEventCartOkAsk,
-  extractGuestsFromMessage
+  extractGuestsFromMessage,
+  matchCocktailNamesInText
 } from './eventos-helpers.js';
 import { OrderBuilder } from './order-builder.js';
 import { formatMenuBlock, MENU_WRITE_CTA } from './flow-rails.js';
+import { matchesMenuOption } from './keyword-intent.js';
 import { nextEventosAck } from './eventos-intro.js';
 
 /** Base comercial: complemento de la celebración (no open bar completo). */
@@ -921,6 +923,172 @@ export function buildFormatSizesYieldLine(formatKey = 'dispensador') {
 _(rendimiento calculado en un vaso con hielo y 200 ml de cóctel)_`;
 }
 
+/** Umbral p/p: sobre 3 se confirma volumen (4, 5, …) sin empujar a bajar. */
+export const EVENT_PP_HIGH_CONFIRM_THRESHOLD = 3;
+
+/**
+ * needsHighPerPersonConfirmation: ¿Debemos confirmar p/p alto antes del menú intro?
+ *
+ * @param {number} per
+ * @returns {boolean}
+ */
+export function needsHighPerPersonConfirmation(per) {
+  return Number(per) > EVENT_PP_HIGH_CONFIRM_THRESHOLD;
+}
+
+/**
+ * buildHighPerPersonConfirmCopy: Explica volumen y pide confirmación (tono positivo).
+ *
+ * @param {object} session
+ * @param {'dispensador'|'muro'|string} formatKey
+ * @param {number} per
+ * @returns {string}
+ */
+export function buildHighPerPersonConfirmCopy(session, formatKey, per) {
+  const baseline = calculateEventBaseline(session?.guests, formatKey, per);
+  const guests = baseline.guests || Number(session?.guests) || 0;
+  const cocktails = baseline.totalCocktails;
+  const liters = baseline.totalLiters;
+  const guestBit = guests > 0 ? `Con *${guests}* invitados` : 'Con esos invitados';
+  return `Anoté *${per}* por persona. ${guestBit} son unos *${cocktails}* cócteles (~${liters}L).
+
+Queda una barra bien servida 😊
+
+¿Lo dejamos en *${per}*?`;
+}
+
+/**
+ * confirmsHighPerPersonChoice: ¿Confirma el p/p propuesto (sí / ok / mismo número)?
+ *
+ * @param {string} messageText
+ * @param {number} expectedPer
+ * @returns {boolean}
+ */
+export function confirmsHighPerPersonChoice(messageText, expectedPer) {
+  const raw = String(messageText || '').trim();
+  if (!raw) return false;
+  if (/^(si|sí|ok|okay|dale|listo|correcto|exacto|así|asi|dejalo|déjalo|confirmo)$/i.test(raw)) return true;
+  const parsed = parsePerPersonChoice(raw);
+  return parsed?.per === Number(expectedPer);
+}
+
+/**
+ * buildQuoteStartCopy: Una línea de transición (uso puntual fuera de la entrada a sabores).
+ *
+ * @returns {string}
+ */
+export function buildQuoteStartCopy() {
+  return `Armemos tu cotización 🥂`;
+}
+
+/**
+ * buildFormatSizeHint: Recordatorio corto de tamaños (sin repetir el pitch de INTRO_MENU).
+ *
+ * @param {'dispensador'|'muro'|string} formatKey
+ * @returns {string}
+ */
+export function buildFormatSizeHint(formatKey = 'dispensador') {
+  const isMuro = formatKey === 'muro';
+  const noun = isMuro ? 'Muro' : 'Dispensador';
+  const sizes = isMuro ? '*10L*, *20L* o *30L*' : '*5L* o *10L*';
+  return `En el *${noun}* los barriles son de ${sizes}.`;
+}
+
+/**
+ * buildFamilyChoiceMenu: Aclara una familia (Spritz) con 1/2/3 antes de armar litros.
+ *
+ * @param {string} family
+ * @param {string[]} opciones
+ * @param {string[]} [pendingNames] - Sabores ya claros (ej. Mojito) que esperan el reparto
+ * @returns {string}
+ */
+export function buildFamilyChoiceMenu(family, opciones, pendingNames = []) {
+  const labels = [...(opciones || [])];
+  if (labels.length >= 2) labels.push('Ambos');
+  const pendingBit = pendingNames.length
+    ? `Anoté *${pendingNames.join('*, *')}*. `
+    : '';
+  return `${pendingBit}De *${family}* elige cuál (así armamos bien los litros):
+
+${MENU_WRITE_CTA}
+${formatMenuBlock(labels)}`;
+}
+
+/**
+ * resolveFamilyChoiceFromMessage: Número, “ambos” o nombres concretos de la familia.
+ *
+ * @param {string} messageText
+ * @param {string[]} opciones
+ * @returns {string[]|null}
+ */
+export function resolveFamilyChoiceFromMessage(messageText, opciones) {
+  const opts = Array.isArray(opciones) ? opciones.filter(Boolean) : [];
+  if (opts.length === 0) return null;
+  const trimmed = String(messageText || '').trim();
+  if (!trimmed) return null;
+
+  if (matchesMenuOption(trimmed, 3) || /\b(ambos|los\s+dos|las\s+dos|los\s+2|las\s+2)\b/i.test(trimmed)) {
+    return [...opts];
+  }
+  if (matchesMenuOption(trimmed, 1) && opts[0]) return [opts[0]];
+  if (matchesMenuOption(trimmed, 2) && opts[1]) return [opts[1]];
+
+  const named = matchCocktailNamesInText(trimmed, opts);
+  if (named.length > 0) return named;
+  return null;
+}
+
+/**
+ * buildClasicosCatalogBlock: Clásicos al entrar + nota corta de extras on-demand.
+ *
+ * @param {'dispensador'|'muro'|string} formatKey
+ * @returns {string}
+ */
+export function buildClasicosCatalogBlock(formatKey = 'dispensador') {
+  const clasicos = getCoctelesNamesCatalogCompact({ sections: ['CLÁSICOS'] });
+  return `${buildFormatSizeHint(formatKey)}
+
+${clasicos}
+
+También tenemos *Combinados* y opciones *sin alcohol*: escribe *otros* y te los muestro.`;
+}
+
+/**
+ * wantsEventOtherFlavorsList: ¿Pide ver Combinados + Mocktails (CTA *otros* o sinónimos)?
+ * Debe ir antes del NLU de productos para no inventar cócteles desde "muestrame los otros".
+ *
+ * @param {string} text
+ * @returns {boolean}
+ */
+export function wantsEventOtherFlavorsList(text) {
+  const raw = String(text || '').trim();
+  if (!raw) return false;
+  const t = raw.toLowerCase().normalize('NFD').replace(/[\u0300-\u036f]/g, '');
+
+  if (/^otros?$/.test(t)) return true;
+
+  if (/\b(muestra|muestrame|mostrar|ver|dame|lista|listar|ensena|ensename)\w*\s+(los\s+)?otros?\b/.test(t)) {
+    return true;
+  }
+  if (/\blos\s+otros?\s+(sabores?|cocteles?)?\b/.test(t)
+      && /\b(muestra|muestrame|ver|dame|cuales|que)\b/.test(t)) {
+    return true;
+  }
+  if (/\bque\s+(mas|otros?)\s+(tienen|hay|ofrecen)\b/.test(t)) return true;
+  if (/\bcombinados?\b/.test(t) && /\b(sin\s+alcohol|mocktails?)\b/.test(t)) return true;
+
+  return false;
+}
+
+/**
+ * buildEventOtherFlavorsListBlock: Combinados + Mocktails on-demand (respuesta a *otros*).
+ *
+ * @returns {string}
+ */
+export function buildEventOtherFlavorsListBlock() {
+  return getCoctelesNamesCatalogCompact({ sections: ['COMBINADOS', 'MOCKTAILS'] });
+}
+
 /**
  * buildFlavorCatalogBlock: Rendimiento del formato + menú de sabores (sin carta de precios).
  *
@@ -936,16 +1104,15 @@ ${getCoctelesNamesCatalogCompact()}`;
 }
 
 /**
- * buildFlavorPickQuestion: Favoritos o selección sugerida (precios van después).
- * Sin pie HUMANO: va en burbuja propia después de la lista.
+ * buildFlavorPickQuestion: Pregunta de elección de sabores (carta de precios on-demand).
  *
  * @returns {string}
  */
 export function buildFlavorPickQuestion() {
-  return `*¿Cuáles son tus favoritos?*
-_(indica los *nombres* de los cócteles, no la categoría; ej: Mojito y Sangría)_
+  return `*¿Cuáles quieres de la lista?*
+_(nombres concretos; ej: Mojito y Sangría)_
 
-Si prefieres, escribe *sugerida* y te armo una cotización con los más populares y la ajustamos 😊`;
+O escribe *sugerida* y te armo una cotización con los más populares 😊`;
 }
 
 /**
@@ -1134,13 +1301,59 @@ export function buildFlavorPickEntryReplies(session, formatKey, per) {
   session.eventosFlavorMode = 'free';
   session.eventosStyleKey = null;
   session.eventosPackProposed = false;
+  session.eventosFlavorPhase = 'clasicos';
+  session.eventosSuggestedApplied = false;
 
   return [
-    `${buildFlavorCatalogBlock(formatKey)}
-
-Los *valores y el detalle* te los armo en el siguiente paso, cuando ya tenga los sabores.`,
+    buildClasicosCatalogBlock(formatKey),
     buildFlavorPickQuestion()
   ];
+}
+
+/**
+ * buildEventFlavorAdminNotify: Aviso a admins al entrar a elegir sabores (no SOS).
+ *
+ * @param {object} session
+ * @param {string} [lastMessage]
+ * @returns {{ type: string, title: string, body: string }}
+ */
+export function buildEventFlavorAdminNotify(session, lastMessage = '') {
+  const snippet = String(lastMessage || '').trim().slice(0, 120);
+  return {
+    type: 'INFO',
+    title: 'EVENTOS — ELIGIENDO SABORES',
+    body: [
+      'Cliente en elección de cócteles.',
+      `Formato: ${session?.eventoFormato || '?'}`,
+      `Invitados: ${session?.guests || '?'}`,
+      `Cócteles p/p: ${session?.eventosDrinksPerGuest || '?'}`,
+      snippet ? `Último mensaje: ${snippet}` : ''
+    ].filter(Boolean).join('\n')
+  };
+}
+
+/**
+ * wrapEventFlavorMenuEntry: Transición a ELECCION_MENU con ping admin + CRM (una vez).
+ *
+ * @param {object} session
+ * @param {string} formatKey
+ * @param {number} per
+ * @param {string} [lastMessage]
+ * @returns {object}
+ */
+export function wrapEventFlavorMenuEntry(session, formatKey, per, lastMessage = '') {
+  const result = {
+    success: true,
+    nextState: 'EVENTOS_ELECCION_MENU',
+    customReplies: buildFlavorPickEntryReplies(session, formatKey, per),
+    flowProgress: true
+  };
+  if (!session.eventosFlavorAdminPinged) {
+    session.eventosFlavorAdminPinged = true;
+    result.notifyAdmin = buildEventFlavorAdminNotify(session, lastMessage);
+    result.crmEngage = 'eventos_elige_sabores';
+  }
+  return result;
 }
 
 /** Alias: mismo camino que buildFlavorPickEntryReplies (compat tests / callers). */

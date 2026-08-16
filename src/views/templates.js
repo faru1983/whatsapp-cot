@@ -385,7 +385,9 @@ export function composeAdminAlertMessage({ type, title, clientLabel, body }) {
   // Cabecera según tipo: cotización confirmada vs pedido de ayuda
   const headline = type === 'SUCCESS'
     ? `✅ *COTIZACIÓN CONFIRMADA* — ${title || 'PEDIDO'}`
-    : `⚠️ *SOS — ASISTENCIA*${title ? ` — ${title}` : ''}`;
+    : type === 'INFO'
+      ? `📣 *AVISO*${title ? ` — ${title}` : ''}`
+      : `⚠️ *SOS — ASISTENCIA*${title ? ` — ${title}` : ''}`;
 
   return `${headline}\n👤 Cliente: ${clientLabel || 'Desconocido'}\n\n${(body || '').trim()}`;
 }

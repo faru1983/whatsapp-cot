@@ -16,7 +16,12 @@ import {
   buildFlavorPickEntryReplies,
   resolveDrinksPerPersonChoice,
   getEventosEstiloPhase,
-  calculateEventBaseline
+  calculateEventBaseline,
+  wrapEventFlavorMenuEntry,
+  needsHighPerPersonConfirmation,
+  buildHighPerPersonConfirmCopy,
+  confirmsHighPerPersonChoice,
+  parsePerPersonChoice
 } from '../../../logic/eventos-style-pack.js';
 
 /**
@@ -93,30 +98,59 @@ ${buildFlavorCatalogBlock(formatKey)}`,
     // Sesión legacy: ya tiene p/p pero quedó en ESTILO → mandar a sabores
     // ------------------------------------------------------------------
     if (phase === 'done') {
-      const replies = buildFlavorPickEntryReplies(
-        session,
-        formatKey,
-        Number(session.eventosDrinksPerGuest) || 2
-      );
+      const per = Number(session.eventosDrinksPerGuest) || 2;
+      return wrapEventFlavorMenuEntry(session, formatKey, per, messageText);
+    }
+
+    // Confirmación p/p alto (>3)
+    if (session.eventosPendingPerPersonConfirm) {
+      const pending = Number(session.eventosPendingPerPersonConfirm);
+      if (confirmsHighPerPersonChoice(messageText, pending)) {
+        session.eventosDrinksPerGuest = pending;
+        session.eventosPerPersonConfirmed = true;
+        delete session.eventosPendingPerPersonConfirm;
+        return wrapEventFlavorMenuEntry(session, formatKey, pending, messageText);
+      }
+      const alt = parsePerPersonChoice(messageText)
+        || (await resolveDrinksPerPersonChoice(messageText, session))?.per;
+      if (alt) {
+        if (needsHighPerPersonConfirmation(alt)) {
+          session.eventosPendingPerPersonConfirm = alt;
+          return {
+            success: true,
+            nextState: 'EVENTOS_ESTILO_MENU',
+            customReply: buildHighPerPersonConfirmCopy(session, formatKey, alt),
+            flowProgress: true
+          };
+        }
+        session.eventosDrinksPerGuest = alt;
+        session.eventosPerPersonConfirmed = true;
+        delete session.eventosPendingPerPersonConfirm;
+        return wrapEventFlavorMenuEntry(session, formatKey, alt, messageText);
+      }
       return {
         success: true,
-        nextState: 'EVENTOS_ELECCION_MENU',
-        customReplies: replies,
+        nextState: 'EVENTOS_ESTILO_MENU',
+        customReply: buildHighPerPersonConfirmCopy(session, formatKey, pending),
         flowProgress: true
       };
     }
 
-    // ------------------------------------------------------------------
     // Cócteles por persona (pregunta abierta) → ELECCION_MENU
-    // ------------------------------------------------------------------
     const choice = await resolveDrinksPerPersonChoice(messageText, session);
     if (choice?.per) {
-      return {
-        success: true,
-        nextState: 'EVENTOS_ELECCION_MENU',
-        customReplies: buildFlavorPickEntryReplies(session, formatKey, choice.per),
-        flowProgress: true
-      };
+      if (needsHighPerPersonConfirmation(choice.per)) {
+        session.eventosPendingPerPersonConfirm = choice.per;
+        return {
+          success: true,
+          nextState: 'EVENTOS_ESTILO_MENU',
+          customReply: buildHighPerPersonConfirmCopy(session, formatKey, choice.per),
+          flowProgress: true
+        };
+      }
+      session.eventosDrinksPerGuest = choice.per;
+      session.eventosPerPersonConfirmed = true;
+      return wrapEventFlavorMenuEntry(session, formatKey, choice.per, messageText);
     }
 
     return { success: false };

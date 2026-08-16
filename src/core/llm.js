@@ -134,6 +134,9 @@ REGLAS CRÍTICAS DE DUDAS Y SABORES:
 - MOJITO SABORES: Si el usuario menciona "mojito sabores", "mojitos de sabores", "mojito de sabor" o pide ver/elegir sabores de mojito, DEBES generar un objeto en "dudas" con:
   {"mencionado": "mojito sabores", "opciones": ["Mojito Maracuyá", "Mojito Frambuesa", "Mojito Mango"]}
   NO agregues "Mojito" a productos cuando solicita sabores explícitamente.
+- SPRITZ: Si el usuario dice solo "spritz" (sin "aperol" o "ramazzotti" concretos), DEBES generar duda:
+  {"mencionado": "spritz", "opciones": ["Aperol Spritz", "Ramazzotti Spritz"]}
+  NO marques spritz como inexistente ni elijas uno al azar.
 - NOMBRES DESCRIPTIVOS Y DE RELLENO: Si el cliente escribe "Pisco sour clásico", "Mojito clásico", "Sangría tradicional", el nombre oficial del catálogo es "Pisco Sour", "Mojito", "Sangría".
 
 Ejemplo 1 (Duda real): {"analisis": "Pidió piscola (hay varias marcas).", "productos": [], "dudas": [{"mencionado": "piscola", "opciones": ["Piscola Alto 35°", "Piscola Mistral 35°"]}], "quiere_avanzar": false}
@@ -261,6 +264,9 @@ REGLAS CRÍTICAS DE EXTRACCIÓN Y SINTAXIS:
 - DUDAS Y SABORES DE MOJITO: Si el usuario menciona "mojito sabores", "mojitos de sabores", "mojito de sabor" o pide ver/elegir sabores de mojito, DEBES generar un objeto en "dudas" con:
   {"mencionado": "mojito sabores", "opciones": ["Mojito Maracuyá", "Mojito Frambuesa", "Mojito Mango"]}
   NO agregues "Mojito" a productos cuando solicita sabores explícitamente.
+- SPRITZ: Si el usuario dice solo "spritz" (sin "aperol" o "ramazzotti" concretos), DEBES generar duda:
+  {"mencionado": "spritz", "opciones": ["Aperol Spritz", "Ramazzotti Spritz"]}
+  NO marques spritz como inexistente ni elijas uno al azar. Si dice "mojito y spritz", pon Mojito en productos y spritz en dudas.
 - NOMBRES DESCRIPTIVOS Y DE RELLENO: Si el cliente escribe "Pisco sour clásico", "Mojito clásico", "Sangría tradicional", el nombre oficial del catálogo es "Pisco Sour", "Mojito", "Sangría".
 - LITROS VS UNIDADES Y CANTIDADES MÚLTIPLES:
   * "10 de mojito", "10 mojito", "10L mojito", "mojito 10L" -> quantity=1, litrage="10L".
@@ -502,6 +508,38 @@ Ejemplo: {"intent":"${labels[0]}","confidence":"high"}`;
     console.error(`[bot] Error en classifyStepIntent:`, err.message);
     return null;
   }
+}
+
+/**
+ * classifyEventFlavorStepIntent: NLU del paso EVENTOS_ELECCION_MENU (sabores).
+ * Clasifica pregunta vs familia vs pedido vs confirmar vs extras antes del miss.
+ *
+ * @param {object} opts
+ * @param {string} opts.userMessage
+ * @param {string} opts.stepQuestion
+ * @param {string} [opts.lastBotMessage]
+ * @param {string} [opts.flavorPhase] - clasicos | extras | cart
+ * @returns {Promise<string|null>} PEDIDO|FAMILIA|PREGUNTA|CONFIRMAR|EXTRAS|UNCLEAR|null
+ */
+export async function classifyEventFlavorStepIntent({
+  userMessage,
+  stepQuestion,
+  lastBotMessage = '',
+  flavorPhase = 'clasicos'
+}) {
+  return classifyStepIntent({
+    userMessage,
+    stepQuestion,
+    lastBotMessage,
+    allowedLabels: ['PEDIDO', 'FAMILIA', 'PREGUNTA', 'CONFIRMAR', 'EXTRAS'],
+    labelHints: {
+      PEDIDO: 'Nombra cócteles concretos del catálogo (Mojito, Sangría, Aperol Spritz, typos).',
+      FAMILIA: 'Menciona familia genérica sin sabor (spritz, mojito sabores, gin) que requiere aclarar.',
+      PREGUNTA: 'Pregunta lateral: qué incluye, rendimiento, precios, logística, qué es X.',
+      CONFIRMAR: 'ok, seguimos, listo, solo estos — quiere avanzar con el carrito actual.',
+      EXTRAS: 'Pide ver otros sabores: "otros", "muéstrame los otros", combinados, sin alcohol, mocktails. NO es pedido de cóctel concreto.'
+    }
+  });
 }
 
 /**

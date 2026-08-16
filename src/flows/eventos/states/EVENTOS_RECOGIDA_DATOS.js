@@ -43,7 +43,7 @@ import {
   buildDrinksPerPersonAsk,
   getEventServiceIncludesReply
 } from '../../../logic/eventos-intro.js';
-import { buildVolumeRecommendation, resolveDrinksPerPersonChoice, parsePerPersonChoice } from '../../../logic/eventos-style-pack.js';
+import { buildVolumeRecommendation, resolveDrinksPerPersonChoice, parsePerPersonChoice, needsHighPerPersonConfirmation, buildHighPerPersonConfirmCopy, confirmsHighPerPersonChoice } from '../../../logic/eventos-style-pack.js';
 
 /** Cierre suave: sin evento concreto, solo info/precios → web. */
 const REPLY_INFO_ONLY_WEB = `Entiendo: si aún no tienes un evento o celebración definida y solo necesitas información, te invitamos a revisar nuestra web. En *Cotizar* puedes simular distintas opciones y ver precios:
@@ -395,6 +395,42 @@ ${pendingAsk}`,
     // Con invitados: pedir p/p (o, si ya lo dijo, ir al menú Ver Precios)
     if (hasGuests(session)) {
       if (!hasDrinksPerPerson(session)) {
+        const formatKey = formatKeyFromSession(session);
+
+        // Confirmación de p/p alto (>3): explicar volumen antes de INTRO_MENU
+        if (session.eventosPendingPerPersonConfirm) {
+          const pending = Number(session.eventosPendingPerPersonConfirm);
+          if (confirmsHighPerPersonChoice(messageText, pending)) {
+            session.eventosDrinksPerGuest = pending;
+            session.eventosPerPersonConfirmed = true;
+            delete session.eventosPendingPerPersonConfirm;
+            return goIntroMenu(session);
+          }
+          const altChoice = parsePerPersonChoice(messageText)
+            || (await resolveDrinksPerPersonChoice(messageText, session))?.per;
+          if (altChoice) {
+            if (needsHighPerPersonConfirmation(altChoice)) {
+              session.eventosPendingPerPersonConfirm = altChoice;
+              return {
+                success: true,
+                nextState: 'EVENTOS_RECOGIDA_DATOS',
+                customReply: buildHighPerPersonConfirmCopy(session, formatKey, altChoice),
+                flowProgress: true
+              };
+            }
+            session.eventosDrinksPerGuest = altChoice;
+            session.eventosPerPersonConfirmed = true;
+            delete session.eventosPendingPerPersonConfirm;
+            return goIntroMenu(session);
+          }
+          return {
+            success: true,
+            nextState: 'EVENTOS_RECOGIDA_DATOS',
+            customReply: buildHighPerPersonConfirmCopy(session, formatKey, pending),
+            flowProgress: true
+          };
+        }
+
         // Si este mismo mensaje acaba de aportar invitados y no trae p/p, preguntar p/p
         // (no mandar el “50” a la IA: lo tomaría como cócteles por persona).
         if (guestsJustParsed && !parsePerPersonChoice(messageText)?.per) {
@@ -402,7 +438,17 @@ ${pendingAsk}`,
         }
         const choice = await resolveDrinksPerPersonChoice(messageText, session);
         if (choice?.per) {
+          if (needsHighPerPersonConfirmation(choice.per)) {
+            session.eventosPendingPerPersonConfirm = choice.per;
+            return {
+              success: true,
+              nextState: 'EVENTOS_RECOGIDA_DATOS',
+              customReply: buildHighPerPersonConfirmCopy(session, formatKey, choice.per),
+              flowProgress: true
+            };
+          }
           session.eventosDrinksPerGuest = choice.per;
+          session.eventosPerPersonConfirmed = true;
           return goIntroMenu(session);
         }
         return askDrinksPhase(session);

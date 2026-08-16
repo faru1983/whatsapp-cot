@@ -53,8 +53,23 @@ Si cambias copy con litrajes/ejemplos en **un** estado, revisar **todos** los he
 Favoritos manuales, `sugerida`/`sugerencia` y carrito ya armado son **la misma variante** del paso. Reglas:
 
 ### Entrada (sin precios)
-- Al cotizar desde `INTRO_MENU`: **solo** lista de sabores + tamaños/rendimiento (`buildFlavorPickEntryReplies`).
+- Al cotizar desde `INTRO_MENU`: **Clásicos** + CTA `escribe *otros*` (Combinados/Mocktails on-demand) + `sugerida`.
+- `wantsEventOtherFlavorsList` (otros, muéstrame los otros, qué más tienen…) → `buildEventOtherFlavorsListBlock` **antes** del NLU de productos. Fallback NLU: intent `EXTRAS`.
+- Tras armar carrito: **una** pregunta (`buildEventCartOkAsk`: *ok* / cambiar litros / *quita* / *agrega*). **No** menú 1–4. Combinados/mocktails se listan on-demand.
 - **No** enviar imagen de precios al entrar.
+- **Aviso admin** una vez al entrar (`wrapEventFlavorMenuEntry` → `notifyAdmin` INFO + CRM Interesado).
+
+### Familias de sabor (Spritz, Mojito sabores)
+- `detectCatalogFamilyMention` / `collectProgrammaticFamilyDoubts`: spritz suelto → Aperol vs Ramazzotti (no “fuera de carta”).
+- `getProductFamilyBase` incluye Spritz; `getCatalogFamilyFlavorOptions('Spritz')` lista ambos.
+- NLU productos: varios candidatos → `dudas` obligatorias (`extractEventProductsWithAI`).
+
+### p/p alto (>3)
+- En `EVENTOS_RECOGIDA_DATOS` (y `ESTILO_MENU` fallback): `needsHighPerPersonConfirmation` → `buildHighPerPersonConfirmCopy` (tono positivo, ~cócteles/L).
+- Confirmar con sí/ok/mismo número → `eventosPerPersonConfirmed` y seguir a `INTRO_MENU`.
+
+### Carta vs API
+- `getCoctelesNamesCatalogCompact` filtra por `filterCatalogNamesByCache` (API viva). Sin caché → `datos.json` completo.
 
 ### Selección sugerida
 - Keywords: `wantsSuggestedSelection()` + red NLU `quiere_sugerencia` / `inferSuggestedSelectionFromNlu()`.
@@ -116,7 +131,7 @@ La carta muestra secciones (*CLÁSICOS*, *COMBINADOS*, *MOCKTAILS*). El cliente 
 |---|---|
 | Menús 1/2, confirmar | Keywords → `resolveDecisionIntent` |
 | Cócteles p/p | `parsePerPersonChoice` → `extractDrinksPerPersonWithAI` |
-| Pedido de cócteles | Parsers → categoría suelta (`detectNamedCatalogCategory`) → `extractEventProductsWithAI` |
+| Pedido de cócteles | Parsers → familia (`detectCatalogFamilyMention`) → categoría suelta → `classifyEventFlavorStepIntent` → `extractEventProductsWithAI` |
 | Sugerida no detectada por keyword | NLU `quiere_sugerencia` |
 | Qué incluye / hielo / vasos | FAQ + `asksWhatServiceIncludes` (nunca NLU de productos) |
 | Pregunta lateral con dato pendiente | FAQ (máx. 1) → `engine.js` |

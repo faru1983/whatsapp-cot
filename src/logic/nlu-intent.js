@@ -6,6 +6,7 @@
 // ==============================================================================
 export {
   classifyStepIntent,
+  classifyEventFlavorStepIntent,
   extractCelebrationTypeWithAI,
   extractDrinksPerPersonWithAI,
   classifyEventosInfoOnlyWithAI,

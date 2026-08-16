@@ -750,6 +750,32 @@ function findProductInIndex(productsByName, botName) {
 }
 
 /**
+ * isProductInCachedCatalog: ¿Este nombre está en el índice API en caché?
+ * Sin caché → true (no filtramos; fallback datos.json).
+ *
+ * @param {string} botName
+ * @returns {boolean}
+ */
+export function isProductInCachedCatalog(botName) {
+  const index = getCachedProductIndex();
+  if (!index) return true;
+  return Boolean(findProductInIndex(index, botName));
+}
+
+/**
+ * filterCatalogNamesByCache: Oculta nombres ausentes del índice API vivo.
+ * Sin caché → null (el caller usa la lista completa de datos.json).
+ *
+ * @param {string[]} names
+ * @returns {string[]|null}
+ */
+export function filterCatalogNamesByCache(names) {
+  const index = getCachedProductIndex();
+  if (!index || !Array.isArray(names) || names.length === 0) return null;
+  return names.filter((name) => findProductInIndex(index, name));
+}
+
+/**
  * resolveProductId: UUID del producto (async: puede disparar fetch de catálogo).
  *
  * @param {string} botName

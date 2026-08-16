@@ -4,7 +4,7 @@
 import fs from 'node:fs';
 import { DATOS_JSON_PATH } from '../core/paths.js';
 import { testLog } from '../core/debug-log.js';
-import { enrichLocationFromCatalog, getCachedComunas } from './cot-catalog.js';
+import { enrichLocationFromCatalog, getCachedComunas, filterCatalogNamesByCache } from './cot-catalog.js';
 
 // ==============================================================================
 // BASE DE DATOS GENERAL (datos.json)
@@ -271,6 +271,8 @@ export function getProductFamilyBase(name) {
 		const re = new RegExp(`^${family}\\b`, 'i');
 		if (re.test(name)) return family;
 	}
+	// Spritz: Aperol Spritz / Ramazzotti Spritz (no es prefijo "Spritz …")
+	if (/\bspritz\b/i.test(name) && !/\bmocktail\b/i.test(name)) return 'Spritz';
 	return null;
 }
 
@@ -463,9 +465,15 @@ export function getCoctelesNamesCatalog() {
  *
  * @returns {string}
  */
-export function getCoctelesNamesCatalogCompact() {
+export function getCoctelesNamesCatalogCompact(opts = {}) {
+	const sections = opts.sections || ['CLÁSICOS', 'COMBINADOS', 'MOCKTAILS'];
+	const includeClasicos = sections.includes('CLÁSICOS');
+	const includeCombinados = sections.includes('COMBINADOS');
+	const includeMocktails = sections.includes('MOCKTAILS');
 	const catalog = preciosData.cocteles || {};
-	const has = (name) => Boolean(catalog[name]);
+	const activeNames = filterCatalogNamesByCache(Object.keys(catalog));
+	const activeSet = activeNames ? new Set(activeNames) : null;
+	const has = (name) => Boolean(catalog[name]) && (!activeSet || activeSet.has(name));
 
 	/** @type {Set<string>} */
 	const used = new Set();
@@ -556,9 +564,9 @@ export function getCoctelesNamesCatalogCompact() {
 	if (leftoverMock.length) mocktails.push(leftoverMock.join(' / '));
 
 	let text = '';
-	if (clasicos.length) text += `🍸 *CLÁSICOS*\n${clasicos.join('\n')}`;
-	if (combinados.length) text += `${text ? '\n\n' : ''}🥃 *COMBINADOS*\n${combinados.join('\n')}`;
-	if (mocktails.length) text += `${text ? '\n\n' : ''}🍹 *MOCKTAILS*\n${mocktails.join('\n')}`;
+	if (includeClasicos && clasicos.length) text += `🍸 *CLÁSICOS*\n${clasicos.join('\n')}`;
+	if (includeCombinados && combinados.length) text += `${text ? '\n\n' : ''}🥃 *COMBINADOS*\n${combinados.join('\n')}`;
+	if (includeMocktails && mocktails.length) text += `${text ? '\n\n' : ''}🍹 *MOCKTAILS*\n${mocktails.join('\n')}`;
 	return text;
 }
 
@@ -1827,7 +1835,12 @@ export function asksAvailableCocktailsList(messageText) {
 export function getCatalogFamilyFlavorOptions(familyBase, catalogNames) {
 	const fb = normalizeString(familyBase);
 	if (!fb) return [];
-	return (catalogNames || []).filter((name) => {
+	const names = filterCatalogNamesByCache(catalogNames || Object.keys(preciosData.cocteles || {}))
+		|| (catalogNames || Object.keys(preciosData.cocteles || {}));
+	if (fb === 'spritz') {
+		return names.filter((name) => /\bspritz\b/i.test(name) && !/\bmocktail\b/i.test(name));
+	}
+	return names.filter((name) => {
 		const nn = normalizeString(name);
 		if (nn === fb) return true;
 		if (!nn.startsWith(`${fb} `)) return false;
@@ -1835,6 +1848,80 @@ export function getCatalogFamilyFlavorOptions(familyBase, catalogNames) {
 		if (/\bmocktail\b/i.test(name)) return false;
 		return true;
 	});
+}
+
+/**
+ * getActiveCatalogNames: Nombres del catálogo filtrados por API viva (si hay caché).
+ * Sin caché → todos los de datos.json (fallback seguro).
+ *
+ * @param {string[]} [catalogNames]
+ * @returns {string[]}
+ */
+export function getActiveCatalogNames(catalogNames) {
+	const base = catalogNames || Object.keys(preciosData.cocteles || {});
+	return filterCatalogNamesByCache(base) || base;
+}
+
+/**
+ * detectCatalogFamilyMention: Familia genérica sin sabor concreto (ej. "spritz" suelto).
+ * No es "fuera de carta": devuelve opciones para aclarar (Aperol vs Ramazzotti).
+ *
+ * @param {string} messageText
+ * @param {string[]} [catalogNames]
+ * @returns {{ family: string, opciones: string[], mencionado: string }|null}
+ */
+export function detectCatalogFamilyMention(messageText, catalogNames) {
+	const names = getActiveCatalogNames(catalogNames);
+	const raw = String(messageText || '').trim();
+	if (!raw) return null;
+	const norm = normalizeString(raw)
+		.replace(/[\u{1F300}-\u{1FAFF}\u{2600}-\u{27BF}]/gu, ' ')
+		.replace(/[¿?¡!.,;:…'"()]+/g, ' ')
+		.replace(/\s+/g, ' ')
+		.trim();
+	if (!norm) return null;
+
+	// Spritz genérico: no si ya nombró Aperol/Ramazzotti con match claro
+	if (/\bspritz\b/.test(norm)) {
+		const matchedSpritz = names.filter((n) => /\bspritz\b/i.test(n) && norm.includes(normalizeString(n)));
+		if (matchedSpritz.length === 0) {
+			const opciones = getCatalogFamilyFlavorOptions('Spritz', names);
+			if (opciones.length >= 2) {
+				return { family: 'Spritz', opciones, mencionado: 'spritz' };
+			}
+		}
+	}
+
+	// Mojito sabores (sin elegir variante)
+	if (/\bmojito\b/.test(norm) && /\b(sabor|sabores|variedad|variedades)\b/.test(norm)) {
+		const opciones = getCatalogFamilyFlavorOptions('Mojito', names);
+		if (opciones.length >= 2) {
+			return { family: 'Mojito', opciones, mencionado: 'mojito sabores' };
+		}
+	}
+
+	return null;
+}
+
+/**
+ * collectProgrammaticFamilyDoubts: Dudas de familia a partir del mensaje (sin LLM).
+ *
+ * @param {string} messageText
+ * @param {string[]} catalogNames
+ * @param {string[]} [alreadyMatched] - Productos ya resueltos en el mensaje
+ * @returns {Array<{ mencionado: string, opciones: string[] }>}
+ */
+export function collectProgrammaticFamilyDoubts(messageText, catalogNames, alreadyMatched = []) {
+	const doubts = [];
+	const familyHit = detectCatalogFamilyMention(messageText, catalogNames);
+	if (!familyHit) return doubts;
+
+	const matchedSet = new Set((alreadyMatched || []).map((n) => normalizeString(n)));
+	const unresolved = familyHit.opciones.filter((op) => !matchedSet.has(normalizeString(op)));
+	if (unresolved.length >= 2) {
+		doubts.push({ mencionado: familyHit.mencionado, opciones: familyHit.opciones });
+	}
+	return doubts;
 }
 
 // ==============================================================================

@@ -1515,7 +1515,25 @@ function eventCartModifyExamplePhrase(group, formatKey) {
 }
 
 /**
- * buildEventCartOkAsk: Pregunta *ok* con ejemplos según los sabores del carrito.
+ * getEventCartAdjustHint: Ejemplo corto para corregir el pedido (litros o quitar).
+ *
+ * @param {object} products
+ * @param {'dispensador'|'muro'|string} formatKey
+ * @returns {string}
+ */
+export function getEventCartAdjustHint(products, formatKey) {
+  const groups = eventCartGroupedLines(products, formatKey);
+  if (!groups.length) return '"10L Mojito" / *quita el aperol*';
+  const first = groups[0];
+  const removeTarget = groups.length > 1 ? groups[groups.length - 1] : groups[0];
+  const literExample = eventCartModifyExamplePhrase(first, formatKey);
+  const removeExample = eventCartRemoveExamplePhrase(removeTarget.name);
+  if (literExample) return `${literExample} / ${removeExample}`;
+  return removeExample;
+}
+
+/**
+ * buildEventCartOkAsk: Confirmar o modificar (cambiar litros / quitar / agregar).
  *
  * @param {object} products - session.orderBuilder.products
  * @param {'dispensador'|'muro'|string} formatKey
@@ -1535,10 +1553,10 @@ _(ej: escribe *ok* para el resumen)_`;
 
   if (literExample) {
     return `*¿Todo bien con el pedido?*
-_(ej: *ok* para seguir, o ${literExample} / ${removeExample})_`;
+_(ej: *ok* / ${literExample} / ${removeExample} / *agrega piscola*)_`;
   }
   return `*¿Todo bien con el pedido?*
-_(ej: *ok* para seguir, o ${removeExample})_`;
+_(ej: *ok* / ${removeExample} / *agrega piscola*)_`;
 }
 
 /**

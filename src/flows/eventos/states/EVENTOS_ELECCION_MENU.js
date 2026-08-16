@@ -9,6 +9,7 @@ import {
   hasDrinkSelection,
   hasProductOrderSignal,
   preciosData,
+  normalizeString,
   resolveDoubtsProgrammatically,
   interceptBotOptionsAnswer,
   parseEventElimination,
@@ -23,6 +24,9 @@ import {
   getCoctelesNamesCatalog,
   getProductFamilyBase,
   getCatalogFamilyFlavorOptions,
+  getActiveCatalogNames,
+  collectProgrammaticFamilyDoubts,
+  detectCatalogFamilyMention,
   wantsNonAlcoholicOption,
   isMocktailName,
   detectNamedCatalogCategory
@@ -87,9 +91,14 @@ import {
   buildFlavorCatalogBlock,
   asksEventCatalogPriceList,
   buildEventPriceListAskReplies,
-  buildCategoryFlavorAsk
+  buildCategoryFlavorAsk,
+  buildFamilyChoiceMenu,
+  wantsEventOtherFlavorsList,
+  buildEventOtherFlavorsListBlock,
+  resolveFamilyChoiceFromMessage
 } from '../../../logic/eventos-style-pack.js';
 import { nextEventosAck, getEventServiceIncludesReply } from '../../../logic/eventos-intro.js';
+import { classifyEventFlavorStepIntent, lastBotText } from '../../../logic/nlu-intent.js';
 
 const AI_PROMPT = `[SISTEMA - ESTADO: ELECCIÓN DE SABORES (EVENTOS)]
 Un solo paso: el cliente elige cócteles (favoritos manuales, *sugerida*, o ajustando un pedido ya armado).
@@ -263,6 +272,40 @@ function buildCartReply({ session, formatKey, minLiters, header, invalidLitrages
 }
 
 /**
+ * buildFamilyDoubtFollowUp: Menú 1/2/3 de familia (Spritz) sin armar el carrito todavía.
+ *
+ * @param {string} family
+ * @param {string[]} opciones
+ * @param {string[]} [pendingNames]
+ * @returns {string}
+ */
+function buildFamilyDoubtFollowUp(family, opciones, pendingNames = []) {
+  return buildFamilyChoiceMenu(family, opciones, pendingNames);
+}
+
+/**
+ * commitNamedFlavorsToCart: Reparte el volumen p/p entre TODOS los sabores y arma el carrito.
+ *
+ * @param {object} session
+ * @param {string[]} names
+ * @param {string} formatKey
+ */
+function commitNamedFlavorsToCart(session, names, formatKey) {
+  const unique = [...new Set((names || []).filter(Boolean))];
+  if (unique.length === 0) return;
+  session.orderBuilder.products = {};
+  const extractedList = unique.map((name) => ({ name, quantity: 1, litrage: '5L' }));
+  const scaled = applyBaselineLitersIfNamesOnly(
+    extractedList,
+    unique.join(' y '),
+    session,
+    formatKey,
+    { cartLiters: 0, inCartNames: [], preserveCart: false }
+  );
+  applyProductsToCart(session, scaled.length > 0 ? scaled : extractedList, { forceReplace: true });
+}
+
+/**
  * buildSuggestedSelectionTurn: Arma la cotización sugerida (pack populares).
  *
  * @param {object} session
@@ -272,6 +315,7 @@ function buildCartReply({ session, formatKey, minLiters, header, invalidLitrages
  */
 function buildSuggestedSelectionTurn(session, formatKey, linesBefore) {
   const pack = applySuggestedSelectionToSession(session, formatKey);
+  session.eventosSuggestedApplied = true;
   const { reply, followUp } = buildPackProposalReply(session, formatKey, pack);
   return withFirstCocktailCrmEngage(linesBefore, session, {
     success: true,
@@ -293,10 +337,35 @@ export const EVENTOS_ELECCION_MENU = defineState({
     const allowedLitrages = getAllowedLitrages(formatKey);
     ensureEventOrderBuilder(session, formatKey);
 
-    const catalogNames = Object.keys(preciosData.cocteles || {});
+    const catalogNames = getActiveCatalogNames();
     const defaultLitrage = formatKey === 'muro' ? '10L' : '5L';
     // Para CRM Interesado: primer cóctel del carrito (no al solo ver la carta)
     const linesBefore = eventCartLineCount(session);
+
+    // Familia pendiente (ej. Spritz): primero el sabor, después el reparto de litros
+    if (session.eventosPendingFamily?.opciones?.length >= 2) {
+      const chosen = resolveFamilyChoiceFromMessage(
+        messageText,
+        session.eventosPendingFamily.opciones
+      );
+      if (chosen?.length) {
+        const pendingNames = Array.isArray(session.eventosPendingFlavorNames)
+          ? session.eventosPendingFlavorNames
+          : [];
+        const allNames = [...pendingNames, ...chosen].filter((n, i, arr) => arr.indexOf(n) === i);
+        session.eventosPendingFamily = null;
+        session.eventosPendingFlavorNames = null;
+        commitNamedFlavorsToCart(session, allNames, formatKey);
+        const header = '🍹 Te confirmo los cócteles seleccionados:';
+        const { reply, followUp } = buildCartReply({ session, formatKey, minLiters, header });
+        return withFirstCocktailCrmEngage(linesBefore, session, {
+          success: true,
+          nextState: 'EVENTOS_ELECCION_MENU',
+          customReplies: [reply, followUp],
+          flowProgress: true
+        });
+      }
+    }
 
     // ------------------------------------------------------------------
     // Selección sugerida (opcional) o pack propuesto: más cantidad / atajos
@@ -330,11 +399,25 @@ export const EVENTOS_ELECCION_MENU = defineState({
     }
 
     if (wantsSelfBuildEventMenu(messageText)) {
+      session.eventosFlavorPhase = 'clasicos';
       return {
         success: true,
         nextState: 'EVENTOS_ELECCION_MENU',
         customReplies: [
           buildFlavorCatalogBlock(formatKey),
+          buildFlavorPickQuestion()
+        ],
+        flowProgress: true
+      };
+    }
+
+    // "otros" / combinados+mocktails on-demand (antes del NLU de productos)
+    if (wantsEventOtherFlavorsList(messageText) && !hasProductOrderSignal(messageText)) {
+      return {
+        success: true,
+        nextState: 'EVENTOS_ELECCION_MENU',
+        customReplies: [
+          buildEventOtherFlavorsListBlock(),
           buildFlavorPickQuestion()
         ],
         flowProgress: true
@@ -347,7 +430,7 @@ export const EVENTOS_ELECCION_MENU = defineState({
     if (
       namedCategory
       && !hasProductOrderSignal(messageText)
-      && eventCartLineCount(session) === 0
+      && (eventCartLineCount(session) === 0 || namedCategory !== 'MOCKTAILS')
     ) {
       return {
         success: true,
@@ -757,6 +840,25 @@ _(ej: ${getEventCocktailSingleExample(formatKey)})_ 🍸`
       quiere_avanzar = result.quiere_avanzar;
     }
 
+    // Dudas programáticas de familia (spritz, mojito sabores) sin depender del LLM
+    const matchedNames = [
+      ...(extractedList || []).map((p) => p.name),
+      ...parseCocktailNamesWithoutLitrage(extractText || messageText, catalogNames)
+    ];
+    const programmaticDoubts = collectProgrammaticFamilyDoubts(
+      extractText || messageText,
+      catalogNames,
+      matchedNames
+    );
+    if (programmaticDoubts.length > 0) {
+      const existing = new Set((dudas || []).map((d) => normalizeString(d.mencionado || '')));
+      for (const pd of programmaticDoubts) {
+        if (!existing.has(normalizeString(pd.mencionado || ''))) {
+          dudas = [...(dudas || []), pd];
+        }
+      }
+    }
+
     const cartHasItemsAfter = Object.keys(session.orderBuilder.products).length > 0;
     const wantsAdvance = quiere_avanzar || wantsAdvanceProductsOrder(messageText);
     const hasExtracted = Array.isArray(extractedList) && extractedList.length > 0;
@@ -817,7 +919,8 @@ _(ej: ${getEventCocktailSingleExample(formatKey)})_ 🍸`;
       extractedList = extractedList.filter(p => !todasLasOpcionesDudosas.includes(p.name));
     }
 
-    // Si ya fijó cócteles p/p y solo nombró sabores (sin 5L/10L), repartimos litros
+    // Si ya fijó cócteles p/p y solo nombró sabores (sin 5L/10L), asignamos litros
+    // (si aún hay duda de familia, no repartimos: primero se aclara el sabor).
     const cartLitersBeforeExtract = (() => {
       const b = new OrderBuilder(formatKey, preciosData);
       b.products = session.orderBuilder.products;
@@ -827,6 +930,7 @@ _(ej: ${getEventCocktailSingleExample(formatKey)})_ 🍸`;
     const preserveCart = hasExplicitEventAddIntent(messageText) || hasEventCartPreserveIntent(messageText);
     if (
       extractedList.length > 0
+      && !(dudas?.length > 0)
       && session.eventosDrinksPerGuest
       && messageOmitsEventLitrage(extractText || messageText)
     ) {
@@ -862,23 +966,33 @@ _(ej: ${getEventCocktailSingleExample(formatKey)})_ 🍸`;
     };
 
     if (dudas?.length > 0) {
-      // Listar opciones: no aplicar productos parciales en una pregunta de sabores
-      if (!isFlavorQuestion && parsedProducts.length > 0) {
-        applyProductsToCart(session, parsedProducts, cartOpts);
-      }
       const duda = dudas[0];
       const familyFromOpts = (duda.opciones || [])
         .map((n) => getProductFamilyBase(n))
         .find(Boolean);
-      if (familyFromOpts) {
-        const opciones = getCatalogFamilyFlavorOptions(familyFromOpts, catalogNames);
-        if (opciones.length >= 2) {
-          return withFirstCocktailCrmEngage(linesBefore, session, {
-            success: true,
-            nextState: 'EVENTOS_ELECCION_MENU',
-            customReply: getFlavorListReply(familyFromOpts, opciones, { withLitersHint: true })
-          });
-        }
+      const opciones = familyFromOpts
+        ? getCatalogFamilyFlavorOptions(familyFromOpts, catalogNames)
+        : (duda.opciones || []);
+      const pendingNames = (parsedProducts || [])
+        .map((p) => p.name)
+        .filter(Boolean)
+        .filter((n, i, arr) => arr.indexOf(n) === i);
+      if (opciones.length >= 2) {
+        session.eventosPendingFamily = {
+          family: familyFromOpts || duda.mencionado || 'esa familia',
+          opciones
+        };
+        session.eventosPendingFlavorNames = pendingNames;
+        return withFirstCocktailCrmEngage(linesBefore, session, {
+          success: true,
+          nextState: 'EVENTOS_ELECCION_MENU',
+          customReply: buildFamilyDoubtFollowUp(
+            session.eventosPendingFamily.family,
+            opciones,
+            pendingNames
+          ),
+          flowProgress: true
+        });
       }
       return withFirstCocktailCrmEngage(linesBefore, session, {
         success: true,
@@ -960,6 +1074,43 @@ ${formatMenuBlock([
       reply += `Anoté: *${pending.join('*, *')}*.`;
       reply += `\n¿Con qué litraje los quieres? Puedes decir *${allowedLitrages[0]}* para todos, o por ejemplo: _"${getEventCocktailOrderExample(formatKey)}"_`;
       return { success: true, nextState: 'EVENTOS_ELECCION_MENU', customReply: reply };
+    }
+
+    // Tras intentar parsear/NLU: clasificador del paso antes de "fuera de carta"
+    if (maybeUnknownFlavor || hasProductOrderSignal(extractText || messageText)) {
+      const stepIntent = await classifyEventFlavorStepIntent({
+        userMessage: messageText,
+        stepQuestion: buildFlavorPickQuestion(),
+        lastBotMessage: lastBotText(session),
+        flavorPhase: session.eventosFlavorPhase || 'clasicos'
+      });
+
+      if (stepIntent === 'PREGUNTA') {
+        return { success: false };
+      }
+
+      if (stepIntent === 'EXTRAS' && !hasProductOrderSignal(messageText)) {
+        return {
+          success: true,
+          nextState: 'EVENTOS_ELECCION_MENU',
+          customReplies: [
+            buildEventOtherFlavorsListBlock(),
+            buildFlavorPickQuestion()
+          ],
+          flowProgress: true
+        };
+      }
+
+      if (stepIntent === 'FAMILIA') {
+        const familyHit = detectCatalogFamilyMention(messageText, catalogNames);
+        if (familyHit) {
+          return {
+            success: true,
+            nextState: 'EVENTOS_ELECCION_MENU',
+            customReply: getFlavorListReply(familyHit.family, familyHit.opciones, { withLitersHint: true })
+          };
+        }
+      }
     }
 
     // Tras intentar parsear/NLU: sabor fuera de carta o pedido vacío → miss (como Barriles)

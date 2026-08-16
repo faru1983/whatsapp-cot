@@ -550,7 +550,10 @@ const {
   fixEventLitrageShorthand,
   asksAvailableCocktailsList,
   getCoctelesNamesCatalog,
-  detectNamedCatalogCategory
+  detectNamedCatalogCategory,
+  detectCatalogFamilyMention,
+  collectProgrammaticFamilyDoubts,
+  getCatalogFamilyFlavorOptions
 } = await import('../src/logic/utils.js');
 const catalogNames = Object.keys(datosPrecios.cocteles || {});
 
@@ -591,6 +594,28 @@ const validated = validateEventProductLines(
   catalogNames
 );
 assert(validated.parsedProducts.length === 2, `Mojito+Aperol 10L válidos en muro`);
+
+// Familia Spritz: no "fuera de carta"; duda programática
+{
+  const spritzOpts = getCatalogFamilyFlavorOptions('Spritz', catalogNames);
+  assert(spritzOpts.length >= 2 && spritzOpts.some((n) => /Aperol/i.test(n)), 'familia Spritz: Aperol + Ramazzotti');
+  const spritzOnly = detectCatalogFamilyMention('spritz', catalogNames);
+  assert(spritzOnly?.family === 'Spritz' && spritzOnly.opciones.length >= 2, 'spritz suelto → duda familia');
+  const aperolOnly = detectCatalogFamilyMention('aperol', catalogNames);
+  assert(aperolOnly == null, 'aperol concreto no es duda genérica spritz');
+  const mojitoSpritz = parseCocktailNamesWithoutLitrage('Mojito, spritz', catalogNames);
+  assert(mojitoSpritz.includes('Mojito'), 'Mojito, spritz → Mojito en parser');
+  const spritzDoubts = collectProgrammaticFamilyDoubts('Mojito, spritz', catalogNames, mojitoSpritz);
+  assert(spritzDoubts.length === 1 && /spritz/i.test(spritzDoubts[0].mencionado), 'Mojito, spritz → duda spritz');
+  assert(detectNamedCatalogCategory('Clásicos') === 'CLÁSICOS', 'Clásicos sigue siendo categoría, no sabor');
+}
+
+// Filtro API: sin caché → no filtra; con índice mock → oculta ausentes
+{
+  const { filterCatalogNamesByCache } = await import('../src/logic/cot-catalog.js');
+  const all = catalogNames.slice(0, 5);
+  assert(filterCatalogNamesByCache(all) == null, 'sin caché API: lista completa datos.json');
+}
 
 // Parser eventos: litros por cóctel (no reutilizar el primer litraje en todos)
 assert(
@@ -670,7 +695,13 @@ assert(
     buildCategoryFlavorAsk,
     asksEventPricesSpecifically,
     asksEventCatalogPriceList,
-    buildEventPriceListAskReplies
+    buildEventPriceListAskReplies,
+    needsHighPerPersonConfirmation,
+    buildHighPerPersonConfirmCopy,
+    confirmsHighPerPersonChoice,
+    resolveFamilyChoiceFromMessage,
+    wantsEventOtherFlavorsList,
+    buildEventOtherFlavorsListBlock
   } = await import('../src/logic/eventos-style-pack.js');
   const { getEventCocktailOrderExample, formatEventCartValuePitchLine } = await import('../src/logic/eventos-helpers.js');
   {
@@ -696,6 +727,15 @@ assert(
   assert(parsePerPersonChoice('4 por persona')?.per === 4, '4 por persona → 4');
   assert(parsePerPersonChoice('50') == null, '"50" invitados ≠ p/p');
   assert(parsePerPersonChoice('50 invitados y 2 por persona')?.per === 2, 'invitados + 2 p/p en el mismo texto');
+  assert(needsHighPerPersonConfirmation(3) === false, 'p/p 3 no pide confirmación');
+  assert(needsHighPerPersonConfirmation(4) === true, 'p/p 4 pide confirmación');
+  assert(needsHighPerPersonConfirmation(5) === true, 'p/p 5 pide confirmación');
+  {
+    const confirmCopy = buildHighPerPersonConfirmCopy({ guests: 60 }, 'dispensador', 5);
+    assert(/300/.test(confirmCopy) && /barra bien servida/i.test(confirmCopy), 'confirm p/p alto: cócteles + tono positivo');
+    assert(confirmsHighPerPersonChoice('sí', 5), 'confirma p/p: sí');
+    assert(confirmsHighPerPersonChoice('5', 5), 'confirma p/p: mismo número');
+  }
   assert(/\*\¿.+\?\*\n_\(ej: /s.test(buildPerPersonAsk()), 'ask p/p: *pregunta?* + _(ej:)_');
   assert(/2, 3 o m[aá]s/.test(buildPerPersonAsk()), 'ask p/p abierto a 2, 3 o más');
   assert(buildFlavorCatalogBlock().includes('CLÁSICOS'), 'bloque catálogo lista categorías');
@@ -707,7 +747,7 @@ assert(
   assert(/\*10L\*/.test(buildFlavorCatalogBlock('muro')) && /\*30L\*/.test(buildFlavorCatalogBlock('muro')), 'bloque Muro indica 10/30L');
   assert(!buildFlavorCatalogBlock().includes('catálogo con precios'), 'bloque no mete precios en el menú de nombres');
   assert(buildFlavorPickQuestion().includes('*sugerida*'), 'ask menciona escribir sugerida');
-  assert(/favoritos/.test(buildFlavorPickQuestion()), 'ask pide favoritos');
+  assert(/quieres/.test(buildFlavorPickQuestion()), 'ask pide elegir de la lista');
   assert(/nombres/.test(buildFlavorPickQuestion()), 'ask pide nombres no categoría');
   assert(/por \*nombre\*/.test(buildFlavorCatalogBlock()), 'catálogo aclara elegir por nombre');
   {
@@ -716,15 +756,32 @@ assert(
     assert(/Mojito/.test(catAsk) && /Sangr/.test(catAsk), 'categoría Clásicos da ejemplos de esa carta');
     assert(!/\*Subtotal:\*/.test(catAsk), 'categoría no arma cotización');
   }
-  assert(/m[aá]s populares/.test(buildFlavorPickQuestion()), 'ask ofrece los más populares');
   assert(!buildFlavorPickQuestion().includes('CLÁSICOS'), 'pregunta no re-lista catálogo');
   assert(buildFlavorPickAsk() === buildFlavorPickQuestion(), 'ask corto = pregunta');
   const entry = buildFlavorPickEntryReplies({ guests: 25 }, 'dispensador', 2);
   assert(entry.length === 2, 'entrada sabores: 2 burbujas');
-  assert(/Estos son los sabores/.test(entry[0]) && /CLÁSICOS/.test(entry[0]), 'burbuja 1: lista sabores');
-  assert(/valores y el detalle/.test(entry[0]), 'burbuja 1: precios van después');
+  assert(/\*5L\*/.test(entry[0]) && /CLÁSICOS/.test(entry[0]), 'burbuja 1: tamaños + clásicos');
+  assert(/También tenemos/.test(entry[0]) && /escribe \*otros\*/.test(entry[0]), 'burbuja 1: teaser otros on-demand');
+  assert(!/Piscolas:/.test(entry[0]), 'burbuja 1: sin lista completa de combinados');
+  assert(wantsEventOtherFlavorsList('otros'), 'otros → lista extras');
+  assert(wantsEventOtherFlavorsList('muestrame los otros'), 'muestrame los otros → lista extras');
+  assert(wantsEventOtherFlavorsList('qué más tienen'), 'qué más tienen → lista extras');
+  assert(!wantsEventOtherFlavorsList('10L Mojito'), 'pedido concreto ≠ otros');
+  {
+    const otrosBlock = buildEventOtherFlavorsListBlock();
+    assert(/\*COMBINADOS\*/.test(otrosBlock) && /\*MOCKTAILS\*/.test(otrosBlock), 'otros: combinados + mocktails');
+    assert(!/\*CLÁSICOS\*/.test(otrosBlock), 'otros: sin clásicos');
+  }
+  assert(!/armamos tu cotización|2 o 3 sabores/i.test(entry[0]), 'burbuja 1: sin repetir pitch de intro');
   assert(!/Listo:.*cócteles por persona/i.test(entry[0]), 'burbuja 1: sin re-confirmar p/p');
-  assert(/favoritos/.test(entry[1]), 'burbuja 2: pregunta favoritos');
+  assert(/quieres/.test(entry[1]), 'burbuja 2: pregunta de sabores');
+  assert(!/Los precios te los muestro/i.test(entry[1]), 'burbuja 2: sin línea de precios al cerrar');
+  {
+    const spritzOpts = ['Aperol Spritz', 'Ramazzotti Spritz'];
+    assert(resolveFamilyChoiceFromMessage('ambos', spritzOpts).length === 2, 'familia: ambos');
+    assert(resolveFamilyChoiceFromMessage('1', spritzOpts)[0] === 'Aperol Spritz', 'familia: 1 → primera opción');
+    assert(resolveFamilyChoiceFromMessage('aperol', spritzOpts)[0] === 'Aperol Spritz', 'familia: nombre concreto');
+  }
   assert(!/Soy asistente virtual/i.test(entry.join('\n')), 'entrada sabores sin pie HUMANO');
   assert(asksEventPricesSpecifically('cuánto valen') === true, 'detecta pregunta de precios');
   assert(asksEventPricesSpecifically('precios') === true, 'detecta “precios”');
@@ -746,9 +803,9 @@ assert(
   const priceAsk = buildEventPriceListAskReplies('dispensador');
   assert(priceAsk.length === 2, 'on-demand precios: imagen + texto');
   assert(/dispensador_portatil_precios/.test(String(priceAsk[0]?.file || '')), 'on-demand: imagen de carta');
-  assert(/cotizaci[oó]n/.test(priceAsk[1]), 'on-demand: CTA tras carta');
+  assert(/carta con precios/i.test(priceAsk[1]), 'on-demand: CTA tras carta');
   assert((priceAsk[1].match(/\*sugerida\*/g) || []).length === 1, 'on-demand precios: sugerida una sola vez');
-  assert((priceAsk[1].match(/¿Cuáles son tus favoritos\?/g) || []).length === 1, 'on-demand precios: pregunta favoritos una sola vez');
+  assert((priceAsk[1].match(/¿Cuáles quieres de la lista\?/g) || []).length === 1, 'on-demand precios: pregunta sabores una sola vez');
   assert(wantsSuggestedSelection('selección sugerida') === true, 'detecta selección sugerida');
   assert(wantsSuggestedSelection('sugerencia') === true, 'detecta sugerencia');
   assert(wantsSuggestedSelection('una sugerencia') === true, 'detecta una sugerencia');
@@ -785,6 +842,8 @@ assert(
     assert(/Todo bien con el pedido/.test(packReply.followUp), 'sugerida pregunta como resumen de carrito');
     assert(/10L Mojito/.test(packReply.followUp), 'sugerida ejemplo de litraje como carrito manual');
     assert(/quita la sangr/i.test(packReply.followUp), 'sugerida ejemplo de quitar como carrito manual');
+    assert(/agrega piscola/i.test(packReply.followUp), 'sugerida ejemplo de agregar');
+    assert(!/Escribe el número de la opción/i.test(packReply.followUp), 'sugerida sin menú numerado');
     assert(!/cotizaci[oó]n formal con esto/i.test(packReply.followUp), 'sugerida sin pregunta de cotización formal');
   }
   const {
@@ -2281,13 +2340,19 @@ try {
       expectIncludes: [
         'CLÁSICOS',
         'Spritz',
-        'Piscolas',
-        'escribe *sugerida*',
-        'favoritos',
         '5L',
-        'valores y el detalle'
+        'escribe *sugerida*',
+        'más populares',
+        'escribe *otros*',
+        'quieres'
       ],
       expectNotIncludes: [
+        'Piscolas:',
+        'armamos tu cotización',
+        '2 o 3 sabores',
+        'valores y el detalle',
+        'Los precios te los muestro',
+        'avísame y te las listo',
         '[IMG:dispensador_portatil_precios.webp]',
         'catálogo de cócteles',
         'Pack sugerido',
@@ -2311,8 +2376,7 @@ try {
         '*Subtotal:*',
         'Todo bien con el pedido',
         '10L Mojito',
-        'quita',
-        'ok'
+        'agrega'
       ],
       expectNotIncludes: [
         'Soy asistente virtual',
@@ -2321,7 +2385,9 @@ try {
         'Subtotal cócteles',
         'cotización formal con esto',
         'propuesta *sugerida*',
-        'Te confirmo los cócteles seleccionados'
+        'Te confirmo los cócteles seleccionados',
+        'Escribe el número de la opción',
+        'Confirmar —'
       ]
     }
   ]);
@@ -2336,8 +2402,23 @@ try {
     {
       input: 'sugerencia',
       expectState: 'EVENTOS_ELECCION_MENU',
-      expectIncludes: ['sugerencia', 'más populares', 'Mojito', 'Todo bien con el pedido', '10L Mojito', 'quita la sangr'],
+      expectIncludes: ['sugerencia', 'más populares', 'Mojito', 'Todo bien con el pedido', '10L Mojito', 'agrega'],
       expectNotIncludes: ['no entendí tu pedido', 'Te confirmo los cócteles seleccionados']
+    }
+  ]);
+
+  await runCase('Eventos: otros → lista combinados + mocktails (no inventa pedido)', [
+    { input: 'evento', expectState: 'EVENTOS_ELECCION_FORMATO' },
+    { input: '1', expectState: 'EVENTOS_RECOGIDA_DATOS' },
+    { input: 'matrimonio', expectState: 'EVENTOS_RECOGIDA_DATOS' },
+    { input: '60', expectState: 'EVENTOS_RECOGIDA_DATOS' },
+    { input: '2', expectState: 'EVENTOS_INTRO_MENU' },
+    { input: '1', expectState: 'EVENTOS_ELECCION_MENU' },
+    {
+      input: 'muestrame los otros',
+      expectState: 'EVENTOS_ELECCION_MENU',
+      expectIncludes: ['COMBINADOS', 'MOCKTAILS', 'Piscola', 'quieres'],
+      expectNotIncludes: ['Subtotal', 'Te confirmo los cócteles seleccionados', 'no entendí tu pedido']
     }
   ]);
 
@@ -2358,7 +2439,7 @@ try {
       expectIncludes: [
         '[IMG:dispensador_portatil_precios.webp]',
         'carta con precios',
-        'favoritos'
+        'quieres'
       ]
     }
   ]);
@@ -2425,6 +2506,45 @@ try {
       expectState: 'EVENTOS_ELECCION_MENU',
       expectIncludes: ['CLÁSICOS', 'por nombre', 'Mojito'],
       expectNotIncludes: ['Subtotal', 'Pisco Sour']
+    }
+  ]);
+
+  await runCase('Eventos: Mojito + spritz → carrito + duda Spritz (no fuera de carta)', [
+    { input: 'evento', expectState: 'EVENTOS_ELECCION_FORMATO' },
+    { input: '1', expectState: 'EVENTOS_RECOGIDA_DATOS' },
+    { input: 'matrimonio', expectState: 'EVENTOS_RECOGIDA_DATOS' },
+    { input: '60', expectState: 'EVENTOS_RECOGIDA_DATOS' },
+    { input: '2', expectState: 'EVENTOS_INTRO_MENU' },
+    { input: '1', expectState: 'EVENTOS_ELECCION_MENU' },
+    {
+      input: 'Mojito, spritz',
+      expectState: 'EVENTOS_ELECCION_MENU',
+      expectIncludes: ['Mojito', 'Spritz', 'Aperol', 'Ramazzotti', 'Ambos'],
+      expectNotIncludes: ['Subtotal', 'aún no', 'fuera de carta', 'no entendí tu pedido', 'Todo bien con el pedido']
+    },
+    {
+      input: 'ambos',
+      expectState: 'EVENTOS_ELECCION_MENU',
+      expectIncludes: ['Mojito', 'Aperol Spritz', 'Ramazzotti Spritz', 'Subtotal', 'Todo bien con el pedido', 'quita', 'agrega'],
+      expectNotIncludes: ['¿Quieres agregar', 'Escribe el número de la opción', 'Confirmar —']
+    }
+  ]);
+
+  await runCase('Eventos: p/p 5 → confirma volumen antes de intro', [
+    { input: 'evento', expectState: 'EVENTOS_ELECCION_FORMATO' },
+    { input: '1', expectState: 'EVENTOS_RECOGIDA_DATOS' },
+    { input: 'empresa', expectState: 'EVENTOS_RECOGIDA_DATOS' },
+    { input: '60', expectState: 'EVENTOS_RECOGIDA_DATOS' },
+    {
+      input: '5',
+      expectState: 'EVENTOS_RECOGIDA_DATOS',
+      expectIncludes: ['5', '300', 'barra bien servida', '¿Lo dejamos'],
+      expectNotIncludes: ['EVENTOS_INTRO_MENU', 'Ver Precios']
+    },
+    {
+      input: 'sí',
+      expectState: 'EVENTOS_INTRO_MENU',
+      expectIncludes: ['300', 'favoritos', 'Ver Precios']
     }
   ]);
 
@@ -2803,7 +2923,7 @@ try {
     assert(/Todo bien con el pedido/i.test(String(r1.customReplies[1])), `pregunta en 2ª burbuja`);
     assert(/10L Mojito/i.test(String(r1.customReplies[1])), `ejemplo de litros usa sabor del carrito`);
     assert(/quita la sangr/i.test(String(r1.customReplies[1])), `ejemplo de quitar usa sabor del carrito`);
-    assert(!/quita el aperol/i.test(String(r1.customReplies[1])), `sin ejemplo genérico de aperol`);
+    assert(/agrega/i.test(String(r1.customReplies[1])), `ejemplo de agregar`);
     assert(!/Todo bien con el pedido/i.test(String(r1.customReplies[0])), `pregunta no va en 1ª burbuja`);
   }
 
@@ -2824,8 +2944,8 @@ try {
     assert(/Sangr[ií]a/.test(t1) && /Aperol/.test(t1) && /Mojito/.test(t1), `incluye los 3 sabores`);
     assert(/_20L \| 100 cócteles \| 2 x persona_/i.test(t1), `total = baseline 2 p/p (20L / 100 / 2)`);
     const follow2 = String(r1.customReplies[1] || '');
-    assert(/\d+L\s+(Mojito|Sangr|Aperol)/i.test(follow2), `ejemplo litros usa sabor del carrito`);
-    assert(/quita el (mojito|aperol)|quita la sangr/i.test(follow2), `ejemplo quitar usa sabor del carrito`);
+    assert(/\d+L\s+(Mojito|Sangr|Aperol)/i.test(follow2), `tras clásicos: ejemplo de litros`);
+    assert(/quita/i.test(follow2), `tras clásicos: ejemplo de quitar`);
     assert(/10L/.test(t1), `al menos un sabor en 10L (no todo en 5L)`);
     assert(!/_15L \| 75 cócteles \| 1\.5 x persona_/i.test(t1), `no deja 3×5L (=1.5 p/p)`);
 
@@ -3116,7 +3236,7 @@ try {
     assert(/Mojito:/.test(catalog) && /Pisco Sour/.test(catalog), `nombres compactos`);
     assert(/Spritz:/.test(catalog), `agrupa Spritz`);
     assert(!/amplia y variada/i.test(catalog), `no copy FAQ/LLM`);
-    assert(/favoritos/i.test(followUp), `burbuja 2 re-pregunta pedido`);
+    assert(/quieres/i.test(followUp), `burbuja 2 re-pregunta pedido`);
   }
 
   console.log('\n-- Eventos: pregunta sabores lista sin mutar carrito --');
@@ -4176,8 +4296,12 @@ console.log('\n-- CRM Interesado: Eventos al pedir cócteles; Barriles al cotiza
     'Eventos: intro→estilo (aún sin pack) NO marca Interesado'
   );
   assert(
-    notifyCrmOnBotStateChange(sIntro, 'EVENTOS_ESTILO_MENU', 'EVENTOS_ELECCION_MENU') === false,
-    'Eventos: transición a menú NO marca Interesado (va por crmEngage del pack)'
+    notifyCrmOnBotStateChange(sIntro, 'EVENTOS_INTRO_MENU', 'EVENTOS_ELECCION_MENU') === true,
+    'Eventos: intro→menú SÍ marca Interesado (entra a elegir sabores)'
+  );
+  assert(
+    notifyCrmOnBotStateChange(sIntro, 'EVENTOS_ESTILO_MENU', 'EVENTOS_ELECCION_MENU') === true,
+    'Eventos: estilo→menú SÍ marca Interesado (entra a elegir sabores)'
   );
 
   const sCart = { userIntent: 'EVENTOS', guests: 50, waLabelClientePotencialApplied: false };

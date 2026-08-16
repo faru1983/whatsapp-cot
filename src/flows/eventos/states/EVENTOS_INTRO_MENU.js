@@ -14,7 +14,7 @@ import {
   EVENTOS_COTIZAR_SYNONYMS,
   EVENTOS_DUDA_SYNONYMS
 } from '../../../logic/eventos-intro.js';
-import { buildFlavorPickEntryReplies, buildVolumeRecommendation, buildStyleEntryReplies } from '../../../logic/eventos-style-pack.js';
+import { buildFlavorPickEntryReplies, buildVolumeRecommendation, buildStyleEntryReplies, wrapEventFlavorMenuEntry } from '../../../logic/eventos-style-pack.js';
 
 const MENU_Q = eventosIntroMenuQuestion();
 const SHORT_Q = withAssistantFooter(MENU_Q);
@@ -132,12 +132,7 @@ export const EVENTOS_INTRO_MENU = defineState({
       const formatKey = getEventFormatKey(session.eventoFormato);
       const per = Number(session.eventosDrinksPerGuest) || 0;
       if (per >= 1) {
-        return {
-          success: true,
-          nextState: 'EVENTOS_ELECCION_MENU',
-          customReplies: buildFlavorPickEntryReplies(session, formatKey, per),
-          flowProgress: true
-        };
+        return wrapEventFlavorMenuEntry(session, formatKey, per, messageText);
       }
       return {
         success: true,
