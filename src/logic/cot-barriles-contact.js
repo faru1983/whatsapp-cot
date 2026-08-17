@@ -18,6 +18,7 @@ import {
   toIsoDateFromBotText,
   normalizeBotDateText,
   exampleConcreteDateHint,
+  formatExampleConcreteDatePair,
   evaluateDeliveryLeadTime
 } from './cot-event-quote.js';
 import { submitBarrilesSaleFromSession } from './cot-barriles-sale.js';
@@ -146,7 +147,7 @@ export function askForMissingBarriles(missing, session = {}) {
     if (field === 'fecha') {
       const hasPartialDate = Boolean(dateText) && !toIsoDateFromBotText(dateText);
       const monthOnly = capitalizeMonthHint(dateText);
-      const exampleDay = exampleConcreteDateHint();
+      const exampleDates = formatExampleConcreteDatePair();
       if (hasPartialDate && monthOnly) {
         const mm = monthNumberHint(monthOnly);
         return `Me indicaste entrega en *${monthOnly}*.
@@ -160,12 +161,12 @@ _Es necesario para generar la compra._`;
         return `Anoté *${dateText}*, pero necesito el *día concreto* para generar la compra.
 
 *¿Me confirmas una fecha tentativa?*
-_(ej: ${exampleDay} o 15/05/2026)_`;
+_(ej: ${exampleDates})_`;
       }
       return `Para generar la compra:
 
 *¿Me confirmas la fecha de entrega?*
-_(ej: ${exampleDay} o 15/05/2026)_`;
+_(ej: ${exampleDates})_`;
     }
 
     if (field === 'comuna') {

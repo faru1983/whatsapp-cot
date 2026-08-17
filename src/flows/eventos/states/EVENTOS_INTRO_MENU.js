@@ -1,5 +1,5 @@
 // ==============================================================================
-// OBJETIVO: Paso EVENTOS_INTRO_MENU — tras p/p, cálculo de volumen + Ver Precios / duda.
+// OBJETIVO: Paso EVENTOS_INTRO_MENU — tras p/p, cálculo de volumen + Ver Cócteles / duda.
 // 1️⃣ pide favoritos (sin carta de precios). 2️⃣ duda → SOS + mute.
 // ==============================================================================
 import { defineState } from '../../../logic/compile-state.js';
@@ -22,7 +22,7 @@ const SHORT_Q = withAssistantFooter(MENU_Q);
 const AI_PROMPT = `[SISTEMA - ESTADO: INTRO MENÚ DE EVENTO]
 El cliente ya eligió formato (Dispensador o Muro), tipo, invitados y cócteles por persona.
 Usa el CONTEXTO DE FORMATO inyectado: litrajes, mínimo (10L Dispensador / 30L Muro) e instalación.
-Menú: 1️⃣ Ver Precios y Cotizar → lista de sabores (sin precios) | 2️⃣ Tengo una duda → equipo humano.
+Menú: 1️⃣ Ver Cócteles y Cotizar → lista de sabores (sin precios) | 2️⃣ Tengo una duda → equipo humano.
 1. Si no eligió opción clara, pide el número 1️⃣ o 2️⃣.
 2. Si corrige invitados/tipo, confirma, actualiza litros y vuelve al menú.
 3. Dudas breves de formato (instalación, qué incluye) sin inventar precios de cócteles.
@@ -111,7 +111,7 @@ export const EVENTOS_INTRO_MENU = defineState({
         extraDos: EVENTOS_DUDA_SYNONYMS
       }),
       labelHints: {
-        COTIZAR: 'Opción 1 / Ver Precios y Cotizar (1, 1️⃣, cotizar, cotización, ver precios).',
+        COTIZAR: 'Opción 1 / Ver Cócteles y Cotizar (1, 1️⃣, cotizar, cotización, ver cócteles).',
         DUDA: 'Opción 2 / tiene una duda o quiere hablar con el equipo (2, 2️⃣, duda, consulta, pregunta).'
       }
     });

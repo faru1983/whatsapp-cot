@@ -11,6 +11,7 @@ import {
 import { OrderBuilder } from '../logic/order-builder.js';
 import { getEventFormatChoiceCaption } from '../logic/eventos-intro.js';
 import { formatEventLitersSummaryLine } from '../logic/eventos-helpers.js';
+import { formatExampleConcreteDatePair } from '../logic/cot-event-quote.js';
 import { quoteCatalogShipping, quoteBarrilesDirectShipping, enrichLocationFromCatalog } from '../logic/cot-catalog.js';
 
 // ==============================================================================
@@ -459,7 +460,7 @@ export function getEventosContactIntroAsk() {
 Para armar tu *cotización formal* y enviarte una *copia al correo*, te pediré unos datos.
 
 *¿Me confirmas la fecha del evento?*
-_(ej: 15 de mayo o 15/05/2026)_`;
+_(ej: ${formatExampleConcreteDatePair()})_`;
 }
 
 /**

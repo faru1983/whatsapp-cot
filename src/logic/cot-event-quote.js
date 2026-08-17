@@ -88,16 +88,48 @@ export function formatDayMonthEs(year, month, day) {
 }
 
 /**
+ * exampleConcreteDateUtc: Fecha de ejemplo = hoy Chile + 3 días (UTC estable).
+ *
+ * @returns {Date}
+ */
+function exampleConcreteDateUtc() {
+  const today = todayPartsChile();
+  const base = new Date(Date.UTC(today.year, today.month - 1, today.day));
+  base.setUTCDate(base.getUTCDate() + 3);
+  return base;
+}
+
+/**
  * exampleConcreteDateHint: Fecha de ejemplo cercana (hoy Chile + 3 días).
- * Sirve en copy de Barriles para evitar "este sábado" (relativo).
+ * Sirve en copy de Barriles/Eventos para evitar "este sábado" (relativo).
  *
  * @returns {string} Ej. "5 de agosto"
  */
 export function exampleConcreteDateHint() {
-  const today = todayPartsChile();
-  const base = new Date(Date.UTC(today.year, today.month - 1, today.day));
-  base.setUTCDate(base.getUTCDate() + 3);
+  const base = exampleConcreteDateUtc();
   return formatDayMonthEs(base.getUTCFullYear(), base.getUTCMonth() + 1, base.getUTCDate());
+}
+
+/**
+ * exampleConcreteDateNumericHint: Misma fecha que exampleConcreteDateHint en DD/MM/YYYY.
+ *
+ * @returns {string} Ej. "20/08/2026"
+ */
+export function exampleConcreteDateNumericHint() {
+  const base = exampleConcreteDateUtc();
+  const y = base.getUTCFullYear();
+  const m = String(base.getUTCMonth() + 1).padStart(2, '0');
+  const d = String(base.getUTCDate()).padStart(2, '0');
+  return `${d}/${m}/${y}`;
+}
+
+/**
+ * formatExampleConcreteDatePair: Par verbal + numérico alineados (mismo día).
+ *
+ * @returns {string} Ej. "20 de agosto o 20/08/2026"
+ */
+export function formatExampleConcreteDatePair() {
+  return `${exampleConcreteDateHint()} o ${exampleConcreteDateNumericHint()}`;
 }
 
 /**

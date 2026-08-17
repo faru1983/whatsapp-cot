@@ -29,6 +29,7 @@ import {
   matchCocktailNamesInText
 } from './eventos-helpers.js';
 import { OrderBuilder } from './order-builder.js';
+import { filterCatalogNamesByCache } from './cot-catalog.js';
 import { formatMenuBlock, MENU_WRITE_CTA } from './flow-rails.js';
 import { matchesMenuOption } from './keyword-intent.js';
 import { nextEventosAck } from './eventos-intro.js';
@@ -1039,18 +1040,61 @@ export function resolveFamilyChoiceFromMessage(messageText, opciones) {
 }
 
 /**
- * buildClasicosCatalogBlock: Clásicos al entrar + nota corta de extras on-demand.
+ * buildEventClasicosEntryList: Layout editorial de clásicos al entrar a cotizar sabores.
+ * Respeta el catálogo vivo (API) y deja sabores nuevos al final.
  *
- * @param {'dispensador'|'muro'|string} formatKey
  * @returns {string}
  */
-export function buildClasicosCatalogBlock(formatKey = 'dispensador') {
-  const clasicos = getCoctelesNamesCatalogCompact({ sections: ['CLÁSICOS'] });
-  return `${buildFormatSizeHint(formatKey)}
+export function buildEventClasicosEntryList() {
+  const catalog = preciosData.cocteles || {};
+  const activeNames = filterCatalogNamesByCache(Object.keys(catalog));
+  const activeSet = activeNames ? new Set(activeNames) : null;
+  const has = (name) => Boolean(catalog[name]) && (!activeSet || activeSet.has(name));
+  const used = new Set();
+  const take = (name) => {
+    if (!has(name)) return false;
+    used.add(name);
+    return true;
+  };
 
-${clasicos}
+  const lines = [];
 
-También tenemos *Combinados* y opciones *sin alcohol*: escribe *otros* y te los muestro.`;
+  const mojitoVars = [];
+  if (take('Mojito')) mojitoVars.push('Tradicional');
+  if (take('Mojito Maracuyá')) mojitoVars.push('Maracuyá');
+  if (take('Mojito Frambuesa')) mojitoVars.push('Frambuesa');
+  if (take('Mojito Mango')) mojitoVars.push('Mango');
+  if (mojitoVars.length) lines.push(`Mojito: ${mojitoVars.join(' / ')}`);
+
+  const classicsRow = ['Sangría', 'Caipiriña', 'Pisco Sour'].filter((n) => take(n));
+  if (classicsRow.length) lines.push(classicsRow.join(' / '));
+
+  const spritzRow = ['Ramazzotti Spritz', 'Aperol Spritz', 'Gin & Tonic'].filter((n) => take(n));
+  if (spritzRow.length) lines.push(spritzRow.join(' / '));
+
+  const ginRow = ['Tropical Gin', 'Moscow Mule', 'Tequila Margarita'].filter((n) => take(n));
+  if (ginRow.length) lines.push(ginRow.join(' / '));
+
+  const leftover = Object.keys(catalog)
+    .filter((n) => catalog[n]?.categoria === 'CLÁSICOS' && !used.has(n))
+    .sort((a, b) => a.localeCompare(b, 'es'));
+  if (leftover.length) lines.push(leftover.join(' / '));
+
+  return lines.join('\n');
+}
+
+/**
+ * buildClasicosCatalogBlock: Clásicos al entrar + nota corta de extras on-demand.
+ *
+ * @param {'dispensador'|'muro'|string} [_formatKey] - Conservado por compatibilidad de callers
+ * @returns {string}
+ */
+export function buildClasicosCatalogBlock(_formatKey = 'dispensador') {
+  return `Esta es nuestra lista de cócteles *Clásicos*:
+
+${buildEventClasicosEntryList()}
+
+También tenemos *combinados* y opciones *sin alcohol*: escribe *otros* y te los muestro.`;
 }
 
 /**
@@ -1109,8 +1153,8 @@ ${getCoctelesNamesCatalogCompact()}`;
  * @returns {string}
  */
 export function buildFlavorPickQuestion() {
-  return `*¿Cuáles quieres de la lista?*
-_(nombres concretos; ej: Mojito y Sangría)_
+  return `*¿Escribe los que quieras de la lista?*
+_(ej: Mojito, Sangría y Ramazzotti)_
 
 O escribe *sugerida* y te armo una cotización con los más populares 😊`;
 }
@@ -1333,7 +1377,8 @@ export function buildEventFlavorAdminNotify(session, lastMessage = '') {
 }
 
 /**
- * wrapEventFlavorMenuEntry: Transición a ELECCION_MENU con ping admin + CRM (una vez).
+ * wrapEventFlavorMenuEntry: Transición a ELECCION_MENU con ping admin (una vez).
+ * CRM Interesado + Cliente potencial: solo al primer cóctel (withFirstCocktailCrmEngage).
  *
  * @param {object} session
  * @param {string} formatKey
@@ -1351,7 +1396,6 @@ export function wrapEventFlavorMenuEntry(session, formatKey, per, lastMessage = 
   if (!session.eventosFlavorAdminPinged) {
     session.eventosFlavorAdminPinged = true;
     result.notifyAdmin = buildEventFlavorAdminNotify(session, lastMessage);
-    result.crmEngage = 'eventos_elige_sabores';
   }
   return result;
 }

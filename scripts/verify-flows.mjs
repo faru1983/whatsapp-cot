@@ -277,7 +277,7 @@ console.log('\n-- replyTiming (.env REPLY_DELAY_*) --');
   assert(!/c[oó]cteles \(~\*/.test(askDisp), `p/p sin cuentas en litros`);
 }
 
-// Fase B: 2 burbujas (imagen sin caption + texto) y copy sin “Perfecto”+“¡Genial!”
+// Fase B: 2 burbujas (imagen con caption + texto) y copy sin “Perfecto”+“¡Genial!”
 {
   const {
     buildFormatPhaseBReplies,
@@ -285,7 +285,7 @@ console.log('\n-- replyTiming (.env REPLY_DELAY_*) --');
   } = await import('../src/logic/eventos-intro.js');
   const phaseB = buildFormatPhaseBReplies('dispensador', { celebrationType: 'Cumpleaños' });
   assert(Array.isArray(phaseB) && phaseB.length === 2, `fase B → 2 burbujas`);
-  assert(isImagePart(phaseB[0]) && !phaseB[0].caption, `fase B burbuja 1 = imagen sin caption`);
+  assert(isImagePart(phaseB[0]) && /Revisa todo lo que incluye el servicio/.test(phaseB[0].caption || ''), `fase B burbuja 1 = imagen con caption incluido`);
   assert(typeof phaseB[1] === 'string', `fase B burbuja 2 = texto`);
   const bText = buildFormatPhaseBText('dispensador', { celebrationType: 'Cumpleaños' });
   assert(/Perfecto, anoté \*Cumpleaños\*/i.test(bText), `fase B 1er acuse = Perfecto`);
@@ -401,11 +401,19 @@ assert(toIsoDateFromBotText('15 diciembre 2027') === '2027-12-15', `ISO: año ex
 assert(toIsoDateFromBotText('mañana') != null, `ISO: mañana relativa`);
 assert(toIsoDateFromBotText('este sábado') != null, `ISO: este sábado relativa`);
 {
-  const { normalizeBotDateText, exampleConcreteDateHint, todayPartsChile } = await import('../src/logic/cot-event-quote.js');
+  const { normalizeBotDateText, exampleConcreteDateHint, exampleConcreteDateNumericHint, formatExampleConcreteDatePair, todayPartsChile } = await import('../src/logic/cot-event-quote.js');
   const normSab = normalizeBotDateText('este sábado');
   assert(/^\d{2}\/\d{2}\/\d{4}$/.test(String(normSab)), `normaliza este sábado → DD/MM/YYYY (es ${normSab})`);
   assert(toIsoDateFromBotText(normSab) != null, `DD/MM/YYYY de sábado sigue siendo ISO-válida`);
   assert(/\d{1,2}\s+de\s+\w+/i.test(exampleConcreteDateHint()), `ejemplo concreto de entrega (copy)`);
+  assert(/^\d{2}\/\d{2}\/\d{4}$/.test(exampleConcreteDateNumericHint()), `ejemplo numérico DD/MM/YYYY`);
+  {
+    const pair = formatExampleConcreteDatePair();
+    const [verbal, numeric] = pair.split(' o ');
+    const verbalDay = verbal.match(/^(\d{1,2})\s+de\s+/i)?.[1];
+    const numericDay = numeric?.match(/^(\d{2})\//)?.[1];
+    assert(verbalDay && numericDay && Number(verbalDay) === Number(numericDay), `par fecha: mismo día verbal y numérico`);
+  }
 
   // "8 de agosto" → 08/08/<año Chile o siguiente>
   const today = todayPartsChile();
@@ -747,8 +755,8 @@ assert(
   assert(/\*10L\*/.test(buildFlavorCatalogBlock('muro')) && /\*30L\*/.test(buildFlavorCatalogBlock('muro')), 'bloque Muro indica 10/30L');
   assert(!buildFlavorCatalogBlock().includes('catálogo con precios'), 'bloque no mete precios en el menú de nombres');
   assert(buildFlavorPickQuestion().includes('*sugerida*'), 'ask menciona escribir sugerida');
-  assert(/quieres/.test(buildFlavorPickQuestion()), 'ask pide elegir de la lista');
-  assert(/nombres/.test(buildFlavorPickQuestion()), 'ask pide nombres no categoría');
+  assert(/quieras/.test(buildFlavorPickQuestion()), 'ask pide elegir de la lista');
+  assert(/Ramazzotti/.test(buildFlavorPickQuestion()), 'ask ejemplo con tercer sabor');
   assert(/por \*nombre\*/.test(buildFlavorCatalogBlock()), 'catálogo aclara elegir por nombre');
   {
     const catAsk = buildCategoryFlavorAsk('CLÁSICOS', 'dispensador');
@@ -760,7 +768,10 @@ assert(
   assert(buildFlavorPickAsk() === buildFlavorPickQuestion(), 'ask corto = pregunta');
   const entry = buildFlavorPickEntryReplies({ guests: 25 }, 'dispensador', 2);
   assert(entry.length === 2, 'entrada sabores: 2 burbujas');
-  assert(/\*5L\*/.test(entry[0]) && /CLÁSICOS/.test(entry[0]), 'burbuja 1: tamaños + clásicos');
+  assert(/lista de c[oó]cteles \*Cl[aá]sicos\*/.test(entry[0]), 'burbuja 1: encabezado clásicos');
+  assert(/Mojito:.*Maracuy[aá]/.test(entry[0]), 'burbuja 1: mojito con Maracuyá primero');
+  assert(/Ramazzotti Spritz/.test(entry[0]) && /Aperol Spritz/.test(entry[0]), 'burbuja 1: spritz por nombre');
+  assert(!/\*5L\*/.test(entry[0]), 'burbuja 1: sin hint de litraje al entrar');
   assert(/También tenemos/.test(entry[0]) && /escribe \*otros\*/.test(entry[0]), 'burbuja 1: teaser otros on-demand');
   assert(!/Piscolas:/.test(entry[0]), 'burbuja 1: sin lista completa de combinados');
   assert(wantsEventOtherFlavorsList('otros'), 'otros → lista extras');
@@ -774,7 +785,7 @@ assert(
   }
   assert(!/armamos tu cotización|2 o 3 sabores/i.test(entry[0]), 'burbuja 1: sin repetir pitch de intro');
   assert(!/Listo:.*cócteles por persona/i.test(entry[0]), 'burbuja 1: sin re-confirmar p/p');
-  assert(/quieres/.test(entry[1]), 'burbuja 2: pregunta de sabores');
+  assert(/quieras/.test(entry[1]), 'burbuja 2: pregunta de sabores');
   assert(!/Los precios te los muestro/i.test(entry[1]), 'burbuja 2: sin línea de precios al cerrar');
   {
     const spritzOpts = ['Aperol Spritz', 'Ramazzotti Spritz'];
@@ -805,7 +816,7 @@ assert(
   assert(/dispensador_portatil_precios/.test(String(priceAsk[0]?.file || '')), 'on-demand: imagen de carta');
   assert(/carta con precios/i.test(priceAsk[1]), 'on-demand: CTA tras carta');
   assert((priceAsk[1].match(/\*sugerida\*/g) || []).length === 1, 'on-demand precios: sugerida una sola vez');
-  assert((priceAsk[1].match(/¿Cuáles quieres de la lista\?/g) || []).length === 1, 'on-demand precios: pregunta sabores una sola vez');
+  assert((priceAsk[1].match(/¿Escribe los que quieras de la lista\?/g) || []).length === 1, 'on-demand precios: pregunta sabores una sola vez');
   assert(wantsSuggestedSelection('selección sugerida') === true, 'detecta selección sugerida');
   assert(wantsSuggestedSelection('sugerencia') === true, 'detecta sugerencia');
   assert(wantsSuggestedSelection('una sugerencia') === true, 'detecta una sugerencia');
@@ -839,10 +850,10 @@ assert(
     assert(/10L Mojito: \$\d/.test(packReply.reply), 'sugerida lista líneas como carrito normal');
     assert(/\*Subtotal:\*/.test(packReply.reply), 'sugerida usa Subtotal de carrito');
     assert(/~\*100 cócteles\*/.test(packReply.reply) && /promedio.*por copa/i.test(packReply.reply), 'sugerida incluye valor por copa');
-    assert(/Todo bien con el pedido/.test(packReply.followUp), 'sugerida pregunta como resumen de carrito');
-    assert(/10L Mojito/.test(packReply.followUp), 'sugerida ejemplo de litraje como carrito manual');
-    assert(/quita la sangr/i.test(packReply.followUp), 'sugerida ejemplo de quitar como carrito manual');
-    assert(/agrega piscola/i.test(packReply.followUp), 'sugerida ejemplo de agregar');
+    assert(/Te parece bien/i.test(packReply.followUp), 'sugerida pregunta como resumen de carrito');
+    assert(/solo 10L Mojito/.test(packReply.followUp), 'sugerida ejemplo de litraje como carrito manual');
+    assert(/Elimina Sangr/i.test(packReply.followUp), 'sugerida ejemplo de eliminar como carrito manual');
+    assert(/Agrega piscola/i.test(packReply.followUp), 'sugerida ejemplo de agregar');
     assert(!/Escribe el número de la opción/i.test(packReply.followUp), 'sugerida sin menú numerado');
     assert(!/cotizaci[oó]n formal con esto/i.test(packReply.followUp), 'sugerida sin pregunta de cotización formal');
   }
@@ -2192,6 +2203,7 @@ try {
       expectState: 'EVENTOS_RECOGIDA_DATOS',
       expectIncludes: [
         '[IMG:dispensador_portatil.webp]',
+        'Revisa todo lo que incluye el servicio',
         'Matrimonio',
         'Perfecto',
         'propuesta concreta',
@@ -2219,7 +2231,7 @@ try {
         '10L',
         'catálogo de cócteles',
         '[IMG:dispensador_portatil_precios.webp]',
-        'Ver Precios'
+        'Ver Cócteles'
       ]
     },
     {
@@ -2229,7 +2241,7 @@ try {
         '2',
         '20L',
         'favoritos',
-        'Ver Precios',
+        'Ver Cócteles',
         'duda'
       ],
       expectNotIncludes: [
@@ -2242,7 +2254,7 @@ try {
     {
       input: 'son 80 invitados',
       expectState: 'EVENTOS_INTRO_MENU',
-      expectIncludes: ['80', 'corregí', 'Ver Precios']
+      expectIncludes: ['80', 'corregí', 'Ver Cócteles']
     }
   ]);
 
@@ -2314,7 +2326,7 @@ try {
         '10L',
         'catálogo de cócteles',
         '[IMG:dispensador_portatil_precios.webp]',
-        'Ver Precios'
+        'Ver Cócteles'
       ]
     },
     {
@@ -2322,7 +2334,7 @@ try {
       expectState: 'EVENTOS_INTRO_MENU',
       expectIncludes: [
         'favoritos',
-        'Ver Precios',
+        'Ver Cócteles',
         'duda',
         '80',
         '2'
@@ -2338,13 +2350,13 @@ try {
       input: '1',
       expectState: 'EVENTOS_ELECCION_MENU',
       expectIncludes: [
-        'CLÁSICOS',
-        'Spritz',
-        '5L',
+        'lista de cócteles',
+        'Clásicos',
+        'Ramazzotti Spritz',
         'escribe *sugerida*',
         'más populares',
         'escribe *otros*',
-        'quieres'
+        'quieras'
       ],
       expectNotIncludes: [
         'Piscolas:',
@@ -2353,6 +2365,8 @@ try {
         'valores y el detalle',
         'Los precios te los muestro',
         'avísame y te las listo',
+        'En el *Dispensador*',
+        '*5L*',
         '[IMG:dispensador_portatil_precios.webp]',
         'catálogo de cócteles',
         'Pack sugerido',
@@ -2374,9 +2388,10 @@ try {
         'Mojito',
         'Sangría',
         '*Subtotal:*',
-        'Todo bien con el pedido',
-        '10L Mojito',
-        'agrega'
+        'Te parece bien',
+        'Elimina',
+        'solo 10L Mojito',
+        'Agrega piscola'
       ],
       expectNotIncludes: [
         'Soy asistente virtual',
@@ -2402,7 +2417,7 @@ try {
     {
       input: 'sugerencia',
       expectState: 'EVENTOS_ELECCION_MENU',
-      expectIncludes: ['sugerencia', 'más populares', 'Mojito', 'Todo bien con el pedido', '10L Mojito', 'agrega'],
+      expectIncludes: ['sugerencia', 'más populares', 'Mojito', 'Te parece bien', 'Elimina', 'solo 10L Mojito', 'Agrega'],
       expectNotIncludes: ['no entendí tu pedido', 'Te confirmo los cócteles seleccionados']
     }
   ]);
@@ -2417,7 +2432,7 @@ try {
     {
       input: 'muestrame los otros',
       expectState: 'EVENTOS_ELECCION_MENU',
-      expectIncludes: ['COMBINADOS', 'MOCKTAILS', 'Piscola', 'quieres'],
+      expectIncludes: ['COMBINADOS', 'MOCKTAILS', 'Piscola', 'quieras'],
       expectNotIncludes: ['Subtotal', 'Te confirmo los cócteles seleccionados', 'no entendí tu pedido']
     }
   ]);
@@ -2439,7 +2454,7 @@ try {
       expectIncludes: [
         '[IMG:dispensador_portatil_precios.webp]',
         'carta con precios',
-        'quieres'
+        'quieras'
       ]
     }
   ]);
@@ -2460,7 +2475,7 @@ try {
         'carta con precios',
         'Tu pedido actual',
         'Mojito',
-        'Todo bien con el pedido'
+        'Te parece bien'
       ],
       expectNotIncludes: [
         'Si en la imagen viste otro valor',
@@ -2520,12 +2535,12 @@ try {
       input: 'Mojito, spritz',
       expectState: 'EVENTOS_ELECCION_MENU',
       expectIncludes: ['Mojito', 'Spritz', 'Aperol', 'Ramazzotti', 'Ambos'],
-      expectNotIncludes: ['Subtotal', 'aún no', 'fuera de carta', 'no entendí tu pedido', 'Todo bien con el pedido']
+      expectNotIncludes: ['Subtotal', 'aún no', 'fuera de carta', 'no entendí tu pedido', 'Te parece bien']
     },
     {
       input: 'ambos',
       expectState: 'EVENTOS_ELECCION_MENU',
-      expectIncludes: ['Mojito', 'Aperol Spritz', 'Ramazzotti Spritz', 'Subtotal', 'Todo bien con el pedido', 'quita', 'agrega'],
+      expectIncludes: ['Mojito', 'Aperol Spritz', 'Ramazzotti Spritz', 'Subtotal', 'Te parece bien', 'Elimina', 'Agrega'],
       expectNotIncludes: ['¿Quieres agregar', 'Escribe el número de la opción', 'Confirmar —']
     }
   ]);
@@ -2539,12 +2554,12 @@ try {
       input: '5',
       expectState: 'EVENTOS_RECOGIDA_DATOS',
       expectIncludes: ['5', '300', 'barra bien servida', '¿Lo dejamos'],
-      expectNotIncludes: ['EVENTOS_INTRO_MENU', 'Ver Precios']
+      expectNotIncludes: ['EVENTOS_INTRO_MENU', 'Ver Cócteles']
     },
     {
       input: 'sí',
       expectState: 'EVENTOS_INTRO_MENU',
-      expectIncludes: ['300', 'favoritos', 'Ver Precios']
+      expectIncludes: ['300', 'favoritos', 'Ver Cócteles']
     }
   ]);
 
@@ -2618,7 +2633,7 @@ try {
     {
       input: 'sugerencia',
       expectState: 'EVENTOS_ELECCION_MENU',
-      expectIncludes: ['sugerencia', 'Todo bien con el pedido'],
+      expectIncludes: ['sugerencia', 'Te parece bien'],
       expectNotIncludes: ['5L Mojito', 'no entendí tu pedido']
     }
   ]);
@@ -2920,11 +2935,11 @@ try {
     assert(/_20L \| 100 cócteles \| 2 x persona_/i.test(t1), `resumen litros simple 20L / 100 / 2 x persona`);
     assert(/\*Subtotal:\*.*\n_20L/s.test(t1), `litros va debajo del subtotal`);
     assert(/~\*100 cócteles\*/.test(t1) && /promedio.*por copa/i.test(t1), `carrito incluye pitch de valor por copa`);
-    assert(/Todo bien con el pedido/i.test(String(r1.customReplies[1])), `pregunta en 2ª burbuja`);
-    assert(/10L Mojito/i.test(String(r1.customReplies[1])), `ejemplo de litros usa sabor del carrito`);
-    assert(/quita la sangr/i.test(String(r1.customReplies[1])), `ejemplo de quitar usa sabor del carrito`);
-    assert(/agrega/i.test(String(r1.customReplies[1])), `ejemplo de agregar`);
-    assert(!/Todo bien con el pedido/i.test(String(r1.customReplies[0])), `pregunta no va en 1ª burbuja`);
+    assert(/Te parece bien/i.test(String(r1.customReplies[1])), `pregunta en 2ª burbuja`);
+    assert(/solo 10L Mojito/i.test(String(r1.customReplies[1])), `ejemplo de litros usa sabor del carrito`);
+    assert(/Elimina Sangr/i.test(String(r1.customReplies[1])), `ejemplo de eliminar usa sabor del carrito`);
+    assert(/Agrega piscola/i.test(String(r1.customReplies[1])), `ejemplo de agregar`);
+    assert(!/Te parece bien/i.test(String(r1.customReplies[0])), `pregunta no va en 1ª burbuja`);
   }
 
   console.log('\n-- Eventos: sabores sin tamaño respetan cócteles p/p --');
@@ -2944,8 +2959,8 @@ try {
     assert(/Sangr[ií]a/.test(t1) && /Aperol/.test(t1) && /Mojito/.test(t1), `incluye los 3 sabores`);
     assert(/_20L \| 100 cócteles \| 2 x persona_/i.test(t1), `total = baseline 2 p/p (20L / 100 / 2)`);
     const follow2 = String(r1.customReplies[1] || '');
-    assert(/\d+L\s+(Mojito|Sangr|Aperol)/i.test(follow2), `tras clásicos: ejemplo de litros`);
-    assert(/quita/i.test(follow2), `tras clásicos: ejemplo de quitar`);
+    assert(/solo \d+L\s+(Mojito|Sangr|Aperol)/i.test(follow2), `tras clásicos: ejemplo de litros`);
+    assert(/Elimina/i.test(follow2), `tras clásicos: ejemplo de eliminar`);
     assert(/10L/.test(t1), `al menos un sabor en 10L (no todo en 5L)`);
     assert(!/_15L \| 75 cócteles \| 1\.5 x persona_/i.test(t1), `no deja 3×5L (=1.5 p/p)`);
 
@@ -3236,7 +3251,7 @@ try {
     assert(/Mojito:/.test(catalog) && /Pisco Sour/.test(catalog), `nombres compactos`);
     assert(/Spritz:/.test(catalog), `agrupa Spritz`);
     assert(!/amplia y variada/i.test(catalog), `no copy FAQ/LLM`);
-    assert(/quieres/i.test(followUp), `burbuja 2 re-pregunta pedido`);
+    assert(/quieras/i.test(followUp), `burbuja 2 re-pregunta pedido`);
   }
 
   console.log('\n-- Eventos: pregunta sabores lista sin mutar carrito --');
@@ -4296,12 +4311,12 @@ console.log('\n-- CRM Interesado: Eventos al pedir cócteles; Barriles al cotiza
     'Eventos: intro→estilo (aún sin pack) NO marca Interesado'
   );
   assert(
-    notifyCrmOnBotStateChange(sIntro, 'EVENTOS_INTRO_MENU', 'EVENTOS_ELECCION_MENU') === true,
-    'Eventos: intro→menú SÍ marca Interesado (entra a elegir sabores)'
+    notifyCrmOnBotStateChange(sIntro, 'EVENTOS_INTRO_MENU', 'EVENTOS_ELECCION_MENU') === false,
+    'Eventos: intro→menú NO marca Interesado (solo al primer cóctel)'
   );
   assert(
-    notifyCrmOnBotStateChange(sIntro, 'EVENTOS_ESTILO_MENU', 'EVENTOS_ELECCION_MENU') === true,
-    'Eventos: estilo→menú SÍ marca Interesado (entra a elegir sabores)'
+    notifyCrmOnBotStateChange(sIntro, 'EVENTOS_ESTILO_MENU', 'EVENTOS_ELECCION_MENU') === false,
+    'Eventos: estilo→menú NO marca Interesado (solo al primer cóctel)'
   );
 
   const sCart = { userIntent: 'EVENTOS', guests: 50, waLabelClientePotencialApplied: false };

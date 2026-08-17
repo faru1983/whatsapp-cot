@@ -1482,9 +1482,39 @@ function eventCartGroupedLines(products, formatKey) {
 }
 
 /**
- * eventCartRemoveExamplePhrase: Frase corta "quita el/la mojito" para el ejemplo.
+ * eventCartEliminateExamplePhrase: Ejemplo "Elimina Sangría" con sabor del carrito.
  *
- * @param {string} name - Nombre del cóctel en catálogo
+ * @param {string} name
+ * @returns {string}
+ */
+function eventCartEliminateExamplePhrase(name) {
+  const label = String(name || '').trim() || 'Sangría';
+  return `Elimina ${label}`;
+}
+
+/**
+ * eventCartSoloLitersExamplePhrase: Ejemplo "solo 10L Mojito" para ajustar litraje.
+ *
+ * @param {{ name: string, parts?: Array<{ size: number }> }} group
+ * @param {'dispensador'|'muro'|string} formatKey
+ * @returns {string}
+ */
+function eventCartSoloLitersExamplePhrase(group, formatKey) {
+  const allowed = getAllowedLitrages(formatKey)
+    .map((l) => parseInt(l, 10))
+    .filter((n) => n > 0)
+    .sort((a, b) => a - b);
+  const currentSize = group?.parts?.[0]?.size || 0;
+  const upgradeSize = allowed.find((n) => n > currentSize);
+  const exampleSize = upgradeSize || currentSize || allowed[allowed.length - 1];
+  if (!exampleSize || !group?.name) return '';
+  return `solo ${exampleSize}L ${group.name}`;
+}
+
+/**
+ * eventCartRemoveExamplePhrase: Frase corta "quita el/la mojito" (re-preguntas de quitar).
+ *
+ * @param {string} name
  * @returns {string}
  */
 function eventCartRemoveExamplePhrase(name) {
@@ -1495,8 +1525,7 @@ function eventCartRemoveExamplePhrase(name) {
 }
 
 /**
- * eventCartModifyExamplePhrase: Ejemplo "10L Mojito" para ajustar litraje.
- * Si hay tamaño mayor disponible, sugiere subir; si no, usa el litraje actual del carrito.
+ * eventCartModifyExamplePhrase: Ejemplo "10L Mojito" para ajustar litraje (hints internos).
  *
  * @param {{ name: string, parts?: Array<{ size: number }> }} group
  * @param {'dispensador'|'muro'|string} formatKey
@@ -1515,6 +1544,24 @@ function eventCartModifyExamplePhrase(group, formatKey) {
 }
 
 /**
+ * buildEventCartModifyExamples: Línea de ejemplos Agrega / Elimina / solo xxL según el carrito.
+ *
+ * @param {object} products
+ * @param {'dispensador'|'muro'|string} formatKey
+ * @returns {string}
+ */
+function buildEventCartModifyExamples(products, formatKey) {
+  const groups = eventCartGroupedLines(products, formatKey);
+  if (!groups.length) return 'Agrega Mojito, Elimina Sangría, solo 10L Mojito';
+  const first = groups[0];
+  const removeTarget = groups.length > 1 ? groups[groups.length - 1] : groups[0];
+  const eliminateEx = eventCartEliminateExamplePhrase(removeTarget.name);
+  const soloLitersEx = eventCartSoloLitersExamplePhrase(first, formatKey);
+  if (soloLitersEx) return `Agrega piscola / ${eliminateEx}, ${soloLitersEx}`;
+  return `Agrega piscola / ${eliminateEx}`;
+}
+
+/**
  * getEventCartAdjustHint: Ejemplo corto para corregir el pedido (litros o quitar).
  *
  * @param {object} products
@@ -1522,41 +1569,20 @@ function eventCartModifyExamplePhrase(group, formatKey) {
  * @returns {string}
  */
 export function getEventCartAdjustHint(products, formatKey) {
-  const groups = eventCartGroupedLines(products, formatKey);
-  if (!groups.length) return '"10L Mojito" / *quita el aperol*';
-  const first = groups[0];
-  const removeTarget = groups.length > 1 ? groups[groups.length - 1] : groups[0];
-  const literExample = eventCartModifyExamplePhrase(first, formatKey);
-  const removeExample = eventCartRemoveExamplePhrase(removeTarget.name);
-  if (literExample) return `${literExample} / ${removeExample}`;
-  return removeExample;
+  return buildEventCartModifyExamples(products, formatKey);
 }
 
 /**
- * buildEventCartOkAsk: Confirmar o modificar (cambiar litros / quitar / agregar).
+ * buildEventCartOkAsk: Confirmar *OK* o modificar (agregar / eliminar / litraje).
  *
  * @param {object} products - session.orderBuilder.products
  * @param {'dispensador'|'muro'|string} formatKey
  * @returns {string}
  */
 export function buildEventCartOkAsk(products, formatKey) {
-  const groups = eventCartGroupedLines(products, formatKey);
-  if (!groups.length) {
-    return `*¿Todo bien con el pedido?*
-_(ej: escribe *ok* para el resumen)_`;
-  }
-
-  const first = groups[0];
-  const removeTarget = groups.length > 1 ? groups[groups.length - 1] : groups[0];
-  const literExample = eventCartModifyExamplePhrase(first, formatKey);
-  const removeExample = eventCartRemoveExamplePhrase(removeTarget.name);
-
-  if (literExample) {
-    return `*¿Todo bien con el pedido?*
-_(ej: *ok* / ${literExample} / ${removeExample} / *agrega piscola*)_`;
-  }
-  return `*¿Todo bien con el pedido?*
-_(ej: *ok* / ${removeExample} / *agrega piscola*)_`;
+  const examples = buildEventCartModifyExamples(products, formatKey);
+  return `*¿Te parece bien?* Escribe *OK* o *modificamos algo*.
+_(ej: ${examples})_`;
 }
 
 /**

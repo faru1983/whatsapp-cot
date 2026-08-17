@@ -245,7 +245,7 @@ function nudgePendingAsk(stateId, session, pendingKey) {
     return '👉 *¿Qué cóctel(es) del catálogo te interesan?*';
   }
   if (stateId === 'EVENTOS_INTRO_MENU' || pendingKey === 'continue') {
-    return 'Escribe *1* *Ver Precios y Cotizar* o *2* si tienes una *duda*.';
+    return 'Escribe *1* *Ver Cócteles y Cotizar* o *2* si tienes una *duda*.';
   }
   if (stateId === 'EVENTOS_ESTILO_MENU' || pendingKey === 'style' || pendingKey === 'per_person' || pendingKey === 'flavor_mode') {
     if (pendingKey === 'per_person' || (!session?.eventosDrinksPerGuest)) {

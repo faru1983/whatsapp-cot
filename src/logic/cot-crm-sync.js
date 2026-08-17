@@ -405,8 +405,8 @@ export function syncCrmCtwaAttributionAsync(session) {
 
 /**
  * shouldEngageCrmOnTransition: ¿Esta transición del bot = momento Interesado?
- * Eventos: NO al solo elegir “cotizar” (estilo/pack aún no); se marca al entrar
- *   a ELECCION_MENU (elegir sabores) vía transición o crmEngage explícito.
+ * Eventos: NO al elegir “Ver Cócteles” ni al entrar a ELECCION_MENU; Interesado al
+ *   primer cóctel en carrito (notifyCrmEngageTrigger / withFirstCocktailCrmEngage).
  * Barriles: al elegir pedir (FILTRO o post-precios) o atajo sabor → RECOGIDA_PRODUCTOS.
  * Solo ver precios o dejar una duda sigue siendo Curioso.
  *
@@ -419,11 +419,6 @@ function shouldEngageCrmOnTransition(from, to) {
   // Barriles: Interesado al elegir pedir (FILTRO o post-precios) / atajo sabor
   if (to === 'BARRILES_RECOGIDA_PRODUCTOS'
       && (from === 'BARRILES_INTRO_MENU' || from === 'BARRILES_FILTRO_CANAL')) return true;
-  // Eventos: Interesado al entrar a elegir sabores (antes era al primer cóctel)
-  if (to === 'EVENTOS_ELECCION_MENU'
-      && (from === 'EVENTOS_INTRO_MENU' || from === 'EVENTOS_ESTILO_MENU')) return true;
-  // Red de seguridad si avanzó a contacto con carrito
-  if (from === 'EVENTOS_ELECCION_MENU' && to === 'EVENTOS_DATOS_CONTACTO') return true;
   return false;
 }
 

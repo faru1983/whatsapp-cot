@@ -53,11 +53,11 @@ Si cambias copy con litrajes/ejemplos en **un** estado, revisar **todos** los he
 Favoritos manuales, `sugerida`/`sugerencia` y carrito ya armado son **la misma variante** del paso. Reglas:
 
 ### Entrada (sin precios)
-- Al cotizar desde `INTRO_MENU`: **Clásicos** + CTA `escribe *otros*` (Combinados/Mocktails on-demand) + `sugerida`.
+- Al cotizar desde `INTRO_MENU`: lista editorial de **Clásicos** (`buildClasicosCatalogBlock` / `buildEventClasicosEntryList`) + CTA `escribe *otros*` + `sugerida`. Sin hint de litraje en la entrada.
 - `wantsEventOtherFlavorsList` (otros, muéstrame los otros, qué más tienen…) → `buildEventOtherFlavorsListBlock` **antes** del NLU de productos. Fallback NLU: intent `EXTRAS`.
-- Tras armar carrito: **una** pregunta (`buildEventCartOkAsk`: *ok* / cambiar litros / *quita* / *agrega*). **No** menú 1–4. Combinados/mocktails se listan on-demand.
+- Tras armar carrito: **una** pregunta (`buildEventCartOkAsk`: *¿Te parece bien?* / *OK* / Agrega / Elimina / solo xxL). **No** menú 1–4. Combinados/mocktails se listan on-demand.
 - **No** enviar imagen de precios al entrar.
-- **Aviso admin** una vez al entrar (`wrapEventFlavorMenuEntry` → `notifyAdmin` INFO + CRM Interesado).
+- **Aviso admin** una vez al entrar a sabores (`wrapEventFlavorMenuEntry` → `notifyAdmin` INFO). **CRM Interesado + Cliente potencial** solo al **primer cóctel** en carrito (`withFirstCocktailCrmEngage`).
 
 ### Familias de sabor (Spritz, Mojito sabores)
 - `detectCatalogFamilyMention` / `collectProgrammaticFamilyDoubts`: spritz suelto → Aperol vs Ramazzotti (no “fuera de carta”).

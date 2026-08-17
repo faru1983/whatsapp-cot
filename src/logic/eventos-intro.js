@@ -320,8 +320,8 @@ export function buildFormatPhaseAReplies(formatKeyOrLabel) {
 }
 
 /**
- * buildFormatPhaseBReplies: Imagen primero + texto después (2 burbujas, sin caption).
- * Misma pauta que fase A: media sola, luego el copy.
+ * buildFormatPhaseBReplies: Imagen con caption + texto después (2 burbujas).
+ * La imagen invita a revisar qué incluye el servicio antes del copy de invitados.
  *
  * @param {'dispensador'|'muro'|string} formatKeyOrLabel
  * @param {object} [session]
@@ -332,7 +332,7 @@ export function buildFormatPhaseBReplies(formatKeyOrLabel, session = null) {
     ? formatKeyOrLabel
     : getEventFormatKey(formatKeyOrLabel);
   return [
-    img(eventFormatPhaseBAssetFile(formatKey)),
+    img(eventFormatPhaseBAssetFile(formatKey), '👆 Revisa todo lo que incluye el servicio.'),
     buildFormatPhaseBText(formatKey, session)
   ];
 }
@@ -375,7 +375,7 @@ export function buildEventFormatChoiceReplies() {
  * @returns {string}
  */
 export function eventosIntroMenuBlock() {
-  return formatMenuBlock(['Ver Precios y Cotizar', 'Tengo una duda']);
+  return formatMenuBlock(['Ver Cócteles y Cotizar', 'Tengo una duda']);
 }
 
 /**
@@ -402,7 +402,7 @@ export function buildEventosAskDoubtReply() {
  * EVENTOS_COTIZAR_SYNONYMS: Equivale a 1️⃣ (hacer cotización).
  */
 export const EVENTOS_COTIZAR_SYNONYMS =
-  /hacer\s+((una|la)\s+)?cotizaci[oó]n|\bcotizar\b|\bcotizaci[oó]n\b|ver\s+precios(\s+y\s+cotizar)?|quiero\s+(cotizar|seguir|continuar|armar)|armar\s+((una|la)\s+)?cotizaci[oó]n|ver\s+(la\s+)?(carta|precios)|armame|ármame|dale|seguimos|opci[oó]n\s*1|^(uno|primera?|si|sí)$/i;
+  /hacer\s+((una|la)\s+)?cotizaci[oó]n|\bcotizar\b|\bcotizaci[oó]n\b|ver\s+(precios|c[oó]cteles)(\s+y\s+cotizar)?|quiero\s+(cotizar|seguir|continuar|armar)|armar\s+((una|la)\s+)?cotizaci[oó]n|ver\s+(la\s+)?carta|armame|ármame|dale|seguimos|opci[oó]n\s*1|^(uno|primera?|si|sí)$/i;
 
 /**
  * EVENTOS_DUDA_SYNONYMS: Equivale a 2️⃣ (tengo una duda).

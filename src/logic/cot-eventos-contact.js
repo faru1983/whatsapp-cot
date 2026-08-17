@@ -18,7 +18,7 @@ import {
 import {
   submitEventQuoteFromSession,
   toIsoDateFromBotText,
-  exampleConcreteDateHint,
+  formatExampleConcreteDatePair,
   normalizeBotDateText
 } from './cot-event-quote.js';
 import { canSubmitCotApiWrite, isCotApiMockMode } from './cot-api.js';
@@ -116,12 +116,12 @@ _Es necesario para generar la cotización formal._`;
         return `Anoté *${session.date}*, pero necesito el *día concreto* para generar la cotización formal.
 
 *¿Me confirmas una fecha tentativa?*
-_(ej: 15 de mayo o 15/05/2026)_`;
+_(ej: ${formatExampleConcreteDatePair()})_`;
       }
       return `Para generar la cotización formal:
 
 *¿Me confirmas la fecha del evento?*
-_(ej: 15 de mayo o 15/05/2026)_`;
+_(ej: ${formatExampleConcreteDatePair()})_`;
     }
 
     if (field === 'comuna') {
@@ -508,7 +508,7 @@ export function resolveEventosContactPhase(session) {
  * @returns {string}
  */
 export function askEventosContactPhase(phase, session = {}) {
-  const exampleDay = exampleConcreteDateHint();
+  const exampleDates = formatExampleConcreteDatePair();
   const firstName = String(session.contact?.firstName || '').trim();
 
   if (phase === 'fecha') {
@@ -525,10 +525,10 @@ _(ej: 15 de ${monthOnly.toLowerCase()} o 15/${mm}/2026)_`;
       return `Anoté *${session.date}*, pero necesito el *día concreto*.
 
 *¿Me confirmas una fecha tentativa?*
-_(ej: ${exampleDay} o 15/05/2026)_`;
+_(ej: ${exampleDates})_`;
     }
     return `*¿Me confirmas la fecha del evento?*
-_(ej: ${exampleDay} o 15/05/2026)_`;
+_(ej: ${exampleDates})_`;
   }
 
   if (phase === 'comuna') {
