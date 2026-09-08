@@ -387,7 +387,10 @@ export async function buildEventQuotePayload(session) {
   const firstName = String(contact.firstName || '').trim();
   const lastName = String(contact.lastName || '').trim();
   const email = String(contact.email || '').trim().toLowerCase();
-  const phone = String(contact.phone || session.clientPhoneE164 || '').trim();
+  // Modo operador: teléfono del cliente viene explícito en contact.phone (nunca el JID del admin)
+  const phone = session.operatorMode
+    ? String(contact.phone || '').trim()
+    : String(contact.phone || session.clientPhoneE164 || '').trim();
   const comunaRaw = String(session.location || contact.comuna || '').trim();
   const isoDate = toIsoDateFromBotText(session.date || contact.eventDate);
 
@@ -450,7 +453,7 @@ export async function buildEventQuotePayload(session) {
     },
     consumption: {
       guests: Number(session.guests) || 0,
-      drinksPerPerson: 3
+      drinksPerPerson: Number(session.eventosDrinksPerGuest) || 3
     },
     dispenser: dispenserFromSession(session),
     items

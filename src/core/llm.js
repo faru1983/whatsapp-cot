@@ -1055,3 +1055,76 @@ REGLAS:
   }
 }
 
+/**
+ * extractOperatorDraftWithAI: NLU del modo operador — extrae campos del bloque libre.
+ * Devuelve patch parcial + dudas (no inventar si no hay certeza).
+ *
+ * @param {string} userMessage
+ * @param {{ kind: 'event'|'barriles', catalogNames: string[], currentDraft?: object }} opts
+ * @returns {Promise<{ patch: object, dudas: string[] }>}
+ */
+export async function extractOperatorDraftWithAI(userMessage, opts = {}) {
+  const env = getEnv();
+  const { provider, apiKey, model } = env;
+  const config = { temperature: 0.1, maxOutputTokens: 900 };
+  const kind = opts.kind === 'barriles' ? 'barriles' : 'event';
+  const catalogSample = (opts.catalogNames || []).slice(0, 80).join(', ');
+
+  const systemInstruction = `Eres un extractor JSON para un operador interno que crea pedidos en cocktailsontap.cl.
+Tipo de acción: "${kind}" (${kind === 'event' ? 'cotización evento' : 'venta barriles desechables 5L'}).
+
+Devuelve SOLO JSON válido con:
+- "patch": objeto con campos detectados (omitir los que no aparezcan con certeza):
+  firstName, lastName, email, phone (E.164 +569...), comuna, date (texto día y mes en español),
+  address (solo barriles), eventoFormato ("Dispensador Portátil" o "Muro de Coctelería"),
+  guests (número), celebrationType (texto libre), drinksPerPerson (número),
+  products: [{ name (catálogo exacto), quantity, litrage (solo eventos: 5L/10L/20L/30L) }]
+- "dudas": array de strings con campos ambiguos (ej. "email", "spritz") — NO adivinar.
+
+Reglas:
+- Si el mensaje corrige un dato ("cambié el correo a x@y.com"), solo patch con ese campo.
+- phone es del CLIENTE final, no del operador.
+- products: nombres EXACTOS del catálogo. Barriles: litrage siempre 5L implícito.
+- Si spritz sin marca → dudas incluye "spritz", products vacío para spritz.
+- Si email tiene typo dudoso → dudas incluye "email".
+
+Catálogo (muestra): ${catalogSample}`;
+
+  const empty = { patch: {}, dudas: [] };
+
+  try {
+    let rawText = '{}';
+    if (provider === 'gemini') {
+      const client = new GoogleGenerativeAI(apiKey);
+      const genModel = client.getGenerativeModel({ model, systemInstruction });
+      const result = await genModel.generateContent({
+        contents: [{ role: 'user', parts: [{ text: userMessage }] }],
+        generationConfig: { temperature: config.temperature, maxOutputTokens: config.maxOutputTokens }
+      });
+      rawText = result.response?.text?.().trim() || '{}';
+    } else if (provider === 'nvidia') {
+      const openai = new OpenAI({ apiKey, baseURL: 'https://integrate.api.nvidia.com/v1' });
+      const completion = await openai.chat.completions.create({
+        model,
+        messages: [
+          { role: 'system', content: systemInstruction },
+          { role: 'user', content: userMessage }
+        ],
+        temperature: config.temperature,
+        max_tokens: config.maxOutputTokens,
+        stream: false
+      });
+      rawText = completion.choices?.[0]?.message?.content?.trim() || '{}';
+    }
+
+    const jsonMatch = rawText.match(/\{[\s\S]*\}/);
+    const parsed = JSON.parse(jsonMatch ? jsonMatch[0] : rawText);
+    const patch = parsed?.patch && typeof parsed.patch === 'object' ? parsed.patch : {};
+    const dudas = Array.isArray(parsed?.dudas) ? parsed.dudas.map(String) : [];
+    return { patch, dudas };
+  } catch (err) {
+    console.error('[bot] extractOperatorDraftWithAI:', err.message);
+    return empty;
+  }
+}
+

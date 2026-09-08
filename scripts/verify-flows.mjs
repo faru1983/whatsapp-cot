@@ -43,6 +43,9 @@ const EXPECTED_STATES = [
   'EVENTOS_ELECCION_MENU',
   'EVENTOS_DATOS_CONTACTO',
   'EVENTOS_CONFIRMAR_ENVIO',
+  'OPERADOR_MENU',
+  'OPERADOR_CAPTURA',
+  'OPERADOR_CONFIRMAR',
   'CERRADO'
 ];
 
@@ -2141,21 +2144,21 @@ try {
     };
     session.contact = {};
 
-    // Patrón: corrección explícita de fecha mientras pedimos nombre
+    // Patrón: corrección explícita de fecha mientras pedimos nombre (fecha futura respecto a hoy)
     const helper = await tryApplyBarrilesPedidoPriorCorrection(
-      'me equivoque es para el 20 de agosto',
+      'me equivoque es para el 20 de octubre',
       session,
       'nombre'
     );
     assert(helper?.field === 'fecha', 'helper: detecta corrección de fecha');
-    assert(/20\/08\/2026|20 de agosto/i.test(String(helper?.ack || '')), 'helper: ack con fecha nueva');
-    assert(/20\/08\/2026|20 de agosto/i.test(String(session.orderBuilder.clientData.date)), 'helper: guarda fecha');
+    assert(/20\/10\/\d{4}|20 de octubre/i.test(String(helper?.ack || '')), 'helper: ack con fecha nueva');
+    assert(/20\/10\/\d{4}|20 de octubre/i.test(String(session.orderBuilder.clientData.date)), 'helper: guarda fecha');
 
     // Reset fecha y probar vía estado completo
     session.orderBuilder.clientData.date = '10/08/2026';
     session.barrilesPedidoPhase = 'nombre';
     const stDatos = statesMap.BARRILES_RECOGIDA_DATOS;
-    const rFix = await stDatos.validateAndProcess('me equivoque es para el 13 de agosto', session);
+    const rFix = await stDatos.validateAndProcess('me equivoque es para el 13 de octubre', session);
     assert(rFix.nextState === 'BARRILES_RECOGIDA_DATOS', 'sigue en datos');
     assert(/corregí la entrega/i.test(String(rFix.customReply || '')), 'ack de corrección');
     assert(/nombre y apellido/i.test(String(rFix.customReply || '')), 're-pide la fase actual (nombre)');
@@ -2164,9 +2167,9 @@ try {
     // Patrón hermano: "perdón, era el 12…" (sin "para") también corrige fecha
     session.orderBuilder.clientData.date = '10/08/2026';
     session.barrilesPedidoPhase = 'nombre';
-    const rPerdon = await stDatos.validateAndProcess('perdon, era el 12 de agosto', session);
+    const rPerdon = await stDatos.validateAndProcess('perdon, era el 12 de octubre', session);
     assert(/corregí la entrega/i.test(String(rPerdon.customReply || '')), 'perdón+era el → ack fecha');
-    assert(/12\/08\/\d{4}/.test(String(session.orderBuilder.clientData.date || '')), 'perdón guarda 12/08');
+    assert(/12\/10\/\d{4}/.test(String(session.orderBuilder.clientData.date || '')), 'perdón guarda 12/10');
     assert(/nombre y apellido/i.test(String(rPerdon.customReply || '')), 'perdón: re-pide nombre');
 
     // Nombre real sigue funcionando
@@ -4386,6 +4389,86 @@ console.log('\n-- CLI API ask: OK → menú 1/2 → simulada cierra sin POST --'
   assert(session.cliAwaitingApiMode !== true, 'ask→2: limpia espera');
 
   setCotApiWriteMode(prevMode === 'ask' ? 'real' : prevMode);
+}
+
+console.log('\n-- Modo operador: flags, checklist y borrador --');
+{
+  process.env.SKIP_OPERATOR_NLU = '1';
+  const {
+    resetRuntimeFlagsCache,
+    setCustomerBotEnabled,
+    setCotApiWritesEnabled,
+    shouldProcessCustomerChat,
+    isCustomerBotEnabled
+  } = await import('../src/logic/bot-runtime-flags.js');
+  const {
+    applyOperatorDraftPatch,
+    getMissingOperatorFields,
+    formatOperatorSummary,
+    setOperatorKind,
+    clearOperatorDraft
+  } = await import('../src/logic/operator-draft.js');
+  const { buildOperatorMenuText, buildOperatorDataRequestCopy } = await import('../src/logic/operator-menu.js');
+  const { canSubmitCotApiWrite } = await import('../src/logic/cot-api.js');
+
+  resetRuntimeFlagsCache();
+  setCustomerBotEnabled(false);
+  assert(isCustomerBotEnabled() === false, 'operador: /respuestas off');
+  assert(shouldProcessCustomerChat({ inOperatorConsole: false }) === false, 'operador: no procesar cliente si respuestas off');
+  assert(shouldProcessCustomerChat({ inOperatorConsole: true }) === false, 'operador: consola no es flujo cliente');
+
+  const menu = buildOperatorMenuText();
+  assert(menu.includes('Panel operador'), 'operador: /menu lista panel');
+  assert(menu.includes('1️⃣'), 'operador: menú muestra cotización');
+
+  const opSessionId = 'operator-admin@test.local';
+  resetSession(opSessionId);
+  const menuReply = await processMessage(opSessionId, '/menu', { operatorMode: true });
+  assert(String(menuReply || '').includes('Panel operador'), 'operador: /menu abre panel');
+
+  const pickEvent = await processMessage(opSessionId, '1', { operatorMode: true });
+  assert(String(pickEvent || '').includes('envíame los datos'), 'operador: tras 1 pide checklist');
+  assert(String(pickEvent || '').includes('nombre'), 'operador: checklist incluye nombre');
+
+  const opSession = getSession(opSessionId);
+  setOperatorKind(opSession, 'event');
+  applyOperatorDraftPatch(opSession, {
+    firstName: 'Ana',
+    lastName: 'Pérez',
+    email: 'ana@test.cl',
+    phone: '+56912345678',
+    comuna: 'Providencia',
+    date: '20 de septiembre',
+    eventoFormato: 'Dispensador Portátil',
+    guests: 40,
+    products: [{ name: 'Mojito', quantity: 1, litrage: '10L' }]
+  });
+  saveSession(opSessionId, opSession);
+  assert(getMissingOperatorFields(opSession).length === 0, 'operador: borrador completo sin NLU');
+
+  const partial = getSession('operator-partial@test.local');
+  resetSession('operator-partial@test.local');
+  setOperatorKind(partial, 'event');
+  applyOperatorDraftPatch(partial, { firstName: 'Ana', email: 'ana@test.cl' });
+  const missing = getMissingOperatorFields(partial);
+  assert(missing.includes('lastName'), 'operador: parcial conserva y detecta faltantes');
+  assert(missing.includes('phone'), 'operador: parcial detecta teléfono cliente');
+
+  applyOperatorDraftPatch(partial, { email: 'nueva@test.cl' });
+  assert(partial.operatorDraft.email === 'nueva@test.cl', 'operador: parche NL correo');
+  assert(partial.operatorDraft.firstName === 'Ana', 'operador: parche no borra nombre');
+
+  setCotApiWritesEnabled(false);
+  assert(canSubmitCotApiWrite() === false, 'operador: /cotapi off bloquea POST');
+  setCotApiWritesEnabled(true);
+
+  const summary = formatOperatorSummary(opSession);
+  assert(summary.includes('Ana'), 'operador: resumen muestra cliente');
+  assert(summary.includes('OK'), 'operador: resumen pide confirmación');
+
+  clearOperatorDraft(opSession);
+  assert(!opSession.operatorKind, 'operador: clear borrador');
+  delete process.env.SKIP_OPERATOR_NLU;
 }
 
 // Restaura credenciales COT por si el proceso padre las reutiliza

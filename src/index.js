@@ -28,6 +28,15 @@ import {
 } from './core/whatsapp-send.js';
 import { startNudgeRunner, stopNudgeRunner } from './core/nudge-runner.js';
 import { waitBeforeFirstReply, waitBetweenBubbles } from './logic/reply-timing.js';
+import {
+  isCustomerBotEnabled,
+  handleRuntimeToggleCommand
+} from './logic/bot-runtime-flags.js';
+import {
+  buildOperatorHintText,
+  isOperatorMenuCommand,
+  isOperatorMidFlowState
+} from './logic/operator-menu.js';
 import process from 'node:process';
 import fs from 'node:fs';
 
@@ -284,6 +293,105 @@ async function resolveClientPhoneLabel(message, sock, sessionId) {
 }
 
 /**
+ * deliverBotReply: Envía string, array o media al JID indicado (ritmo natural).
+ *
+ * @param {object} sock - Socket Baileys
+ * @param {string} targetJid
+ * @param {string|object|Array|null} reply
+ * @param {object} timing - botConfig.replyTiming
+ */
+async function deliverBotReply(sock, targetJid, reply, timing = {}) {
+  if (!reply) return;
+
+  const replies = Array.isArray(reply) ? reply : [reply];
+
+  try {
+    await sock.assertSessions([targetJid], true);
+  } catch (e) {
+    console.warn(`assertSessions falló para ${targetJid}:`, e.message);
+  }
+
+  await waitBeforeFirstReply(sock, targetJid, timing);
+
+  for (let i = 0; i < replies.length; i++) {
+    const part = replies[i];
+    if (!part) continue;
+
+    await waitBetweenBubbles(sock, targetJid, timing, i);
+
+    if (typeof part === 'string') {
+      await sendTracked(sock, targetJid, { text: part });
+      continue;
+    }
+
+    if (isImagePart(part)) {
+      const check = assertImageExists(part.file);
+      if (!check.ok) {
+        console.error(`Imagen no encontrada al enviar: ${check.expectedPath}`);
+        continue;
+      }
+      const imageBuffer = fs.readFileSync(check.absolutePath);
+      const payload = { image: imageBuffer };
+      if (part.caption) payload.caption = part.caption;
+      await sendTracked(sock, targetJid, payload);
+    } else if (isVideoPart(part)) {
+      const check = assertImageExists(part.file);
+      if (!check.ok) {
+        console.error(`Video no encontrado al enviar: ${check.expectedPath}`);
+        continue;
+      }
+      const videoBuffer = fs.readFileSync(check.absolutePath);
+      const payload = { video: videoBuffer, mimetype: 'video/mp4' };
+      if (part.caption) payload.caption = part.caption;
+      await sendTracked(sock, targetJid, payload);
+    }
+  }
+}
+
+/**
+ * handleOperatorConsoleMessage: Panel /menu (self-chat o ADMIN_NUMBERS).
+ *
+ * @param {object} params
+ */
+async function handleOperatorConsoleMessage({
+  message,
+  sock,
+  config,
+  botConfig,
+  remoteJid,
+  text,
+  content
+}) {
+  const cleanText = stripTriggerPrefix(text, config);
+  if (!cleanText && !getMessageText(content).trim()) {
+    return;
+  }
+
+  const toggleReply = handleRuntimeToggleCommand(cleanText || text);
+  if (toggleReply) {
+    await deliverBotReply(sock, remoteJid, toggleReply, botConfig.replyTiming || {});
+    return;
+  }
+
+  const sessionId = remoteJid;
+  const session = getSession(sessionId);
+  const inOperatorFlow = isOperatorMidFlowState(session.currentState)
+    || String(session.currentState || '').startsWith('OPERADOR_');
+
+  if (!isOperatorMenuCommand(cleanText || text) && !inOperatorFlow) {
+    await deliverBotReply(sock, remoteJid, buildOperatorHintText(), botConfig.replyTiming || {});
+    return;
+  }
+
+  try {
+    const reply = await processMessage(sessionId, cleanText || text, { operatorMode: true });
+    await deliverBotReply(sock, remoteJid, reply, botConfig.replyTiming || {});
+  } catch (error) {
+    console.error('Error en consola operador:', error.message);
+  }
+}
+
+/**
  * clearReconnectTimer: Cancela un reintento pendiente (ej. si WhatsApp hizo logout).
  */
 function clearReconnectTimer() {
@@ -413,8 +521,11 @@ async function startBot() {
         setTimeout(() => {
           logLabelReadyStatus(config.labels);
         }, 5000);
-        // Nudge por inactividad (híbrido cron + horas). Off si NUDGE_ENABLED=false.
-        startNudgeRunner(sock, () => loadBotConfig().nudge);
+        // Nudge por inactividad (híbrido cron + horas). Off si NUDGE_ENABLED=false o /respuestas off.
+        startNudgeRunner(sock, () => {
+          const nudge = loadBotConfig().nudge;
+          return { ...nudge, enabled: Boolean(nudge.enabled && isCustomerBotEnabled()) };
+        });
       }
 
       if (connection === 'close') {
@@ -598,15 +709,32 @@ async function startBot() {
           return;
         }
 
-        // fromMe / admin / self-chat sin comando: no seguir al flujo de cliente
-        if (isFromMe || selfChat) {
+        // fromMe / admin / self-chat sin comando: consola operador o salir
+        if (isFromMe || selfChat || isFromAdmin) {
+          const inClientChat = isClientCustomerChat(remoteJid, adminList, sock);
+          const inOperatorConsole = !inClientChat && (selfChat || isFromAdmin || isFromMe);
+
+          if (inOperatorConsole) {
+            await handleOperatorConsoleMessage({
+              message,
+              sock,
+              config,
+              botConfig,
+              remoteJid,
+              text,
+              content
+            });
+          }
           return;
         }
       }
 
       // --------------------------------------------------------------------------
-      // 2.3 Flujo normal para clientes
+      // 2.3 Flujo normal para clientes (si /respuestas on)
       // --------------------------------------------------------------------------
+      if (!isCustomerBotEnabled()) {
+        return;
+      }
       const sessionId = getPreferredSessionId(message);
       const session = getSession(sessionId);
       if (session.isMuted) {
@@ -686,61 +814,7 @@ async function startBot() {
           pushName: pushName || session.clientPushName || undefined,
         });
 
-        if (!reply) {
-          return;
-        }
-
-        // El engine puede devolver string, imagen (img) o array mixto (foto + pregunta, etc.)
-        const replies = Array.isArray(reply) ? reply : [reply];
-        // Responder al JID con el que llegó el mensaje (puede ser @lid); la sesión usa sessionId
-        const targetJid = message.key.remoteJid;
-
-        // Asegura sesión Signal con el destinatario antes del primer envío
-        try {
-          await sock.assertSessions([targetJid], true);
-        } catch (e) {
-          console.warn(`assertSessions falló para ${targetJid}:`, e.message);
-        }
-
-        // Ritmo natural: pausa tras el usuario + pausa entre burbujas (REPLY_DELAY_*).
-        // Mientras espera mostramos "escribiendo…" para que no se sienta cortado.
-        const timing = botConfig.replyTiming || {};
-        await waitBeforeFirstReply(sock, targetJid, timing);
-
-        for (let i = 0; i < replies.length; i++) {
-          const part = replies[i];
-          if (!part) continue;
-
-          await waitBetweenBubbles(sock, targetJid, timing, i);
-
-          if (typeof part === 'string') {
-            await sendTracked(sock, targetJid, { text: part });
-            continue;
-          }
-
-          // Imagen / video desde assets/ (el engine ya validó que existe; defensa extra aquí)
-          if (isImagePart(part)) {
-            const check = assertImageExists(part.file);
-            if (!check.ok) {
-              console.error(`Imagen no encontrada al enviar: ${check.expectedPath}`);
-              continue;
-            }
-            const imageBuffer = fs.readFileSync(check.absolutePath);
-            const payload = { image: imageBuffer };
-            if (part.caption) payload.caption = part.caption;
-            await sendTracked(sock, targetJid, payload);
-          } else if (isVideoPart(part)) {
-            const check = assertImageExists(part.file);
-            if (!check.ok) {
-              console.error(`Video no encontrado al enviar: ${check.expectedPath}`);
-              continue;
-            }
-            const videoBuffer = fs.readFileSync(check.absolutePath);
-            const payload = { video: videoBuffer, mimetype: 'video/mp4' };
-            if (part.caption) payload.caption = part.caption;
-            await sendTracked(sock, targetJid, payload);
-          }
-        }
+        await deliverBotReply(sock, message.key.remoteJid, reply, botConfig.replyTiming || {});
 
       } catch (error) {
         console.error('Error procesando mensaje de WhatsApp:', error.message);

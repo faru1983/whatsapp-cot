@@ -3,6 +3,7 @@
 // El bot solo habla; los precios y quotes reales los crea la web (createQuoteCore).
 // En test:local puede simular POST (quotes / direct-sales / contacts) sin red.
 // ==============================================================================
+import { areCotApiWritesEnabled } from './bot-runtime-flags.js';
 
 /** @typedef {'real'|'mock'|'ask'} CotApiWriteMode */
 
@@ -90,10 +91,12 @@ export function isCotApiMockMode() {
 
 /**
  * canSubmitCotApiWrite: ¿Podemos intentar crear quote/venta (real o mock)?
+ * Respeta /cotapi off además de credenciales.
  *
  * @returns {boolean}
  */
 export function canSubmitCotApiWrite() {
+  if (!areCotApiWritesEnabled()) return false;
   return isCotApiConfigured() || isCotApiMockMode();
 }
 

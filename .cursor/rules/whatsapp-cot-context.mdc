@@ -13,7 +13,7 @@ Bot de WhatsApp para **Cocktails on Tap** (Chile). Guía cotizaciones de **Barri
 
 ```
 index.js → engine.js → statesMap (flows/index.js)
-  ↘ flows/router|barriles|eventos /states/*.js   ← un archivo por paso
+  ↘ flows/router|barriles|eventos|operador /states/*.js   ← un archivo por paso
   ↘ logic/compile-state.js (defineState)
   ↘ logic/interruptions.js + decision-intent + keyword-intent + nlu-intent
   ↘ logic/validators + actions (registro por nombre)
@@ -31,7 +31,10 @@ index.js → engine.js → statesMap (flows/index.js)
 | `src/core/engine.js` | Máquina de estados + red de seguridad + CLI (`test:local`) |
 | `src/core/llm.js` | `generateResponse`, extractores NLU, `classifyStepIntent`, `responderFAQ` |
 | `src/core/db.js` | Sesiones SQLite |
-| `src/flows/index.js` | `statesMap` unificado (18 estados) |
+| `src/flows/index.js` | `statesMap` unificado (21 estados, incl. `OPERADOR_*`) |
+| `src/flows/operador/states/` | Panel `/menu` (solo self-chat o `ADMIN_NUMBERS`) |
+| `src/logic/bot-runtime-flags.js` | `/respuestas` y `/cotapi` on\|off (persistente) |
+| `src/logic/operator-draft.js` | Borrador operador → payload API |
 | `src/flows/router/states/` | `ESPERANDO_INTENCION` |
 | `src/flows/barriles/states/` | Un archivo por `BARRILES_*` |
 | `src/flows/eventos/states/` | Un archivo por `EVENTOS_*` |

@@ -37,7 +37,9 @@ export async function buildBarrilesSalePayload(session) {
   const firstName = String(contact.firstName || '').trim();
   const lastName = String(contact.lastName || '').trim();
   const email = String(contact.email || '').trim().toLowerCase();
-  const phone = String(contact.phone || session.clientPhoneE164 || '').trim();
+  const phone = session.operatorMode
+    ? String(contact.phone || '').trim()
+    : String(contact.phone || session.clientPhoneE164 || '').trim();
   const address = String(contact.address || '').trim();
   const comunaRaw = String(clientData.location || session.location || contact.comuna || '').trim();
   const isoDate = toIsoDateFromBotText(clientData.date || session.date || contact.eventDate);

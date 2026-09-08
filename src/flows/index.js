@@ -1,6 +1,7 @@
 import { ESPERANDO_INTENCION } from './router/index.js';
 import { barrilesStates } from './barriles/index.js';
 import { eventosStates } from './eventos/index.js';
+import { operadorStates } from './operador/index.js';
 import { CERRADO } from './cerrado.js';
 
 // ==============================================================================
@@ -9,11 +10,12 @@ import { CERRADO } from './cerrado.js';
 // ==============================================================================
 
 /**
- * statesMap: Diccionario de estados disponibles (18 claves).
+ * statesMap: Diccionario de estados disponibles (21 claves).
  */
 export const statesMap = {
   ESPERANDO_INTENCION,
   ...barrilesStates,
   ...eventosStates,
+  ...operadorStates,
   CERRADO
 };

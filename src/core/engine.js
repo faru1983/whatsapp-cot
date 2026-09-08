@@ -50,6 +50,9 @@ import {
   setCotApiWriteMode,
   isCotApiConfigured
 } from '../logic/cot-api.js';
+import { clearOperatorDraft } from '../logic/operator-draft.js';
+import { buildOperatorMenuText } from '../logic/operator-menu.js';
+import { handleRuntimeToggleCommand } from '../logic/bot-runtime-flags.js';
 
 const isMainModule = process.argv[1] === fileURLToPath(import.meta.url);
 
@@ -336,6 +339,8 @@ export async function processMessage(sessionId, messageText, options = {}) {
  * @returns {Promise<string|object|Array|null>}
  */
 async function processMessageUnlocked(sessionId, messageText, options = {}) {
+  const operatorMode = options.operatorMode === true;
+
   // Callback de este mensaje concreto (no variable global compartida)
   const alertAdmin = typeof options.sendAdminAlert === 'function'
     ? options.sendAdminAlert
@@ -346,29 +351,41 @@ async function processMessageUnlocked(sessionId, messageText, options = {}) {
 
   let session = getSession(sessionId);
 
-  // Guardamos el JID y el teléfono E.164 para la API de cotizaciones web
+  if (operatorMode) {
+    session.operatorMode = true;
+    const lower = messageText.trim().toLowerCase();
+    if (lower === '/menu') {
+      clearOperatorDraft(session);
+      session.currentState = 'OPERADOR_MENU';
+    } else if (!String(session.currentState || '').startsWith('OPERADOR_')) {
+      session.currentState = 'OPERADOR_MENU';
+    }
+  }
+
+  // Guardamos el JID y el teléfono E.164 para la API de cotizaciones web (no en modo operador)
   session.sessionId = sessionId;
-  const phone =
-    options.clientPhoneE164 ||
-    session.clientPhoneE164 ||
-    jidToE164(sessionId);
-  if (phone) session.clientPhoneE164 = phone;
+  if (!session.operatorMode) {
+    const phone =
+      options.clientPhoneE164 ||
+      session.clientPhoneE164 ||
+      jidToE164(sessionId);
+    if (phone) session.clientPhoneE164 = phone;
+  }
 
   const pushName = String(options.pushName || '').trim();
-  if (pushName) session.clientPushName = pushName;
+  if (pushName && !session.operatorMode) session.clientPushName = pushName;
 
-  // CRM Curioso: en ESPERANDO_INTENCION lo dispara el router al final del turno
-  // (así el 1er mensaje "Barriles"/"Eventos" lleva intent en el mismo POST).
-  // En otros estados (mid-flow / CTWA) sync inmediato.
+  // CRM Curioso: omitir en consola operador
   const deferCuriousForRouter =
+    !session.operatorMode &&
     !session.crmCuriousSynced &&
     String(session.currentState || 'ESPERANDO_INTENCION') === 'ESPERANDO_INTENCION';
 
-  if (phone && !session.crmCuriousSynced && !deferCuriousForRouter) {
+  if (!session.operatorMode && session.clientPhoneE164 && !session.crmCuriousSynced && !deferCuriousForRouter) {
     // Si ya tenemos clid en sesión, el Lead CAPI saldrá con atribución CTWA
     if (session.metaCtwaClid) session.metaCtwaSyncedToCrm = true;
     syncCrmCuriousAsync(session);
-  } else if (phone && pushName && !session.crmNameSynced) {
+  } else if (!session.operatorMode && session.clientPhoneE164 && pushName && !session.crmNameSynced) {
     // Baileys a veces omite pushName al inicio; cuando aparece, actualiza el CRM
     syncCrmNameAsync(session);
   }
@@ -392,6 +409,13 @@ async function processMessageUnlocked(sessionId, messageText, options = {}) {
 
   if (messageText.trim() === '/reset') {
     resetSession(sessionId);
+    session = getSession(sessionId);
+    if (operatorMode || session.operatorMode) {
+      session.operatorMode = true;
+      session.currentState = 'OPERADOR_MENU';
+      saveSession(sessionId, session);
+      return buildOperatorMenuText();
+    }
     return "🔄 Sesión reiniciada. El bot ya no recuerda lo que hablaron.";
   }
   if (messageText.trim() === '/mute') {
@@ -407,7 +431,7 @@ async function processMessageUnlocked(sessionId, messageText, options = {}) {
 
   // Inicialización de la sesión si es cliente nuevo
   if (!session.currentState) {
-    session.currentState = 'ESPERANDO_INTENCION';
+    session.currentState = session.operatorMode ? 'OPERADOR_MENU' : 'ESPERANDO_INTENCION';
   }
 
   // Sesión vieja en un estado ya eliminado → redirigir al paso equivalente
@@ -473,7 +497,8 @@ async function processMessageUnlocked(sessionId, messageText, options = {}) {
   // El traspaso inicial ocurre con 3️⃣ o una petición explícita de HUMANO.
   const SOS_NO_EXCLUDED_STATES = ['ESPERANDO_INTENCION', 'BARRILES_RECOGIDA_DATOS'];
   const wantsNoHandoff = isNoWord && !SOS_NO_EXCLUDED_STATES.includes(currentStateId);
-  const wantsHandoff = isSosWord || wantsNoHandoff || wantsExplicitHandoff(messageText);
+  const wantsHandoff = !currentStateId.startsWith('OPERADOR_')
+    && (isSosWord || wantsNoHandoff || wantsExplicitHandoff(messageText));
 
   if (wantsHandoff) {
     session.history.turns.push({ role: 'user', text: messageText });
@@ -509,9 +534,9 @@ async function processMessageUnlocked(sessionId, messageText, options = {}) {
   }
 
   // ==============================================================================
-  // 2. CAPA DE SEGURIDAD BÁSICA (Cambios de intención)
+  // 2. CAPA DE SEGURIDAD BÁSICA (Cambios de intención) — no aplica a operador
   // ==============================================================================
-  if (currentStateId !== 'ESPERANDO_INTENCION' && currentStateId !== 'CERRADO') {
+  if (!currentStateId.startsWith('OPERADOR_') && currentStateId !== 'ESPERANDO_INTENCION' && currentStateId !== 'CERRADO') {
     const earlyStates = [
       'BARRILES_FILTRO_CANAL',
       'BARRILES_INTRO_MENU',
@@ -604,13 +629,13 @@ async function processMessageUnlocked(sessionId, messageText, options = {}) {
     }
   }
 
-  // 2.9 Pre-FAQ: no adelantar precios genéricos si ya hay carril (tip va en fallback / estado)
+  // 2.9 Pre-FAQ: no en consola operador
   const pendingFlow = getPendingFlowRequirement(session, currentStateId);
   const flowAlreadyStalling = Boolean(pendingFlow && (session.consecutiveErrors || 0) > 0);
   const faqSidequestAllowed = canUseFaqSidequest(session, pendingFlow);
 
-  // El router inicial es cerrado: primero Eventos/Barriles/Humano (sin FAQ/IA previa).
-  const canPrecheckFaq = currentStateId !== 'CERRADO'
+  const canPrecheckFaq = !currentStateId.startsWith('OPERADOR_')
+    && currentStateId !== 'CERRADO'
     && currentStateId !== 'ESPERANDO_INTENCION';
 
   const isQuestion = /\?/.test(messageText)
@@ -1172,7 +1197,7 @@ function printCliStartupIntro(session) {
   Rails: estado · stall · strikes · FAQ
   API escritura: ${apiHint}
 
-  Comandos: /status /help /api /reset /mute /unmute /exit
+  Comandos: /status /help /api /menu /respuestas /cotapi /reset /mute /unmute /exit
 
 Estado: ${stateId}
 ─────────────────────────────────────────
@@ -1206,6 +1231,9 @@ Comandos:
   /api mock — simular quotes/ventas (sin red)
   /api real — POST real a cocktailsontap.cl
   /api ask  — al confirmar OK: menú 1️⃣ real / 2️⃣ simulada
+  /menu    — panel operador (cotización / venta)
+  /respuestas on|off — flujos automáticos a clientes
+  /cotapi on|off     — escrituras API web
   /reset   — borrar sesión
   /mute    — silenciar a mano
   /unmute  — reactivar
@@ -1268,6 +1296,25 @@ function cliChat() {
       return;
     }
 
+    const toggleReply = handleRuntimeToggleCommand(message.trim());
+    if (toggleReply) {
+      cliLog(toggleReply.replace(/\*/g, ''));
+      cliChat();
+      return;
+    }
+
+    if (cmd === '/menu' || cmd === '/op') {
+      const menuReply = await processMessage(sessionId, '/menu', { operatorMode: true });
+      if (menuReply) {
+        const parts = Array.isArray(menuReply) ? menuReply : [menuReply];
+        for (const part of parts) {
+          if (typeof part === 'string') console.log(`\nBot: ${part}\n`);
+        }
+      }
+      cliChat();
+      return;
+    }
+
     // /api · /api mock · /api real · /api ask
     if (cmd === '/api' || cmd.startsWith('/api ')) {
       const arg = cmd.slice(4).trim();
@@ -1288,9 +1335,12 @@ function cliChat() {
     const wasMuted = !!sessionBefore.isMuted;
     const stateBefore = sessionBefore.currentState || '(sin estado)';
     const adminAlerts = [];
+    const useOperatorMode = String(stateBefore).startsWith('OPERADOR_')
+      || sessionBefore.operatorMode === true;
 
     // En el simulador, las alertas SOS se imprimen para depurar (en WhatsApp van al admin)
     const response = await processMessage(sessionId, message, {
+      operatorMode: useOperatorMode,
       sendAdminAlert: (alert) => {
         adminAlerts.push(alert);
         const type = String(alert?.type || 'ALERT').toUpperCase();
