@@ -21,6 +21,7 @@ import {
   getCliApiSubmitAskReply,
   shouldAskCliApiModeOnConfirm
 } from './cot-api.js';
+import { buildOperatorCancelHint } from './operator-menu.js';
 
 /** @typedef {'event'|'barriles'} OperatorKind */
 
@@ -63,7 +64,14 @@ export function buildOperatorDataRequestCopy(kind) {
     .map((key) => FIELD_LABELS[key] || key)
     .join(', ');
   const tipo = kind === 'event' ? 'cotización de evento' : 'venta de barriles desechables';
-  return `Ok, envíame los datos para la *${tipo}* (en cualquier orden):\n\n${fields}\n\nCuando esté completo te muestro el resumen para confirmar.`;
+  return [
+    `Ok, envíame los datos para la *${tipo}* (en cualquier orden):`,
+    '',
+    fields,
+    '',
+    'Cuando esté completo te muestro el resumen para confirmar.',
+    buildOperatorCancelHint()
+  ].join('\n');
 }
 
 /**
@@ -337,7 +345,11 @@ export function getMissingOperatorFields(session) {
 export function formatMissingFieldsMessage(missingKeys) {
   if (!missingKeys.length) return '';
   const labels = missingKeys.map((k) => FIELD_LABELS[k] || k);
-  return `Me faltan: *${labels.join(', ')}*.\nPuedes enviar solo eso o un bloque nuevo.`;
+  return [
+    `Me faltan: *${labels.join(', ')}*.`,
+    'Puedes enviar solo eso o un bloque nuevo.',
+    buildOperatorCancelHint()
+  ].join('\n');
 }
 
 /**
@@ -446,6 +458,7 @@ export function formatOperatorSummary(session) {
   });
   lines.push('', '*Productos:*', prodLines.length ? prodLines.join('\n') : '_(vacío)_');
   lines.push('', '¿Lo creo en la web? Escribe *OK* o dime qué cambiar.');
+  lines.push(buildOperatorCancelHint());
   return lines.join('\n');
 }
 

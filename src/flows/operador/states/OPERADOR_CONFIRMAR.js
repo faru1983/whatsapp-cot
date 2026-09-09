@@ -5,7 +5,7 @@
 import { defineState } from '../../../logic/compile-state.js';
 import { resolveDecisionIntent } from '../../../logic/decision-intent.js';
 import { rulesConfirmarOCorregirDatos } from '../../../logic/keyword-intent.js';
-import { buildOperatorMenuText } from '../../../logic/operator-menu.js';
+import { buildOperatorMenuText, isOperatorCancelCommand } from '../../../logic/operator-menu.js';
 import {
   ingestOperatorMessage,
   formatOperatorSummary,
@@ -25,14 +25,14 @@ import {
 export const OPERADOR_CONFIRMAR = defineState({
   id: 'OPERADOR_CONFIRMAR',
   promptQuestion: (session) => formatOperatorSummary(session),
-  shortQuestion: 'Escribe *OK* para crear en la web o indica qué cambiar.',
+  shortQuestion: 'Escribe *OK*, qué cambiar, o */menu* / *cancelar* para anular.',
   aiPrompt: `[SISTEMA - OPERADOR CONFIRMAR] Solo OK para enviar o correcciones puntuales.`,
 
   async validateAndProcess(messageText, session) {
     const trimmed = String(messageText || '').trim();
     const lower = trimmed.toLowerCase();
 
-    if (lower === '/menu' || lower === 'menu' || lower === 'cancelar') {
+    if (isOperatorCancelCommand(trimmed)) {
       clearOperatorDraft(session);
       session.operatorMode = true;
       return {

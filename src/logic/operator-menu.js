@@ -28,7 +28,39 @@ ${flags}
 /iniciarbot <número>
 /reiniciarbot <número>
 
-Escribe *1* o *2* para empezar, o */menu* para ver esto de nuevo.`;
+Escribe *1* o *2* para empezar, o */menu* para ver esto de nuevo.
+En captura: */menu* o *cancelar* anula el borrador y vuelve aquí.`;
+}
+
+/**
+ * buildOperatorCancelHint: Cómo anular un borrador a medias.
+ * Se reutiliza en captura, faltantes y resumen (evento y barriles).
+ *
+ * @returns {string}
+ */
+export function buildOperatorCancelHint() {
+  return 'Para anular y volver al panel: escribe */menu* o *cancelar*.';
+}
+
+/**
+ * isOperatorCancelCommand: ¿El admin quiere salir del borrador?
+ * Mensaje completo (no un dato que mencione "cancelar" a medias).
+ *
+ * @param {string} text
+ * @returns {boolean}
+ */
+export function isOperatorCancelCommand(text) {
+  const lower = String(text || '').trim().toLowerCase();
+  return (
+    lower === '/menu'
+    || lower === 'menu'
+    || lower === '/cancelar'
+    || lower === 'cancelar'
+    || lower === '/anular'
+    || lower === 'anular'
+    || lower === '/cancel'
+    || lower === 'cancel'
+  );
 }
 
 /**

@@ -51,7 +51,7 @@ import {
   isCotApiConfigured
 } from '../logic/cot-api.js';
 import { clearOperatorDraft } from '../logic/operator-draft.js';
-import { buildOperatorMenuText } from '../logic/operator-menu.js';
+import { buildOperatorMenuText, isOperatorCancelCommand } from '../logic/operator-menu.js';
 import { handleRuntimeToggleCommand } from '../logic/bot-runtime-flags.js';
 
 const isMainModule = process.argv[1] === fileURLToPath(import.meta.url);
@@ -355,8 +355,7 @@ async function processMessageUnlocked(sessionId, messageText, options = {}) {
     session.operatorMode = true;
     // La consola operador no debe quedar bloqueada por mute de un intento previo en self-chat
     session.isMuted = false;
-    const lower = messageText.trim().toLowerCase();
-    if (lower === '/menu') {
+    if (isOperatorCancelCommand(messageText)) {
       clearOperatorDraft(session);
       session.currentState = 'OPERADOR_MENU';
     } else if (!String(session.currentState || '').startsWith('OPERADOR_')) {
@@ -1233,7 +1232,8 @@ Comandos:
   /api mock — simular quotes/ventas (sin red)
   /api real — POST real a cocktailsontap.cl
   /api ask  — al confirmar OK: menú 1️⃣ real / 2️⃣ simulada
-  /menu    — panel operador (cotización / venta)
+  /menu      — panel operador (cotización / venta)
+  cancelar   — anula el borrador y vuelve al panel
   /respuestas on|off — flujos automáticos a clientes
   /cotapi on|off     — escrituras API web
   /reset   — borrar sesión

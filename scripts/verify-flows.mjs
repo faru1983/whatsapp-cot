@@ -4405,10 +4405,12 @@ console.log('\n-- Modo operador: flags, checklist y borrador --');
     applyOperatorDraftPatch,
     getMissingOperatorFields,
     formatOperatorSummary,
+    formatMissingFieldsMessage,
     setOperatorKind,
-    clearOperatorDraft
+    clearOperatorDraft,
+    buildOperatorDataRequestCopy
   } = await import('../src/logic/operator-draft.js');
-  const { buildOperatorMenuText, buildOperatorDataRequestCopy } = await import('../src/logic/operator-menu.js');
+  const { buildOperatorMenuText, isOperatorCancelCommand } = await import('../src/logic/operator-menu.js');
   const { canSubmitCotApiWrite } = await import('../src/logic/cot-api.js');
   const {
     isSelfChat,
@@ -4451,6 +4453,18 @@ console.log('\n-- Modo operador: flags, checklist y borrador --');
   const menu = buildOperatorMenuText();
   assert(menu.includes('Panel operador'), 'operador: /menu lista panel');
   assert(menu.includes('1️⃣'), 'operador: menú muestra cotización');
+  assert(menu.includes('cancelar'), 'operador: panel menciona cancelar');
+
+  assert(isOperatorCancelCommand('cancelar') === true, 'operador: cancelar es comando de anular');
+  assert(isOperatorCancelCommand('/cancelar') === true, 'operador: /cancelar es comando de anular');
+  assert(isOperatorCancelCommand('anular') === true, 'operador: anular es comando de anular');
+  assert(isOperatorCancelCommand('Ana Pérez') === false, 'operador: nombre no es cancelar');
+
+  const eventAsk = buildOperatorDataRequestCopy('event');
+  const barrilesAsk = buildOperatorDataRequestCopy('barriles');
+  assert(eventAsk.includes('cancelar'), 'operador: captura evento explica anular');
+  assert(barrilesAsk.includes('cancelar'), 'operador: captura barriles explica anular');
+  assert(formatMissingFieldsMessage(['email']).includes('cancelar'), 'operador: faltantes explica anular');
 
   const opSessionId = 'operator-admin@test.local';
   resetSession(opSessionId);
@@ -4460,6 +4474,25 @@ console.log('\n-- Modo operador: flags, checklist y borrador --');
   const pickEvent = await processMessage(opSessionId, '1', { operatorMode: true });
   assert(String(pickEvent || '').includes('envíame los datos'), 'operador: tras 1 pide checklist');
   assert(String(pickEvent || '').includes('nombre'), 'operador: checklist incluye nombre');
+  assert(String(pickEvent || '').includes('cancelar'), 'operador: tras 1 explica cómo anular');
+
+  const afterPartial = getSession(opSessionId);
+  applyOperatorDraftPatch(afterPartial, { firstName: 'Ana' });
+  saveSession(opSessionId, afterPartial);
+  const cancelReply = await processMessage(opSessionId, 'cancelar', { operatorMode: true });
+  assert(String(cancelReply || '').includes('Panel operador'), 'operador: cancelar vuelve al panel');
+  const afterCancel = getSession(opSessionId);
+  assert(!afterCancel.operatorKind, 'operador: cancelar borra el tipo de acción');
+  assert(!afterCancel.operatorDraft?.firstName, 'operador: cancelar borra el borrador');
+
+  const pickBarriles = await processMessage(opSessionId, '2', { operatorMode: true });
+  assert(String(pickBarriles || '').includes('barriles'), 'operador: 2 pide venta barriles');
+  assert(String(pickBarriles || '').includes('cancelar'), 'operador: tras 2 explica cómo anular');
+  const slashCancel = await processMessage(opSessionId, '/cancelar', { operatorMode: true });
+  assert(String(slashCancel || '').includes('Panel operador'), 'operador: /cancelar vuelve al panel');
+
+  const pickEventAgain = await processMessage(opSessionId, '1', { operatorMode: true });
+  assert(String(pickEventAgain || '').includes('envíame los datos'), 'operador: 1 de nuevo pide checklist');
 
   const opSession = getSession(opSessionId);
   setOperatorKind(opSession, 'event');
@@ -4496,6 +4529,7 @@ console.log('\n-- Modo operador: flags, checklist y borrador --');
   const summary = formatOperatorSummary(opSession);
   assert(summary.includes('Ana'), 'operador: resumen muestra cliente');
   assert(summary.includes('OK'), 'operador: resumen pide confirmación');
+  assert(summary.includes('cancelar'), 'operador: resumen explica cómo anular');
 
   clearOperatorDraft(opSession);
   assert(!opSession.operatorKind, 'operador: clear borrador');

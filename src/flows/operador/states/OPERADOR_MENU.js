@@ -3,7 +3,7 @@
 // Solo admins o self-chat llegan aquí vía operatorMode en el engine.
 // ==============================================================================
 import { defineState } from '../../../logic/compile-state.js';
-import { buildOperatorMenuText } from '../../../logic/operator-menu.js';
+import { buildOperatorMenuText, isOperatorCancelCommand } from '../../../logic/operator-menu.js';
 import {
   setOperatorKind,
   buildOperatorDataRequestCopy,
@@ -19,9 +19,8 @@ export const OPERADOR_MENU = defineState({
 
   async validateAndProcess(messageText, session) {
     const trimmed = String(messageText || '').trim();
-    const lower = trimmed.toLowerCase();
 
-    if (lower === '/menu' || lower === 'menu') {
+    if (isOperatorCancelCommand(trimmed)) {
       clearOperatorDraft(session);
       session.operatorMode = true;
       return {

@@ -3,7 +3,7 @@
 // Mergea en operatorDraft, lista faltantes o pasa a confirmar si está completo.
 // ==============================================================================
 import { defineState } from '../../../logic/compile-state.js';
-import { buildOperatorMenuText } from '../../../logic/operator-menu.js';
+import { buildOperatorMenuText, isOperatorCancelCommand } from '../../../logic/operator-menu.js';
 import {
   ingestOperatorMessage,
   formatMissingFieldsMessage,
@@ -18,14 +18,13 @@ export const OPERADOR_CAPTURA = defineState({
     const kind = session.operatorKind === 'barriles' ? 'venta barriles' : 'cotización evento';
     return `Capturando datos para *${kind}*. Envía el bloque en cualquier orden.`;
   },
-  shortQuestion: 'Envía los datos o */menu* para cancelar.',
+  shortQuestion: 'Envía los datos, o */menu* / *cancelar* para anular.',
   aiPrompt: `[SISTEMA - OPERADOR CAPTURA] Extrae campos del bloque. No inventar.`,
 
   async validateAndProcess(messageText, session) {
     const trimmed = String(messageText || '').trim();
-    const lower = trimmed.toLowerCase();
 
-    if (lower === '/menu' || lower === 'menu' || lower === 'cancelar') {
+    if (isOperatorCancelCommand(trimmed)) {
       clearOperatorDraft(session);
       session.operatorMode = true;
       return {
