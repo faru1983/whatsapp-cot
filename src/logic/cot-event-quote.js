@@ -449,15 +449,34 @@ export async function buildEventQuotePayload(session) {
       type: eventType.type,
       otherType: eventType.otherType,
       date: isoDate,
-      startTime: String(contact.startTime || '').trim()
+      startTime: String(contact.startTime || session.contact?.startTime || '').trim(),
+      pickupDate: String(contact.pickupDate || '').trim(),
+      pickupTime: String(contact.pickupTime || '').trim()
     },
     consumption: {
       guests: Number(session.guests) || 0,
       drinksPerPerson: Number(session.eventosDrinksPerGuest) || 3
     },
     dispenser: dispenserFromSession(session),
-    items
+    items,
+    confirmNow: session.operatorConfirmNow === true
   };
+
+  if (payload.confirmNow) {
+    if (!phone) {
+      return { ok: false, error: 'Para confirmar la reserva hace falta el WhatsApp del cliente (+569...).' };
+    }
+    if (payload.client.address.length < 5) {
+      return { ok: false, error: 'Para confirmar la reserva hace falta la dirección del evento (mín. 5 caracteres).' };
+    }
+    if (!payload.event.startTime) {
+      return { ok: false, error: 'Para confirmar la reserva hace falta la hora de inicio.' };
+    }
+    if (!payload.event.pickupDate) {
+      payload.event.pickupDate = isoDate;
+      payload.event.pickupTime = '';
+    }
+  }
 
   return {
     ok: true,
@@ -472,7 +491,7 @@ export async function buildEventQuotePayload(session) {
  * submitEventQuoteFromSession: Valida sesión → llama API → formatea mensaje de cierre.
  *
  * @param {object} session
- * @returns {Promise<{ success: boolean, url?: string, totalPrice?: number, closingReply?: string, error?: string, adminBody?: string }>}
+ * @returns {Promise<{ success: boolean, url?: string, totalPrice?: number, status?: string, closingReply?: string, error?: string, adminBody?: string }>}
  */
 export async function submitEventQuoteFromSession(session) {
   const built = await buildEventQuotePayload(session);
@@ -482,13 +501,20 @@ export async function submitEventQuoteFromSession(session) {
 
   // Útil en producción: saber si el mapeo vino de API viva, caché o fallback
   console.log(
-    `COT quote: creando draft (catalogSource=${built.catalogSource || '?'},`
+    `COT quote: creando ${session.operatorConfirmNow ? 'reserva confirmada' : 'draft'} (catalogSource=${built.catalogSource || '?'},`
     + ` items=${built.payload.items.length}, comuna=${built.payload.client.comuna})`
   );
 
   const apiResult = await createEventQuoteViaApi(built.payload);
   if (!apiResult.success) {
     return { success: false, error: apiResult.error };
+  }
+
+  if (session.operatorConfirmNow && apiResult.status !== 'confirmed') {
+    return {
+      success: false,
+      error: 'La API respondió sin confirmar (status draft). Despliega cocktailsontap.cl con confirmNow y reintenta.'
+    };
   }
 
   const totalStr = apiResult.totalPrice != null
@@ -515,6 +541,7 @@ export async function submitEventQuoteFromSession(session) {
       : null,
     `Formato: ${session.eventoFormato || built.payload.dispenser}`,
     `URL: ${apiResult.url}`,
+    apiResult.status ? `Estado: ${apiResult.status}` : null,
     totalStr ? `Total API: ${totalStr}` : null
   ].filter(Boolean).join('\n');
 
@@ -530,6 +557,7 @@ export async function submitEventQuoteFromSession(session) {
     success: true,
     url: apiResult.url,
     totalPrice: apiResult.totalPrice,
+    status: apiResult.status,
     closingReply,
     adminBody
   };

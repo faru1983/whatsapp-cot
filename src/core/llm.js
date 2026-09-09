@@ -1060,24 +1060,35 @@ REGLAS:
  * Devuelve patch parcial + dudas (no inventar si no hay certeza).
  *
  * @param {string} userMessage
- * @param {{ kind: 'event'|'barriles', catalogNames: string[], currentDraft?: object }} opts
+ * @param {{ kind: 'event'|'event_reserva'|'barriles', catalogNames: string[], currentDraft?: object }} opts
  * @returns {Promise<{ patch: object, dudas: string[] }>}
  */
 export async function extractOperatorDraftWithAI(userMessage, opts = {}) {
   const env = getEnv();
   const { provider, apiKey, model } = env;
   const config = { temperature: 0.1, maxOutputTokens: 900 };
-  const kind = opts.kind === 'barriles' ? 'barriles' : 'event';
+  const kind = opts.kind === 'barriles'
+    ? 'barriles'
+    : opts.kind === 'event_reserva'
+      ? 'event_reserva'
+      : 'event';
   const catalogSample = (opts.catalogNames || []).slice(0, 80).join(', ');
+  const kindLabel = kind === 'barriles'
+    ? 'venta barriles desechables 5L'
+    : kind === 'event_reserva'
+      ? 'reserva evento confirmada (dirección + hora de inicio)'
+      : 'cotización evento (draft)';
 
   const systemInstruction = `Eres un extractor JSON para un operador interno que crea pedidos en cocktailsontap.cl.
-Tipo de acción: "${kind}" (${kind === 'event' ? 'cotización evento' : 'venta barriles desechables 5L'}).
+Tipo de acción: "${kind}" (${kindLabel}).
 
 Devuelve SOLO JSON válido con:
 - "patch": objeto con campos detectados (omitir los que no aparezcan con certeza):
   firstName, lastName, email, phone (E.164 +569...), comuna, date (texto día y mes en español),
-  address (solo barriles), eventoFormato ("Dispensador Portátil" o "Muro de Coctelería"),
+  address (${kind === 'barriles' ? 'despacho' : 'del evento si aplica'}), eventoFormato ("Dispensador Portátil" o "Muro de Coctelería"),
   guests (número), celebrationType (texto libre), drinksPerPerson (número),
+  startTime (HH:MM 24h, solo reserva), pickupSameDay (true si retiro el mismo día),
+  pickupNextDay (true si retiro al día siguiente), pickupTime (rango "12:00 a 14:00" | "14:00 a 16:00" | "16:00 a 18:00"),
   products: [{ name (catálogo exacto), quantity, litrage (solo eventos: 5L/10L/20L/30L) }]
 - "dudas": array de strings con campos ambiguos (ej. "email", "spritz") — NO adivinar.
 

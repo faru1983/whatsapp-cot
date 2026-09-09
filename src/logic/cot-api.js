@@ -117,7 +117,7 @@ function buildMockWriteResult(kind, payload = {}) {
     quoteId: id,
     url: `https://cocktailsontap.cl/${path}/${id}?simulated=1`,
     totalPrice: Number.isFinite(totalFromPayload) ? totalFromPayload : null,
-    status: 'draft',
+    status: payload?.confirmNow === true ? 'confirmed' : 'draft',
     mocked: true
   };
 }
@@ -245,7 +245,7 @@ export async function fetchCatalogViaApi() {
 }
 
 /**
- * createEventQuoteViaApi: Crea una cotización de evento (draft) en la web.
+ * createEventQuoteViaApi: Crea una cotización de evento (draft o reserva si confirmNow).
  * POST /api/v1/quotes con Bearer token.
  *
  * @param {object} payload - Body según IntegrationEventQuoteSchema

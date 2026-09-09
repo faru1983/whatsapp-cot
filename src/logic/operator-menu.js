@@ -16,8 +16,9 @@ export function buildOperatorMenuText() {
 ${flags}
 
 *Acciones*
-1️⃣ Cotización evento (API /quotes)
-2️⃣ Venta barriles desechables (API /direct-sales)
+1️⃣ Cotización evento (sin confirmar)
+2️⃣ Venta barriles desechables
+3️⃣ Reserva evento confirmada
 
 *Interruptores*
 /respuestas on | off — flujos automáticos a clientes
@@ -28,7 +29,7 @@ ${flags}
 /iniciarbot <número>
 /reiniciarbot <número>
 
-Escribe *1* o *2* para empezar, o */menu* para ver esto de nuevo.
+Escribe *1*, *2* o *3* para empezar, o */menu* para ver esto de nuevo.
 En captura: */menu* o *cancelar* anula el borrador y vuelve aquí.`;
 }
 

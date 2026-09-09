@@ -1,5 +1,5 @@
 // ==============================================================================
-// OBJETIVO: Paso OPERADOR_MENU — panel /menu con acciones 1 y 2.
+// OBJETIVO: Paso OPERADOR_MENU — panel /menu con acciones 1, 2 y 3.
 // Solo admins o self-chat llegan aquí vía operatorMode en el engine.
 // ==============================================================================
 import { defineState } from '../../../logic/compile-state.js';
@@ -14,8 +14,8 @@ import { matchesMenuOption } from '../../../logic/keyword-intent.js';
 export const OPERADOR_MENU = defineState({
   id: 'OPERADOR_MENU',
   promptQuestion: () => buildOperatorMenuText(),
-  shortQuestion: 'Escribe *1* o *2*, o */menu*.',
-  aiPrompt: `[SISTEMA - OPERADOR] Panel interno. Solo menú 1 cotización / 2 venta. No inventar datos.`,
+  shortQuestion: 'Escribe *1*, *2* o *3*, o */menu*.',
+  aiPrompt: `[SISTEMA - OPERADOR] Panel interno. 1 cotización draft / 2 venta barriles / 3 reserva confirmada. No inventar datos.`,
 
   async validateAndProcess(messageText, session) {
     const trimmed = String(messageText || '').trim();
@@ -30,7 +30,16 @@ export const OPERADOR_MENU = defineState({
       };
     }
 
-    if (matchesMenuOption(trimmed, 1) || /\bcotizaci[oó]n\b|\bevento\b/i.test(trimmed)) {
+    if (matchesMenuOption(trimmed, 3) || /\breserva\b/i.test(trimmed)) {
+      setOperatorKind(session, 'event_reserva');
+      return {
+        success: true,
+        nextState: 'OPERADOR_CAPTURA',
+        customReply: buildOperatorDataRequestCopy('event_reserva')
+      };
+    }
+
+    if (matchesMenuOption(trimmed, 1) || /\bcotizaci[oó]n\b/i.test(trimmed) || /\bevento\b/i.test(trimmed)) {
       setOperatorKind(session, 'event');
       return {
         success: true,

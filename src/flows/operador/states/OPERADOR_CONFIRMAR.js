@@ -79,7 +79,7 @@ export const OPERADOR_CONFIRMAR = defineState({
       return {
         success: true,
         nextState: 'OPERADOR_CAPTURA',
-        customReply: `${formatMissingFieldsMessage(result.missing)}\n\n${formatOperatorSummary(session)}`
+        customReply: `${formatMissingFieldsMessage(result.missing, session.operatorKind)}\n\n${formatOperatorSummary(session)}`
       };
     }
 

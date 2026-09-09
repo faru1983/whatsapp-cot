@@ -14,7 +14,7 @@ import { matchCocktailNamesInText } from './eventos-helpers.js';
 import { getEventFormatKey, getAllowedLitrages } from './eventos-helpers.js';
 import { extractOperatorDraftWithAI } from '../core/llm.js';
 import { areCotApiWritesEnabled } from './bot-runtime-flags.js';
-import { submitEventQuoteFromSession } from './cot-event-quote.js';
+import { submitEventQuoteFromSession, toIsoDateFromBotText } from './cot-event-quote.js';
 import { submitBarrilesSaleFromSession } from './cot-barriles-sale.js';
 import {
   beginCliApiModeAsk,
@@ -23,7 +23,10 @@ import {
 } from './cot-api.js';
 import { buildOperatorCancelHint } from './operator-menu.js';
 
-/** @typedef {'event'|'barriles'} OperatorKind */
+/** @typedef {'event'|'event_reserva'|'barriles'} OperatorKind */
+
+/** Rangos de retiro al día siguiente (mismos del wizard web). */
+const EVENT_NEXT_DAY_PICKUP_SLOTS = ['12:00 a 14:00', '14:00 a 16:00', '16:00 a 18:00'];
 
 /** Etiquetas legibles de cada campo del checklist */
 const FIELD_LABELS = {
@@ -33,11 +36,37 @@ const FIELD_LABELS = {
   phone: 'WhatsApp del cliente',
   comuna: 'comuna',
   date: 'fecha',
-  address: 'dirección de despacho',
+  address: 'dirección',
   eventoFormato: 'formato (dispensador o muro)',
   products: 'cócteles / productos',
-  guests: 'cantidad de invitados'
+  guests: 'cantidad de invitados',
+  startTime: 'hora de inicio',
+  pickupDate: 'fecha de retiro',
+  pickupTime: 'hora de retiro'
 };
+
+/**
+ * isEventOperatorKind: Cotización o reserva de evento (no barriles).
+ *
+ * @param {string} [kind]
+ * @returns {boolean}
+ */
+export function isEventOperatorKind(kind) {
+  return kind === 'event' || kind === 'event_reserva';
+}
+
+/**
+ * getOperatorFieldLabel: Etiqueta según tipo (dirección de evento vs despacho).
+ *
+ * @param {OperatorKind} kind
+ * @param {string} key
+ * @returns {string}
+ */
+function getOperatorFieldLabel(kind, key) {
+  if (key === 'address' && kind === 'event_reserva') return 'dirección del evento';
+  if (key === 'address' && kind === 'barriles') return 'dirección de despacho';
+  return FIELD_LABELS[key] || key;
+}
 
 /**
  * getOperatorChecklist: Campos obligatorios según tipo de acción.
@@ -50,6 +79,9 @@ export function getOperatorChecklist(kind) {
   if (kind === 'event') {
     return [...base, 'eventoFormato', 'guests'];
   }
+  if (kind === 'event_reserva') {
+    return [...base, 'eventoFormato', 'guests', 'address', 'startTime'];
+  }
   return [...base, 'address'];
 }
 
@@ -61,15 +93,22 @@ export function getOperatorChecklist(kind) {
  */
 export function buildOperatorDataRequestCopy(kind) {
   const fields = getOperatorChecklist(kind)
-    .map((key) => FIELD_LABELS[key] || key)
+    .map((key) => getOperatorFieldLabel(kind, key))
     .join(', ');
-  const tipo = kind === 'event' ? 'cotización de evento' : 'venta de barriles desechables';
+  const tipo = kind === 'event'
+    ? 'cotización de evento'
+    : kind === 'event_reserva'
+      ? 'reserva de evento confirmada'
+      : 'venta de barriles desechables';
+  const extraHint = kind === 'event_reserva'
+    ? 'Si no indicas retiro, queda el *mismo día* del evento. Al *OK* se confirma la reserva en la web (calendario y correo).'
+    : 'Cuando esté completo te muestro el resumen para confirmar.';
   return [
     `Ok, envíame los datos para la *${tipo}* (en cualquier orden):`,
     '',
     fields,
     '',
-    'Cuando esté completo te muestro el resumen para confirmar.',
+    extraHint,
     buildOperatorCancelHint()
   ].join('\n');
 }
@@ -94,6 +133,7 @@ export function clearOperatorDraft(session) {
   session.operatorDraft = {};
   session.operatorKind = null;
   session.operatorDoubts = [];
+  session.operatorConfirmNow = false;
   delete session.operatorAwaitingApiMode;
 }
 
@@ -107,6 +147,7 @@ export function setOperatorKind(session, kind) {
   clearOperatorDraft(session);
   session.operatorMode = true;
   session.operatorKind = kind;
+  session.operatorConfirmNow = kind === 'event_reserva';
   ensureOperatorDraft(session);
 }
 
@@ -121,6 +162,61 @@ function parseChilePhoneFromText(text) {
   if (/^569\d{8}$/.test(digits)) return `+${digits}`;
   if (/^9\d{8}$/.test(digits)) return `+56${digits}`;
   return null;
+}
+
+/**
+ * parseStartTimeFromText: Hora de inicio (HH:MM 24h).
+ *
+ * @param {string} text
+ * @returns {string|null}
+ */
+function parseStartTimeFromText(text) {
+  const raw = String(text || '');
+  const m = raw.match(/(?:hora(?:\s+de\s+inicio)?|inicio|empieza|a\s+las)\s*[:\-]?\s*(\d{1,2})(?:[:\.](\d{2}))?\s*(am|pm)?/i)
+    || raw.match(/^\s*(\d{1,2})[:\.](\d{2})\s*(am|pm)?\s*$/i);
+  if (!m) return null;
+  let hour = Number(m[1]);
+  const minute = m[2] != null ? Number(m[2]) : 0;
+  const ap = String(m[3] || '').toLowerCase();
+  if (ap === 'pm' && hour < 12) hour += 12;
+  if (ap === 'am' && hour === 12) hour = 0;
+  if (!Number.isFinite(hour) || hour > 23 || minute > 59) return null;
+  return `${String(hour).padStart(2, '0')}:${String(minute).padStart(2, '0')}`;
+}
+
+/**
+ * parsePickupFromText: Retiro mismo día, día siguiente y/o rango horario.
+ *
+ * @param {string} text
+ * @returns {{ pickupSameDay?: boolean, pickupNextDay?: boolean, pickupTime?: string }}
+ */
+function parsePickupFromText(text) {
+  const raw = String(text || '');
+  const n = normalizeString(raw);
+  const out = {};
+  if (/retiro.{0,40}mismo\s+d[ií]a|\bmismo\s+d[ií]a.{0,20}retiro/i.test(raw)) {
+    out.pickupSameDay = true;
+  }
+  if (/retiro.{0,40}(d[ií]a\s+siguiente|ma[nñ]ana)|\b(d[ií]a\s+siguiente|al\s+otro\s+d[ií]a).{0,20}retiro/i.test(raw)) {
+    out.pickupNextDay = true;
+  }
+  for (const slot of EVENT_NEXT_DAY_PICKUP_SLOTS) {
+    const compact = slot.replace(/\s/g, '');
+    if (n.includes(normalizeString(slot)) || n.includes(normalizeString(compact))) {
+      out.pickupTime = slot;
+      break;
+    }
+  }
+  if (!out.pickupTime) {
+    const range = raw.match(/\b(12|14|16)\s*(?::00)?\s*a\s*(14|16|18)\s*(?::00)?\b/i);
+    if (range) {
+      const start = `${range[1]}:00`;
+      const end = `${range[2]}:00`;
+      const slot = EVENT_NEXT_DAY_PICKUP_SLOTS.find((s) => s.startsWith(start) && s.endsWith(end));
+      if (slot) out.pickupTime = slot;
+    }
+  }
+  return out;
 }
 
 /**
@@ -228,8 +324,8 @@ function dedupeProducts(list, kind) {
   const map = new Map();
   for (const item of list || []) {
     if (!item?.name) continue;
-    const litrage = kind === 'event' ? (item.litrage || '10L') : '5L';
-    const key = kind === 'event' ? `${item.name}::${litrage}` : item.name;
+    const litrage = isEventOperatorKind(kind) ? (item.litrage || '10L') : '5L';
+    const key = isEventOperatorKind(kind) ? `${item.name}::${litrage}` : item.name;
     const prev = map.get(key);
     const qty = Number(item.quantity) || 1;
     if (prev) {
@@ -282,6 +378,14 @@ export function parseOperatorDraftLocal(text, kind, session) {
   const guests = parseGuestsFromText(text);
   if (guests) patch.guests = guests;
 
+  const pickup = parsePickupFromText(text);
+  if (pickup.pickupSameDay) patch.pickupSameDay = true;
+  if (pickup.pickupNextDay) patch.pickupNextDay = true;
+  if (pickup.pickupTime) patch.pickupTime = pickup.pickupTime;
+
+  const startTime = parseStartTimeFromText(text);
+  if (startTime) patch.startTime = startTime;
+
   const { items, doubts: prodDoubts } = parseProductsFromTextLocal(
     text,
     kind,
@@ -328,10 +432,17 @@ export function getMissingOperatorFields(session) {
       if (!Array.isArray(d.products) || d.products.length === 0) missing.push(key);
       continue;
     }
+    if (key === 'address') {
+      if (String(d.address || '').trim().length < 5) missing.push(key);
+      continue;
+    }
     const val = d[key];
     if (val === undefined || val === null || String(val).trim() === '') {
       missing.push(key);
     }
+  }
+  if (kind === 'event_reserva' && d.pickupNextDay && !String(d.pickupTime || '').trim()) {
+    missing.push('pickupTime');
   }
   return missing;
 }
@@ -340,11 +451,12 @@ export function getMissingOperatorFields(session) {
  * formatMissingFieldsMessage: Texto "Me faltan: ..."
  *
  * @param {string[]} missingKeys
+ * @param {OperatorKind} [kind]
  * @returns {string}
  */
-export function formatMissingFieldsMessage(missingKeys) {
+export function formatMissingFieldsMessage(missingKeys, kind) {
   if (!missingKeys.length) return '';
-  const labels = missingKeys.map((k) => FIELD_LABELS[k] || k);
+  const labels = missingKeys.map((k) => getOperatorFieldLabel(kind, k));
   return [
     `Me faltan: *${labels.join(', ')}*.`,
     'Puedes enviar solo eso o un bloque nuevo.',
@@ -380,13 +492,17 @@ export function syncOperatorDraftToSession(session) {
   const d = session.operatorDraft;
   const kind = session.operatorKind;
 
+  session.operatorConfirmNow = kind === 'event_reserva';
   session.contact = {
     firstName: String(d.firstName || '').trim(),
     lastName: String(d.lastName || '').trim(),
     email: String(d.email || '').trim().toLowerCase(),
     phone: String(d.phone || '').trim(),
     address: String(d.address || '').trim(),
-    comuna: String(d.comuna || '').trim()
+    comuna: String(d.comuna || '').trim(),
+    startTime: String(d.startTime || '').trim(),
+    pickupDate: '',
+    pickupTime: ''
   };
 
   session.location = d.comuna || '';
@@ -395,7 +511,23 @@ export function syncOperatorDraftToSession(session) {
   session.guests = Number(d.guests) || 0;
   session.eventosDrinksPerGuest = Number(d.drinksPerPerson) || 3;
 
-  if (kind === 'event') {
+  if (isEventOperatorKind(kind)) {
+    const isoDate = toIsoDateFromBotText(d.date) || '';
+    let pickupIso = isoDate;
+    if (d.pickupNextDay && isoDate) {
+      const next = new Date(`${isoDate}T12:00:00`);
+      next.setDate(next.getDate() + 1);
+      pickupIso = next.toISOString().split('T')[0];
+    } else if (d.pickupSameDay) {
+      pickupIso = isoDate;
+    } else if (String(d.pickupDate || '').trim()) {
+      pickupIso = toIsoDateFromBotText(d.pickupDate) || String(d.pickupDate).trim();
+    }
+    session.contact.pickupDate = pickupIso;
+    session.contact.pickupTime = pickupIso && pickupIso !== isoDate
+      ? String(d.pickupTime || '').trim()
+      : '';
+
     session.eventoFormato = d.eventoFormato || 'Dispensador Portátil';
     session.orderBuilder = session.orderBuilder || {};
     session.orderBuilder.type = 'evento';
@@ -448,16 +580,29 @@ export function formatOperatorSummary(session) {
   } else {
     lines.push(`Formato: ${d.eventoFormato || '—'}`);
     lines.push(`Invitados: ${d.guests || '—'}`);
+    if (kind === 'event_reserva') {
+      lines.push(`Dirección: ${d.address || '—'}`);
+      lines.push(`Hora inicio: ${d.startTime || '—'}`);
+      const retiro = d.pickupNextDay
+        ? `día siguiente${d.pickupTime ? ` ${d.pickupTime}` : ''}`
+        : 'mismo día del evento';
+      lines.push(`Retiro: ${retiro}`);
+    }
   }
 
   const prodLines = (d.products || []).map((p) => {
-    if (kind === 'event') {
+    if (isEventOperatorKind(kind)) {
       return `• ${p.quantity || 1}x ${p.name} ${p.litrage || ''}`.trim();
     }
     return `• ${p.quantity || 1}x ${p.name}`;
   });
   lines.push('', '*Productos:*', prodLines.length ? prodLines.join('\n') : '_(vacío)_');
-  lines.push('', '¿Lo creo en la web? Escribe *OK* o dime qué cambiar.');
+  lines.push(
+    '',
+    kind === 'event_reserva'
+      ? '¿Confirmo la *reserva* en la web? Escribe *OK* o dime qué cambiar.'
+      : '¿Lo creo en la web? Escribe *OK* o dime qué cambiar.'
+  );
   lines.push(buildOperatorCancelHint());
   return lines.join('\n');
 }
@@ -523,7 +668,7 @@ export async function submitOperatorQuote(session) {
   syncOperatorDraftToSession(session);
 
   const kind = session.operatorKind;
-  const result = kind === 'event'
+  const result = isEventOperatorKind(kind)
     ? await submitEventQuoteFromSession(session)
     : await submitBarrilesSaleFromSession(session);
 
@@ -536,8 +681,9 @@ export async function submitOperatorQuote(session) {
   }
 
   const totalStr = result.totalPrice != null ? formatPrice(result.totalPrice) : null;
+  const isReserva = kind === 'event_reserva';
   const closing = [
-    '✅ *Creado en la web*',
+    isReserva ? '✅ *Reserva confirmada en la web*' : '✅ *Creado en la web*',
     result.url ? `Link: ${result.url}` : null,
     totalStr ? `Total: ${totalStr}` : null,
     '',

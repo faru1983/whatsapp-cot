@@ -4408,7 +4408,9 @@ console.log('\n-- Modo operador: flags, checklist y borrador --');
     formatMissingFieldsMessage,
     setOperatorKind,
     clearOperatorDraft,
-    buildOperatorDataRequestCopy
+    buildOperatorDataRequestCopy,
+    syncOperatorDraftToSession,
+    parseOperatorDraftLocal
   } = await import('../src/logic/operator-draft.js');
   const { buildOperatorMenuText, isOperatorCancelCommand } = await import('../src/logic/operator-menu.js');
   const { canSubmitCotApiWrite } = await import('../src/logic/cot-api.js');
@@ -4453,6 +4455,7 @@ console.log('\n-- Modo operador: flags, checklist y borrador --');
   const menu = buildOperatorMenuText();
   assert(menu.includes('Panel operador'), 'operador: /menu lista panel');
   assert(menu.includes('1️⃣'), 'operador: menú muestra cotización');
+  assert(menu.includes('3️⃣'), 'operador: menú muestra reserva confirmada');
   assert(menu.includes('cancelar'), 'operador: panel menciona cancelar');
 
   assert(isOperatorCancelCommand('cancelar') === true, 'operador: cancelar es comando de anular');
@@ -4462,8 +4465,11 @@ console.log('\n-- Modo operador: flags, checklist y borrador --');
 
   const eventAsk = buildOperatorDataRequestCopy('event');
   const barrilesAsk = buildOperatorDataRequestCopy('barriles');
+  const reservaAsk = buildOperatorDataRequestCopy('event_reserva');
   assert(eventAsk.includes('cancelar'), 'operador: captura evento explica anular');
   assert(barrilesAsk.includes('cancelar'), 'operador: captura barriles explica anular');
+  assert(reservaAsk.includes('reserva'), 'operador: captura reserva nombra el tipo');
+  assert(reservaAsk.includes('hora de inicio'), 'operador: reserva pide hora de inicio');
   assert(formatMissingFieldsMessage(['email']).includes('cancelar'), 'operador: faltantes explica anular');
 
   const opSessionId = 'operator-admin@test.local';
@@ -4493,6 +4499,16 @@ console.log('\n-- Modo operador: flags, checklist y borrador --');
 
   const pickEventAgain = await processMessage(opSessionId, '1', { operatorMode: true });
   assert(String(pickEventAgain || '').includes('envíame los datos'), 'operador: 1 de nuevo pide checklist');
+  assert(!String(pickEventAgain || '').includes('reserva de evento confirmada'), 'operador: 1 no es reserva');
+  await processMessage(opSessionId, 'cancelar', { operatorMode: true });
+
+  const pickReserva = await processMessage(opSessionId, '3', { operatorMode: true });
+  assert(String(pickReserva || '').includes('reserva'), 'operador: 3 pide reserva confirmada');
+  const reservaWord = await processMessage(opSessionId, 'cancelar', { operatorMode: true });
+  assert(String(reservaWord || '').includes('Panel operador'), 'operador: cancelar tras 3 vuelve al panel');
+  const pickReservaWord = await processMessage(opSessionId, 'reserva', { operatorMode: true });
+  assert(String(pickReservaWord || '').includes('hora de inicio'), 'operador: sinónimo reserva abre captura');
+  await processMessage(opSessionId, 'cancelar', { operatorMode: true });
 
   const opSession = getSession(opSessionId);
   setOperatorKind(opSession, 'event');
@@ -4509,6 +4525,42 @@ console.log('\n-- Modo operador: flags, checklist y borrador --');
   });
   saveSession(opSessionId, opSession);
   assert(getMissingOperatorFields(opSession).length === 0, 'operador: borrador completo sin NLU');
+
+  const reservaSid = 'operator-reserva@test.local';
+  resetSession(reservaSid);
+  const reservaSess = getSession(reservaSid);
+  setOperatorKind(reservaSess, 'event_reserva');
+  applyOperatorDraftPatch(reservaSess, {
+    firstName: 'Ana',
+    lastName: 'Pérez',
+    email: 'ana@test.cl',
+    phone: '+56912345678',
+    comuna: 'Providencia',
+    date: '20 de septiembre',
+    eventoFormato: 'Dispensador Portátil',
+    guests: 40,
+    products: [{ name: 'Mojito', quantity: 1, litrage: '10L' }]
+  });
+  const reservaMissing = getMissingOperatorFields(reservaSess);
+  assert(reservaMissing.includes('address'), 'operador: reserva exige dirección');
+  assert(reservaMissing.includes('startTime'), 'operador: reserva exige hora de inicio');
+  applyOperatorDraftPatch(reservaSess, { address: 'Av. Italia 1234', startTime: '19:00' });
+  assert(getMissingOperatorFields(reservaSess).length === 0, 'operador: reserva completa sin retiro extra');
+  syncOperatorDraftToSession(reservaSess);
+  assert(reservaSess.operatorConfirmNow === true, 'operador: flag confirmNow en reserva');
+  assert(reservaSess.contact.startTime === '19:00', 'operador: hora de inicio en contacto');
+  assert(Boolean(reservaSess.contact.pickupDate), 'operador: retiro default mismo día');
+  const reservaSummary = formatOperatorSummary(reservaSess);
+  assert(reservaSummary.includes('Confirmo la *reserva*'), 'operador: resumen pide confirmar reserva');
+
+  const parsedPickup = parseOperatorDraftLocal(
+    'inicio 20:00 retiro día siguiente 14:00 a 16:00',
+    'event_reserva',
+    reservaSess
+  );
+  assert(parsedPickup.patch.startTime === '20:00', 'operador: parse hora de inicio');
+  assert(parsedPickup.patch.pickupNextDay === true, 'operador: parse retiro día siguiente');
+  assert(parsedPickup.patch.pickupTime === '14:00 a 16:00', 'operador: parse rango de retiro');
 
   const partial = getSession('operator-partial@test.local');
   resetSession('operator-partial@test.local');

@@ -15,7 +15,11 @@ import {
 export const OPERADOR_CAPTURA = defineState({
   id: 'OPERADOR_CAPTURA',
   promptQuestion: (session) => {
-    const kind = session.operatorKind === 'barriles' ? 'venta barriles' : 'cotización evento';
+    const kind = session.operatorKind === 'barriles'
+      ? 'venta barriles'
+      : session.operatorKind === 'event_reserva'
+        ? 'reserva de evento'
+        : 'cotización evento';
     return `Capturando datos para *${kind}*. Envía el bloque en cualquier orden.`;
   },
   shortQuestion: 'Envía los datos, o */menu* / *cancelar* para anular.',
@@ -53,7 +57,7 @@ export const OPERADOR_CAPTURA = defineState({
     }
 
     if (!result.complete) {
-      const missingMsg = formatMissingFieldsMessage(result.missing);
+      const missingMsg = formatMissingFieldsMessage(result.missing, session.operatorKind);
       return {
         success: true,
         nextState: 'OPERADOR_CAPTURA',
