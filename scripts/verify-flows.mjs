@@ -4410,6 +4410,37 @@ console.log('\n-- Modo operador: flags, checklist y borrador --');
   } = await import('../src/logic/operator-draft.js');
   const { buildOperatorMenuText, buildOperatorDataRequestCopy } = await import('../src/logic/operator-menu.js');
   const { canSubmitCotApiWrite } = await import('../src/logic/cot-api.js');
+  const {
+    isSelfChat,
+    isClientCustomerChat,
+    isOperatorConsoleChannel
+  } = await import('../src/logic/operator-console.js');
+
+  const mockSock = {
+    user: { id: '56999999999@s.whatsapp.net', lid: 'lidself123@lid' }
+  };
+  assert(isSelfChat('56999999999@s.whatsapp.net', mockSock) === true, 'operador-console: self por PN');
+  assert(
+    isSelfChat('lidself123@lid', mockSock, { key: { remoteJidAlt: '56999999999@s.whatsapp.net' } }) === true,
+    'operador-console: self por LID + alt'
+  );
+  assert(
+    isClientCustomerChat('56988888888@s.whatsapp.net', ['56977777777@s.whatsapp.net'], mockSock) === true,
+    'operador-console: PN externo es cliente'
+  );
+  assert(
+    isClientCustomerChat('56999999999@s.whatsapp.net', [], mockSock) === false,
+    'operador-console: self-chat no es cliente'
+  );
+  const adminList = ['56977777777@s.whatsapp.net'];
+  const consoleFromAdmin = await isOperatorConsoleChannel({
+    remoteJid: '56977777777@s.whatsapp.net',
+    message: { key: { remoteJid: '56977777777@s.whatsapp.net', fromMe: false } },
+    sock: mockSock,
+    adminList,
+    isFromMe: false
+  });
+  assert(consoleFromAdmin === true, 'operador-console: admin personal es consola');
 
   resetRuntimeFlagsCache();
   setCustomerBotEnabled(false);

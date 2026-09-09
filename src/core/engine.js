@@ -353,6 +353,8 @@ async function processMessageUnlocked(sessionId, messageText, options = {}) {
 
   if (operatorMode) {
     session.operatorMode = true;
+    // La consola operador no debe quedar bloqueada por mute de un intento previo en self-chat
+    session.isMuted = false;
     const lower = messageText.trim().toLowerCase();
     if (lower === '/menu') {
       clearOperatorDraft(session);

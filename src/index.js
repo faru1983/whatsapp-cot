@@ -37,6 +37,12 @@ import {
   isOperatorMenuCommand,
   isOperatorMidFlowState
 } from './logic/operator-menu.js';
+import {
+  isSelfChat,
+  isClientCustomerChat,
+  isOperatorConsoleChannel,
+  isSenderAdmin
+} from './logic/operator-console.js';
 import process from 'node:process';
 import fs from 'node:fs';
 
@@ -181,43 +187,6 @@ function extractPhoneDigits(raw) {
 function jidUserPart(jid) {
   if (!jid) return '';
   return String(jid).split('@')[0].split(':')[0];
-}
-
-/**
- * isSelfChat: Detecta el chat "Mensaje para ti mismo" (Message Yourself).
- * Ahí remoteJid suele ser el propio número del bot; no es un cliente.
- *
- * @param {string} remoteJid
- * @param {object|null} sock - Socket Baileys (para leer sock.user.id)
- * @returns {boolean}
- */
-function isSelfChat(remoteJid, sock) {
-  if (!remoteJid || !sock?.user?.id) return false;
-  const meUser = jidUserPart(sock.user.id);
-  const remoteUser = jidUserPart(remoteJid);
-  if (meUser && remoteUser && meUser === remoteUser) return true;
-  // A veces el self-chat llega como LID propio
-  const meLid = sock.user.lid ? jidUserPart(sock.user.lid) : '';
-  if (meLid && remoteUser && meLid === remoteUser) return true;
-  return false;
-}
-
-/**
- * isClientCustomerChat: true si el chat es de un cliente (no admin, no self, no grupo).
- * Ahí NO deben ejecutarse comandos admin; solo mute por intervención humana real.
- *
- * @param {string} remoteJid - Chat donde llegó el evento
- * @param {string[]} adminList - JIDs de ADMIN_NUMBERS
- * @param {object|null} sock - Socket Baileys
- * @returns {boolean}
- */
-function isClientCustomerChat(remoteJid, adminList, sock = null) {
-  if (!remoteJid) return false;
-  if (remoteJid.endsWith('@g.us') || remoteJid === 'status@broadcast') return false;
-  if (adminList.includes(remoteJid)) return false;
-  // "Mensaje para ti mismo" = consola admin, no cliente
-  if (isSelfChat(remoteJid, sock)) return false;
-  return remoteJid.endsWith('@s.whatsapp.net') || remoteJid.endsWith('@lid');
 }
 
 /**
@@ -385,9 +354,19 @@ async function handleOperatorConsoleMessage({
 
   try {
     const reply = await processMessage(sessionId, cleanText || text, { operatorMode: true });
+    if (!reply) {
+      console.warn(`[operador] sin respuesta para "${String(cleanText || text).slice(0, 40)}" en ${sessionId} (¿mute?)`);
+      return;
+    }
     await deliverBotReply(sock, remoteJid, reply, botConfig.replyTiming || {});
   } catch (error) {
     console.error('Error en consola operador:', error.message);
+    await deliverBotReply(
+      sock,
+      remoteJid,
+      '⚠️ Error interno en consola operador. Revisa los logs del servidor.',
+      botConfig.replyTiming || {}
+    );
   }
 }
 
@@ -607,13 +586,15 @@ async function startBot() {
 
       const remoteJid = message.key.remoteJid;
 
-      // Admin = mensaje desde un chat de ADMIN_NUMBERS, o participant admin en grupo
-      let isFromAdmin = adminList.includes(remoteJid);
-      if (!isFromAdmin && message.key.participant) {
-        isFromAdmin = adminList.includes(message.key.participant);
-      }
-
-      const selfChat = isSelfChat(remoteJid, sock);
+      const selfChat = isSelfChat(remoteJid, sock, message);
+      const senderIsAdmin = await isSenderAdmin({ message, sock, remoteJid, adminList });
+      const operatorConsole = await isOperatorConsoleChannel({
+        remoteJid,
+        message,
+        sock,
+        adminList,
+        isFromMe
+      });
 
       // Eventos de sistema (mensajes temporales on/off, borrados, stubs):
       // NO son intervención humana ni comandos. Si el bot desactiva temporales
@@ -627,34 +608,21 @@ async function startBot() {
         return;
       }
 
-      // fromMe (incluye "Mensaje para ti mismo") o chat de ADMIN_NUMBERS
-      const isAuthorized = isFromMe || isFromAdmin || selfChat;
+      const parts = text.trim().split(/\s+/).filter(Boolean);
+      const command = (parts[0] || '').toLowerCase();
 
       // --------------------------------------------------------------------------
-      // 2.1 Comandos admin: desde chat propio / Message Yourself / admin + número
-      // Formato: /detenerbot 56912345678  (nunca desde la ventana del cliente)
+      // 2.1 Consola operador PRIMERO (self-chat o ADMIN_NUMBERS → /menu, toggles)
+      // Debe ir antes del mute por intervención humana para que /menu siempre responda.
       // --------------------------------------------------------------------------
-      if (isAuthorized) {
-        const parts = text.trim().split(/\s+/).filter(Boolean);
-        const command = (parts[0] || '').toLowerCase();
-
+      if (operatorConsole) {
         if (ADMIN_COMMANDS.includes(command)) {
-          const inClientChat = isClientCustomerChat(remoteJid, adminList, sock);
-
-          // En el chat del cliente no aceptamos comandos (aunque sea fromMe)
-          if (inClientChat) {
-            console.log(`⚠️ Comando ${command} ignorado en chat de cliente. Usa: ${command} <número> desde Mensaje para ti mismo.`);
-            return;
-          }
-
-          // Obligatorio: /comando + número (o JID)
           if (parts.length < 2) {
             const help = `⚠️ Uso: ${command} <número>\nEjemplo: ${command} 56912345678`;
             await sendTracked(sock, remoteJid, { text: help });
             return;
           }
 
-          // Resolvemos PN + posibles @lid para no dejar sesiones huérfanas muteadas
           const targetIds = await resolveSessionIdsForCommand(sock, parts[1]);
 
           if (command === '/detenerbot') {
@@ -690,43 +658,48 @@ async function startBot() {
           }
         }
 
-        // --------------------------------------------------------------------------
-        // 2.2 Intervención humana real en chat de cliente → mute automático
-        // Solo si hay texto/multimedia. Borrados y cambios de temporales ya se filtraron.
-        // --------------------------------------------------------------------------
-        if (isClientCustomerChat(remoteJid, adminList, sock) && hasHumanChatContent(content)) {
-          const targetIds = await resolveSessionIdsForCommand(sock, remoteJid);
-          const preferredId = getPreferredSessionId(message);
-          if (!targetIds.includes(preferredId)) targetIds.push(preferredId);
+        await handleOperatorConsoleMessage({
+          message,
+          sock,
+          config,
+          botConfig,
+          remoteJid,
+          text,
+          content
+        });
+        return;
+      }
 
-          for (const id of targetIds) {
-            const tgtSession = getSession(id);
-            tgtSession.isMuted = true;
-            tgtSession.silenciado_timestamp = Date.now();
-            saveSession(id, tgtSession);
-          }
-          console.log(`🔇 Bot SILENCIADO automáticamente por intervención humana en: ${targetIds.join(', ')}`);
-          return;
+      // --------------------------------------------------------------------------
+      // 2.2 Intervención humana real en chat de cliente → mute automático
+      // Solo fromMe con contenido real; nunca en consola operador (ya salió arriba).
+      // --------------------------------------------------------------------------
+      if (
+        isFromMe
+        && isClientCustomerChat(remoteJid, adminList, sock, message)
+        && hasHumanChatContent(content)
+      ) {
+        const targetIds = await resolveSessionIdsForCommand(sock, remoteJid);
+        const preferredId = getPreferredSessionId(message);
+        if (!targetIds.includes(preferredId)) targetIds.push(preferredId);
+
+        for (const id of targetIds) {
+          const tgtSession = getSession(id);
+          tgtSession.isMuted = true;
+          tgtSession.silenciado_timestamp = Date.now();
+          saveSession(id, tgtSession);
         }
+        console.log(`🔇 Bot SILENCIADO automáticamente por intervención humana en: ${targetIds.join(', ')}`);
+        return;
+      }
 
-        // fromMe / admin / self-chat sin comando: consola operador o salir
-        if (isFromMe || selfChat || isFromAdmin) {
-          const inClientChat = isClientCustomerChat(remoteJid, adminList, sock);
-          const inOperatorConsole = !inClientChat && (selfChat || isFromAdmin || isFromMe);
-
-          if (inOperatorConsole) {
-            await handleOperatorConsoleMessage({
-              message,
-              sock,
-              config,
-              botConfig,
-              remoteJid,
-              text,
-              content
-            });
-          }
-          return;
+      // Comandos admin en chat de cliente: ignorar (evita /detenerbot sin contexto)
+      if ((isFromMe || senderIsAdmin || selfChat) && ADMIN_COMMANDS.includes(command)) {
+        const inClientChat = isClientCustomerChat(remoteJid, adminList, sock, message);
+        if (inClientChat) {
+          console.log(`⚠️ Comando ${command} ignorado en chat de cliente. Usa: ${command} <número> desde Mensaje para ti mismo.`);
         }
+        return;
       }
 
       // --------------------------------------------------------------------------
