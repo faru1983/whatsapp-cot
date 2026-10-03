@@ -3,5 +3,6 @@ auth/
 .env
 *.log
 *.sqlite*
+db/bot-runtime.json
 .DS_Store
 Thumbs.db
