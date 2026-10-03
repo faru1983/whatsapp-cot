@@ -30,7 +30,8 @@ export const OPERADOR_MENU = defineState({
       };
     }
 
-    if (matchesMenuOption(trimmed, 3) || /\breserva\b/i.test(trimmed)) {
+    // 1️⃣ Reservar evento confirmado
+    if (matchesMenuOption(trimmed, 1) || /\breserva\b/i.test(trimmed)) {
       setOperatorKind(session, 'event_reserva');
       return {
         success: true,
@@ -39,21 +40,23 @@ export const OPERADOR_MENU = defineState({
       };
     }
 
-    if (matchesMenuOption(trimmed, 1) || /\bcotizaci[oó]n\b/i.test(trimmed) || /\bevento\b/i.test(trimmed)) {
-      setOperatorKind(session, 'event');
-      return {
-        success: true,
-        nextState: 'OPERADOR_CAPTURA',
-        customReply: buildOperatorDataRequestCopy('event')
-      };
-    }
-
+    // 2️⃣ Venta barriles desechables
     if (matchesMenuOption(trimmed, 2) || /\bventa\b|\bbarriles?\b|\bdesechable/i.test(trimmed)) {
       setOperatorKind(session, 'barriles');
       return {
         success: true,
         nextState: 'OPERADOR_CAPTURA',
         customReply: buildOperatorDataRequestCopy('barriles')
+      };
+    }
+
+    // 3️⃣ Cotizar evento (draft sin confirmar)
+    if (matchesMenuOption(trimmed, 3) || /\bcotizaci[oó]n\b/i.test(trimmed) || /\bevento\b/i.test(trimmed)) {
+      setOperatorKind(session, 'event');
+      return {
+        success: true,
+        nextState: 'OPERADOR_CAPTURA',
+        customReply: buildOperatorDataRequestCopy('event')
       };
     }
 

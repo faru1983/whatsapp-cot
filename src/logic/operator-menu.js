@@ -16,9 +16,9 @@ export function buildOperatorMenuText() {
 ${flags}
 
 *Acciones*
-1️⃣ Cotización evento (sin confirmar)
+1️⃣ Reservar evento
 2️⃣ Venta barriles desechables
-3️⃣ Reserva evento confirmada
+3️⃣ Cotizar evento
 
 *Interruptores*
 /respuestas on | off — flujos automáticos a clientes

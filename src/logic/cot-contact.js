@@ -12,6 +12,11 @@ const MONTH_NAMES =
 const NAME_STOPWORDS = new Set([
   'de', 'del', 'el', 'la', 'los', 'las', 'en', 'para', 'por', 'con', 'mi', 'tu',
   'su', 'y', 'o', 'un', 'una', 'nombre', 'apellido', 'email', 'correo',
+  'personas', 'persona', 'invitados', 'invitado', 'pax', 'tragos', 'copas',
+  'cocteles', 'cócteles', 'barriles', 'barril', 'dispensador', 'muro', 'litros', 'litro',
+  'cumpleaños', 'cumple', 'matrimonio', 'boda', 'fiesta', 'evento', 'bautizo', 'aniversario',
+  'somos', 'seremos', 'calculamos', 'aprox', 'aproximado',
+  'cambia', 'cambiar', 'cambio', 'modifica', 'modificar', 'poner', 'deja', 'dejar', 'corrige', 'corregir',
   'enero', 'febrero', 'marzo', 'abril', 'mayo', 'junio', 'julio', 'agosto',
   'septiembre', 'octubre', 'noviembre', 'diciembre'
 ]);
@@ -115,9 +120,45 @@ export function isPrimarilyDateMessage(text) {
 }
 
 /**
+ * formatTitleCase: Normaliza nombres propios dejando solo la primera letra en mayúscula
+ * y el resto en minúscula para cada palabra (respetando tildes y guiones).
+ * Ej: "feli oñate" -> "Feli Oñate", "FELIPE RAMIREZ" -> "Felipe Ramirez"
+ *
+ * @param {string} str
+ * @returns {string}
+ */
+export function formatTitleCase(str) {
+  if (!str || typeof str !== 'string') return '';
+  return str
+    .trim()
+    .toLowerCase()
+    .split(/\s+/)
+    .map((word) => {
+      if (!word) return '';
+      return word
+        .split('-')
+        .map((sub) => sub ? sub.charAt(0).toUpperCase() + sub.slice(1) : '')
+        .join('-');
+    })
+    .join(' ');
+}
+
+/**
+ * normalizeEmail: Normaliza email siempre en minúsculas y sin espacios.
+ *
+ * @param {string} email
+ * @returns {string}
+ */
+export function normalizeEmail(email) {
+  if (!email || typeof email !== 'string') return '';
+  return email.trim().toLowerCase();
+}
+
+/**
  * parsePersonNames: Intenta sacar nombre y apellido de un mensaje corto.
  * Ej: "Juan Pérez", "Soy Ana López", "nombre: Ana apellido: Soto"
  * Ignora fechas y stopwords ("de", meses) para no guardar "de diciembre".
+ * Devuelve siempre nombres normalizados en Title Case.
  *
  * @param {string} text
  * @returns {{ firstName?: string, lastName?: string }}
@@ -126,10 +167,22 @@ export function parsePersonNames(text) {
   const raw = String(text || '').trim();
   const out = {};
 
+  // Correcciones explícitas primero (ej: "nombre cambia a Feli oñate", "el nombre es Juan Pérez")
+  const explicitFix = raw.match(/(?:(?:cambia(?:r)?|modifica(?:r)?|corrige)\s+(?:el\s+)?)?(?:nombre|apellido\s*s?)\s*(?:cambia\s+(?:a|por)|cambiar\s+(?:a|por)|es|a|por|:|deja\s+en|deja\s+como)\s+([A-Za-záéíóúÁÉÍÓÚñÑ\s]+)/i);
+  if (explicitFix && explicitFix[1]?.trim()) {
+    const fixedParts = explicitFix[1].trim().split(/\s+/).filter((p) => !NAME_STOPWORDS.has(p.toLowerCase()));
+    if (fixedParts.length >= 2) {
+      return { firstName: formatTitleCase(fixedParts[0]), lastName: formatTitleCase(fixedParts.slice(1).join(' ')) };
+    }
+    if (fixedParts.length === 1) {
+      return /apellido/i.test(raw) ? { lastName: formatTitleCase(fixedParts[0]) } : { firstName: formatTitleCase(fixedParts[0]) };
+    }
+  }
+
   const named = raw.match(/nombre\s*:?\s*([A-Za-záéíóúÁÉÍÓÚñÑ]+)/i);
   const lasted = raw.match(/apellido\s*s?\s*:?\s*([A-Za-záéíóúÁÉÍÓÚñÑ]+)/i);
-  if (named && !NAME_STOPWORDS.has(named[1].toLowerCase())) out.firstName = named[1];
-  if (lasted && !NAME_STOPWORDS.has(lasted[1].toLowerCase())) out.lastName = lasted[1];
+  if (named && !NAME_STOPWORDS.has(named[1].toLowerCase())) out.firstName = formatTitleCase(named[1]);
+  if (lasted && !NAME_STOPWORDS.has(lasted[1].toLowerCase())) out.lastName = formatTitleCase(lasted[1]);
 
   if (out.firstName || out.lastName) return out;
 
@@ -154,10 +207,10 @@ export function parsePersonNames(text) {
     .filter((p) => !NAME_STOPWORDS.has(p.toLowerCase()));
 
   if (parts.length >= 2) {
-    out.firstName = parts[0];
-    out.lastName = parts.slice(1).join(' ');
+    out.firstName = formatTitleCase(parts[0]);
+    out.lastName = formatTitleCase(parts.slice(1).join(' '));
   } else if (parts.length === 1) {
-    out.firstName = parts[0];
+    out.firstName = formatTitleCase(parts[0]);
   }
 
   return out;
@@ -178,7 +231,7 @@ export function applyContactFromMessage(messageText, session) {
   const hadLastBefore = String(session.contact.lastName || '').trim().length >= 2;
 
   const email = parseEmailFromText(messageText);
-  if (email) session.contact.email = email;
+  if (email) session.contact.email = normalizeEmail(email);
 
   // "15 de diciembre" / "15/12" → solo fecha: no tocar nombre/apellido
   if (isPrimarilyDateMessage(messageText) && !email) {
@@ -214,7 +267,7 @@ export function applyContactFromMessage(messageText, session) {
     && /^[A-Za-záéíóúÁÉÍÓÚñÑ]{2,}$/.test(singleWord)
     && !NAME_STOPWORDS.has(singleWord.toLowerCase())
   ) {
-    session.contact.lastName = singleWord;
+    session.contact.lastName = formatTitleCase(singleWord);
     return;
   }
 
@@ -233,10 +286,10 @@ export function applyContactFromMessage(messageText, session) {
   }
 
   if (names.firstName && (!hadFirstBefore || email || hasNameLabel)) {
-    session.contact.firstName = names.firstName;
+    session.contact.firstName = formatTitleCase(names.firstName);
   }
   if (names.lastName && (!hadLastBefore || email || hasNameLabel)) {
-    session.contact.lastName = names.lastName;
+    session.contact.lastName = formatTitleCase(names.lastName);
   }
 }
 

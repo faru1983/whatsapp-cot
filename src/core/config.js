@@ -22,7 +22,7 @@ export function getEnv() {
   // Caso 1: Si configuraste usar Nvidia (para modelos de código abierto como Llama 3)
   if (provider === 'nvidia') {
     const apiKey = process.env.NVIDIA_API_KEY;
-    const model = process.env.NVIDIA_MODEL || 'meta/llama-3.1-8b-instruct';
+    const model = process.env.NVIDIA_MODEL || 'meta/llama-3.2-11b-vision-instruct';
     
     // Si olvidaste poner la clave de Nvidia en el archivo .env, detenemos el bot con un error descriptivo
     if (!apiKey) throw new Error('Falta NVIDIA_API_KEY en el archivo .env');

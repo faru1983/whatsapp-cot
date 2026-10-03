@@ -348,17 +348,24 @@ export function mapCelebrationToEventType(celebrationType) {
   const raw = String(celebrationType || '').trim();
   const lower = raw.toLowerCase();
 
-  if (/matrimonio|boda|casamiento/.test(lower)) {
+  if (/matrimonio|boda|casamiento|wedding/.test(lower)) {
     return { type: 'Matrimonio', otherType: '' };
   }
   if (/cumplea|cumple/.test(lower)) {
     return { type: 'Cumpleaños', otherType: '' };
   }
-  if (/bautizo/.test(lower)) {
-    return { type: 'Bautizo', otherType: '' };
+  if (/empresa|corporativ|oficina|trabajo/.test(lower)) {
+    return { type: 'Empresa', otherType: '' };
   }
   if (!raw) {
     return { type: '', otherType: '' };
+  }
+  const matchOther = raw.match(/^(?:Otro|Otra)\s*\/\s*(.+)$/i);
+  if (matchOther) {
+    return { type: 'Otro', otherType: matchOther[1].trim() };
+  }
+  if (/^(?:otro|otra|otros|otras)$/i.test(lower)) {
+    return { type: 'Otro', otherType: '' };
   }
   return { type: 'Otro', otherType: raw };
 }

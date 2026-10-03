@@ -31,7 +31,7 @@ index.js → engine.js → statesMap (flows/index.js)
 | `src/core/engine.js` | Máquina de estados + red de seguridad + CLI (`test:local`) |
 | `src/core/llm.js` | `generateResponse`, extractores NLU, `classifyStepIntent`, `responderFAQ` |
 | `src/core/db.js` | Sesiones SQLite |
-| `src/flows/index.js` | `statesMap` unificado (21 estados, incl. `OPERADOR_*`) |
+| `src/flows/index.js` | `statesMap` unificado (23 estados, incl. `OPERADOR_*`) |
 | `src/flows/operador/states/` | Panel `/menu` (solo self-chat o `ADMIN_NUMBERS`) |
 | `src/logic/bot-runtime-flags.js` | `/respuestas` y `/cotapi` on\|off (persistente) |
 | `src/logic/operator-draft.js` | Borrador operador → payload API |
@@ -108,7 +108,7 @@ Cada estado exporta (vía `defineState`):
 
 **Eventos:** `EVENTOS_ELECCION_FORMATO` → `EVENTOS_RECOGIDA_DATOS` (tipo → invitados → cócteles p/p + rendimiento) → `EVENTOS_INTRO_MENU` (recomendación + Ver Cócteles y Cotizar / duda→SOS) → catálogo de precios al cotizar → `EVENTOS_ELECCION_MENU` → `EVENTOS_DATOS_CONTACTO` → `EVENTOS_CONFIRMAR_ENVIO` → `POST /api/v1/quotes` (draft) → `CERRADO`.
 
-**Operador `/menu`:** `1` cotización evento draft · `2` venta barriles · `3` reserva evento confirmada (`confirmNow: true`, mismos datos que wizard/admin).
+**Operador `/menu`:** `1` reserva evento confirmada · `2` venta barriles · `3` cotización evento draft. Flujo en 3 partes: `OPERADOR_CAPTURA` (contacto) → `OPERADOR_CAPTURA_DETALLES` (detalles) → `OPERADOR_CAPTURA_PRODUCTOS` (cócteles/formato) → `OPERADOR_CONFIRMAR`.
 
 IDs semánticos (`BARRILES_*` / `EVENTOS_*`); transiciones reales en cada `nextState`.
 

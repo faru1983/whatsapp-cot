@@ -45,6 +45,8 @@ const EXPECTED_STATES = [
   'EVENTOS_CONFIRMAR_ENVIO',
   'OPERADOR_MENU',
   'OPERADOR_CAPTURA',
+  'OPERADOR_CAPTURA_DETALLES',
+  'OPERADOR_CAPTURA_PRODUCTOS',
   'OPERADOR_CONFIRMAR',
   'CERRADO'
 ];
@@ -4468,8 +4470,8 @@ console.log('\n-- Modo operador: flags, checklist y borrador --');
   const reservaAsk = buildOperatorDataRequestCopy('event_reserva');
   assert(eventAsk.includes('cancelar'), 'operador: captura evento explica anular');
   assert(barrilesAsk.includes('cancelar'), 'operador: captura barriles explica anular');
-  assert(reservaAsk.includes('reserva'), 'operador: captura reserva nombra el tipo');
-  assert(reservaAsk.includes('hora de inicio'), 'operador: reserva pide hora de inicio');
+  assert(reservaAsk.includes('RESERVA'), 'operador: captura reserva nombra el tipo');
+  assert(reservaAsk.includes('Hora') || reservaAsk.includes('Fecha y Hora'), 'operador: reserva pide hora de inicio');
   assert(formatMissingFieldsMessage(['email']).includes('cancelar'), 'operador: faltantes explica anular');
 
   const opSessionId = 'operator-admin@test.local';
@@ -4477,9 +4479,10 @@ console.log('\n-- Modo operador: flags, checklist y borrador --');
   const menuReply = await processMessage(opSessionId, '/menu', { operatorMode: true });
   assert(String(menuReply || '').includes('Panel operador'), 'operador: /menu abre panel');
 
+  // 1️⃣ es ahora Reservar evento
   const pickEvent = await processMessage(opSessionId, '1', { operatorMode: true });
-  assert(String(pickEvent || '').includes('envíame los datos'), 'operador: tras 1 pide checklist');
-  assert(String(pickEvent || '').includes('nombre'), 'operador: checklist incluye nombre');
+  assert(String(pickEvent || '').includes('RESERVA'), 'operador: tras 1 pide checklist');
+  assert(String(pickEvent || '').includes('Nombre'), 'operador: checklist incluye nombre');
   assert(String(pickEvent || '').includes('cancelar'), 'operador: tras 1 explica cómo anular');
 
   const afterPartial = getSession(opSessionId);
@@ -4491,23 +4494,26 @@ console.log('\n-- Modo operador: flags, checklist y borrador --');
   assert(!afterCancel.operatorKind, 'operador: cancelar borra el tipo de acción');
   assert(!afterCancel.operatorDraft?.firstName, 'operador: cancelar borra el borrador');
 
+  // 2️⃣ es ahora Venta barriles desechables
   const pickBarriles = await processMessage(opSessionId, '2', { operatorMode: true });
-  assert(String(pickBarriles || '').includes('barriles'), 'operador: 2 pide venta barriles');
+  assert(String(pickBarriles || '').includes('BARRILES') || String(pickBarriles || '').includes('barriles'), 'operador: 2 pide venta barriles');
   assert(String(pickBarriles || '').includes('cancelar'), 'operador: tras 2 explica cómo anular');
   const slashCancel = await processMessage(opSessionId, '/cancelar', { operatorMode: true });
   assert(String(slashCancel || '').includes('Panel operador'), 'operador: /cancelar vuelve al panel');
 
-  const pickEventAgain = await processMessage(opSessionId, '1', { operatorMode: true });
-  assert(String(pickEventAgain || '').includes('envíame los datos'), 'operador: 1 de nuevo pide checklist');
-  assert(!String(pickEventAgain || '').includes('reserva de evento confirmada'), 'operador: 1 no es reserva');
+  // 3️⃣ es ahora Cotizar evento (sin confirmar) — test nombre anterior era "1 de nuevo"
+  const pickEventAgain = await processMessage(opSessionId, '3', { operatorMode: true });
+  assert(String(pickEventAgain || '').includes('COTIZACIÓN') || String(pickEventAgain || '').includes('cotización'), 'operador: 1 de nuevo pide checklist');
+  assert(!String(pickEventAgain || '').includes('RESERVA DE EVENTO'), 'operador: 1 no es reserva');
   await processMessage(opSessionId, 'cancelar', { operatorMode: true });
 
-  const pickReserva = await processMessage(opSessionId, '3', { operatorMode: true });
-  assert(String(pickReserva || '').includes('reserva'), 'operador: 3 pide reserva confirmada');
+  // sinónimo "reserva" → abre reserva (opción 1)
+  const pickReserva = await processMessage(opSessionId, '1', { operatorMode: true });
+  assert(String(pickReserva || '').includes('RESERVA') || String(pickReserva || '').includes('reserva'), 'operador: 3 pide reserva confirmada');
   const reservaWord = await processMessage(opSessionId, 'cancelar', { operatorMode: true });
   assert(String(reservaWord || '').includes('Panel operador'), 'operador: cancelar tras 3 vuelve al panel');
   const pickReservaWord = await processMessage(opSessionId, 'reserva', { operatorMode: true });
-  assert(String(pickReservaWord || '').includes('hora de inicio'), 'operador: sinónimo reserva abre captura');
+  assert(String(pickReservaWord || '').includes('RESERVA') || String(pickReservaWord || '').includes('Fecha y Hora'), 'operador: sinónimo reserva abre captura');
   await processMessage(opSessionId, 'cancelar', { operatorMode: true });
 
   const opSession = getSession(opSessionId);
@@ -4580,8 +4586,109 @@ console.log('\n-- Modo operador: flags, checklist y borrador --');
 
   const summary = formatOperatorSummary(opSession);
   assert(summary.includes('Ana'), 'operador: resumen muestra cliente');
-  assert(summary.includes('OK'), 'operador: resumen pide confirmación');
-  assert(summary.includes('cancelar'), 'operador: resumen explica cómo anular');
+  // Test nuevo: Flujo 3 partes del operador (Contacto -> Detalles -> Productos -> Confirmar)
+  const threeStepSid = 'operator-threestep@test.local';
+  resetSession(threeStepSid);
+  await processMessage(threeStepSid, '/menu', { operatorMode: true });
+  await processMessage(threeStepSid, '3', { operatorMode: true }); // Cotización evento
+
+  // 1) Enviar contacto (caso real con número en email y guión en teléfono)
+  const contactReply = await processMessage(
+    threeStepSid,
+    'Felipe Ramirez, feliperamirez1983@gmail.com, +56-966755025',
+    { operatorMode: true }
+  );
+  const sessAfterContact = getSession(threeStepSid);
+  assert(sessAfterContact.currentState === 'OPERADOR_CAPTURA', 'operador 3 partes: contacto pide confirmación');
+  assert(sessAfterContact.operatorDraft.phone === '+56966755025', 'operador 3 partes: extrae whatsapp con guiones y numeros en email');
+  assert(sessAfterContact.operatorDraft.firstName === 'Felipe', 'operador 3 partes: extrae nombre');
+  assert(sessAfterContact.operatorDraft.email === 'feliperamirez1983@gmail.com', 'operador 3 partes: extrae email');
+  assert(String(contactReply || '').includes('Datos de contacto captados'), 'operador 3 partes: muestra datos captados');
+  assert(String(contactReply || '').includes('¿Están correctos estos datos'), 'operador 3 partes: pregunta si están correctos');
+
+  // 1b) Confirmar contacto con OK → avanza a DETALLES
+  const confirmContactReply = await processMessage(
+    threeStepSid,
+    'OK',
+    { operatorMode: true }
+  );
+  const sessAfterConfirmContact = getSession(threeStepSid);
+  assert(sessAfterConfirmContact.currentState === 'OPERADOR_CAPTURA_DETALLES', 'operador 3 partes: OK contacto avanza a DETALLES');
+  assert(String(confirmContactReply || '').includes('DETALLES DEL EVENTO'), 'operador 3 partes: pide detalles de evento');
+
+  // 2) Enviar detalles parciales (falta invitados)
+  const partialDetailsReply = await processMessage(
+    threeStepSid,
+    'Las Condes, 15 de diciembre',
+    { operatorMode: true }
+  );
+  const sessAfterPartialDet = getSession(threeStepSid);
+  assert(sessAfterPartialDet.currentState === 'OPERADOR_CAPTURA_DETALLES', 'operador 3 partes: faltante sigue en DETALLES');
+  assert(String(partialDetailsReply || '').includes('Las Condes'), 'operador 3 partes: muestra lo captado');
+  assert(String(partialDetailsReply || '').includes('invitados'), 'operador 3 partes: pide lo que falta (invitados)');
+
+  // 3) Completar detalles → pide confirmación de detalles
+  const fullDetailsReply = await processMessage(
+    threeStepSid,
+    '50 personas',
+    { operatorMode: true }
+  );
+  const sessAfterFullDet = getSession(threeStepSid);
+  assert(sessAfterFullDet.currentState === 'OPERADOR_CAPTURA_DETALLES', 'operador 3 partes: detalles completos pide confirmación');
+  assert(sessAfterFullDet.operatorDraft.guests === 50, 'operador 3 partes: guarda invitados');
+  assert(String(fullDetailsReply || '').includes('Detalles del evento captados'), 'operador 3 partes: muestra detalles captados');
+  assert(String(fullDetailsReply || '').includes('¿Están correctos estos detalles'), 'operador 3 partes: pregunta si detalles están correctos');
+
+  // 3b) Confirmar detalles con OK → avanza a PRODUCTOS
+  const confirmDetailsReply = await processMessage(
+    threeStepSid,
+    'OK',
+    { operatorMode: true }
+  );
+  const sessAfterConfirmDetails = getSession(threeStepSid);
+  assert(sessAfterConfirmDetails.currentState === 'OPERADOR_CAPTURA_PRODUCTOS', 'operador 3 partes: OK detalles avanza a PRODUCTOS');
+  assert(String(confirmDetailsReply || '').includes('CÓCTELES Y FORMATO'), 'operador 3 partes: pide cócteles y formato');
+
+  // 4) Enviar cócteles y formato → resumen final
+  const fullProductsReply = await processMessage(
+    threeStepSid,
+    'Dispensador Portátil, 2x Mojito 10L',
+    { operatorMode: true }
+  );
+  const sessAfterFullProd = getSession(threeStepSid);
+  assert(sessAfterFullProd.currentState === 'OPERADOR_CONFIRMAR', 'operador 3 partes: productos completos avanza a CONFIRMAR');
+  assert(String(fullProductsReply || '').includes('Felipe Ramirez'), 'operador 3 partes: resumen final muestra cliente');
+  assert(String(fullProductsReply || '').includes('Mojito'), 'operador 3 partes: resumen final muestra productos');
+  assert(String(fullProductsReply || '').includes('Subtotal cócteles:'), 'operador 3 partes: resumen final muestra subtotal cócteles');
+  assert(String(fullProductsReply || '').includes('TOTAL:'), 'operador 3 partes: resumen final muestra total');
+  assert(String(fullProductsReply || '').includes('OK'), 'operador 3 partes: pide OK para enviar');
+
+  // Test caso usuario: 1x Aperol Spritz 5L, 1x Ramazzotti Spritz 5 en Lo Prado
+  const userCaseSid = 'operator-user-case@test.local';
+  resetSession(userCaseSid);
+  const userSess = getSession(userCaseSid);
+  setOperatorKind(userSess, 'event');
+  applyOperatorDraftPatch(userSess, {
+    firstName: 'Felipe',
+    lastName: 'Ramirez',
+    email: 'feliperamirez1983@gmail.com',
+    phone: '+56966755025',
+    comuna: 'Lo Prado',
+    date: '03-12-2026',
+    eventoFormato: 'Dispensador Portátil',
+    guests: 50,
+    products: [
+      { name: 'Aperol Spritz', quantity: 1, litrage: '5L' },
+      { name: 'Ramazzotti Spritz', quantity: 1, litrage: '5' }
+    ]
+  });
+  const userSummary = formatOperatorSummary(userSess);
+  assert(userSummary.includes('Aperol Spritz 5L: $89.990'), 'operador carrito: precio Aperol Spritz 5L');
+  assert(userSummary.includes('Ramazzotti Spritz 5L: $89.990'), 'operador carrito: precio Ramazzotti Spritz 5 normalizado a 5L');
+  assert(userSummary.includes('Subtotal cócteles: $179.980'), 'operador carrito: subtotal cócteles');
+  assert(userSummary.includes('Instalación Dispensador: $0'), 'operador carrito: instalación dispensador $0');
+  assert(userSummary.includes('Traslados (Lo Prado): $0'), 'operador carrito: traslados Lo Prado $0');
+  assert(userSummary.includes('*TOTAL: $179.980*'), 'operador carrito: TOTAL calculado');
 
   clearOperatorDraft(opSession);
   assert(!opSession.operatorKind, 'operador: clear borrador');

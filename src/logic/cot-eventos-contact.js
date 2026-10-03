@@ -8,7 +8,9 @@ import {
   applyContactFromMessage,
   parseEmailFromText,
   parsePersonNames,
-  isPrimarilyDateMessage
+  isPrimarilyDateMessage,
+  formatTitleCase,
+  normalizeEmail
 } from './cot-contact.js';
 import {
   applyEventDataFromMessage,
@@ -266,8 +268,9 @@ export function applyEventosContactPhaseFromMessage(messageText, session, phase)
         captured.length >= 3
         && !/^(enero|febrero|marzo|abril|mayo|junio|julio|agosto|septiembre|octubre|noviembre|diciembre)$/i.test(captured)
       ) {
-        session.location = captured;
-        session.isRM = false;
+        const locationHit = findLocationByFuzzyMatch(captured);
+        session.location = locationHit?.name || formatTitleCase(captured);
+        session.isRM = Boolean(locationHit?.isRM);
         return session.location !== before;
       }
     }
@@ -277,8 +280,10 @@ export function applyEventosContactPhaseFromMessage(messageText, session, phase)
       && !isPrimarilyDateMessage(trimmed)
       && /^[A-Za-záéíóúÁÉÍÓÚñÑ0-9\s.]{3,40}$/.test(trimmed)
     ) {
-      session.location = trimmed.replace(/^(en|comuna)\s+/i, '').trim();
-      session.isRM = Boolean(findLocationByFuzzyMatch(session.location)?.isRM);
+      const locRaw = trimmed.replace(/^(en|comuna)\s+/i, '').trim();
+      const locationHit = findLocationByFuzzyMatch(locRaw);
+      session.location = locationHit?.name || formatTitleCase(locRaw);
+      session.isRM = Boolean(locationHit?.isRM);
       return session.location !== before;
     }
     return false;
@@ -306,18 +311,18 @@ export function applyEventosContactPhaseFromMessage(messageText, session, phase)
 
     if (names.lastName) {
       // Nombre + apellido en un mensaje
-      session.contact.firstName = names.firstName;
-      session.contact.lastName = names.lastName;
+      session.contact.firstName = formatTitleCase(names.firstName);
+      session.contact.lastName = formatTitleCase(names.lastName);
     } else if (!String(session.contact.firstName || '').trim()) {
       // Primera palabra → nombre
-      session.contact.firstName = names.firstName;
+      session.contact.firstName = formatTitleCase(names.firstName);
     } else if (!String(session.contact.lastName || '').trim()) {
       // Segunda respuesta → apellido
-      session.contact.lastName = names.firstName;
+      session.contact.lastName = formatTitleCase(names.firstName);
     } else {
       // Ya había nombre completo: reemplazar con el nuevo parse
-      session.contact.firstName = names.firstName;
-      if (names.lastName) session.contact.lastName = names.lastName;
+      session.contact.firstName = formatTitleCase(names.firstName);
+      if (names.lastName) session.contact.lastName = formatTitleCase(names.lastName);
     }
 
     const after = `${session.contact?.firstName || ''}|${session.contact?.lastName || ''}`;
@@ -328,7 +333,7 @@ export function applyEventosContactPhaseFromMessage(messageText, session, phase)
     const before = session.contact?.email;
     const email = parseEmailFromText(trimmed);
     if (!email) return false;
-    session.contact.email = email;
+    session.contact.email = normalizeEmail(email);
     return session.contact.email !== before;
   }
 

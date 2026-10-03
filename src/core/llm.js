@@ -6,9 +6,11 @@
 import OpenAI from 'openai'; // Importamos la librería OpenAI. Aunque usemos Nvidia, sus servidores son compatibles con el formato de OpenAI.
 import { GoogleGenerativeAI } from '@google/generative-ai'; // Importamos la librería oficial de Google para usar Gemini.
 import { getEnv } from './config.js'; // Función para cargar las claves API Keys y configuraciones de proveedor.
-import { buildFaqCatalogContext, sanitizeCustomerFacingReply } from '../logic/utils.js'; // Catálogo/despachos + limpieza de jerga interna.
+import { buildFaqCatalogContext, sanitizeCustomerFacingReply, findClosestCatalogMatch } from '../logic/utils.js'; // Catálogo/despachos + limpieza de jerga interna.
 import { tryProgrammaticFaqReply } from '../logic/interruptions.js';
 import { testLog } from './debug-log.js';
+import { formatTitleCase, normalizeEmail } from '../logic/cot-contact.js';
+import { normalizeCelebrationType } from '../logic/eventos-helpers.js';
 
 /**
  * generateResponse: Función que se conecta con la IA (Gemini o Nvidia)
@@ -155,8 +157,9 @@ REGLA CRÍTICA DE ORTOGRAFÍA / NOMBRES INCOMPLETOS:
   * "monito", "mojto" → "Mojito"
   * "aperol", "aperol spritz" → "Aperol Spritz"
   * "sangria", "sangría" → "Sangría"
-- Si hay VARIOS candidatos igual de plausibles, usa "dudas" con esas opciones. Si NO se parece a ninguno (ej. "negroni", "daiquiri"), productos=[] y dudas=[].
-- Prefiere corregir un typo a declarar que no existe.
+- Si el usuario pide o pregunta por un cóctel que NO está en el catálogo (por ejemplo: "piña colada", "negroni", "caipiriña", "daiquiri", "fernet", "cerveza"), productos=[] y dudas=[]. NUNCA asocies "colada" o "piña colada" a "Piscola", ni "whisky" a "Whiskcola".
+- Si hay VARIOS candidatos igual de plausibles en el catálogo, usa "dudas" con esas opciones. Si NO se parece a ninguno, productos=[] y dudas=[].
+- Prefiere corregir un typo genuino a declarar que no existe.
 
 REGLA CRÍTICA: Si el mensaje es SOLO cortesía ("gracias", "gracias por la información", "perfecto gracias") SIN nombrar cóctel, productos=[] y quiere_avanzar=false. NUNCA inventes un producto desde el ejemplo del bot.
 REGLA CRÍTICA: En los campos "name" y "opciones", debes usar EXACTAMENTE el nombre que aparece en el catálogo. Copia y pega letra por letra. Prohibido cambiar el orden de las palabras.
@@ -198,11 +201,35 @@ ${catalogNames.join('\n')}`;
 
     testLog(`NLU productos (barriles) provider=${provider}: ${rawText}`);
 
-    let parsed = JSON.parse(rawText);
+    const jsonMatch = rawText.match(/\{[\s\S]*\}/);
+    let parsed = JSON.parse(jsonMatch ? jsonMatch[0] : (rawText || '{}'));
+
+    // Normalizamos cada producto y validamos contra el catálogo
+    const productos = (parsed && Array.isArray(parsed.productos) ? parsed.productos : [])
+      .map((p) => {
+        if (!p || !p.name) return null;
+        const catalogMatch = findClosestCatalogMatch(p.name, catalogNames);
+        if (!catalogMatch) return null;
+        const quantity = Math.max(1, parseInt(p.quantity, 10) || 1);
+        return { name: catalogMatch, quantity };
+      })
+      .filter(Boolean);
+
+    // Dudas: solo si tienen opciones reales de catálogo
+    const dudas = (parsed && Array.isArray(parsed.dudas) ? parsed.dudas : [])
+      .map((d) => {
+        if (!d || !d.mencionado || !Array.isArray(d.opciones)) return null;
+        const opciones = d.opciones
+          .map((op) => findClosestCatalogMatch(op, catalogNames))
+          .filter(Boolean);
+        if (opciones.length < 2) return null;
+        return { mencionado: String(d.mencionado), opciones };
+      })
+      .filter(Boolean);
     
     return {
-      productos: (parsed && Array.isArray(parsed.productos)) ? parsed.productos : [],
-      dudas: (parsed && Array.isArray(parsed.dudas)) ? parsed.dudas : [],
+      productos,
+      dudas,
       quiere_avanzar: (parsed && typeof parsed.quiere_avanzar === 'boolean') ? parsed.quiere_avanzar : false
     };
   } catch (err) {
@@ -285,7 +312,8 @@ Ejemplo 6: {"analisis":"Pidió una sugerencia con los más populares.","producto
 REGLA CRÍTICA DE ORTOGRAFÍA / NOMBRES INCOMPLETOS:
 - Corrige typos y nombres cortos al ítem MÁS CERCANO del catálogo cuando haya un único match claro.
 - Ejemplos: "ramazzoti"/"ramazoti"/"mamazoti" → "Ramazzotti Spritz"; "margarita" → "Tequila Margarita"; "monito" → "Mojito"; "aperol" → "Aperol Spritz".
-- Si no se parece a ninguno (ej. "negroni"), productos=[] y dudas=[]. Prefiere corregir typo a decir que no existe.
+- Si el usuario pide o pregunta por un cóctel que NO está en el catálogo (por ejemplo: "piña colada", "negroni", "caipiriña", "daiquiri", "fernet", "cerveza"), productos=[] y dudas=[]. NUNCA asocies "colada" o "piña colada" a "Piscola", ni "whisky" a "Whiskcola" si no es un pedido explícito de combinados.
+- Si no se parece a ninguno del catálogo, productos=[] y dudas=[]. Prefiere corregir typo genuino a decir que no existe.
 
 REGLA CRÍTICA: Si pregunta qué incluye el servicio / hielo / vasos / garnish / accesorios / hasta cuándo retiran, productos=[] y dudas=[]. NO extraigas cócteles del ejemplo del bot.
 REGLA CRÍTICA: En "name" y "opciones" usa EXACTAMENTE el nombre del catálogo. Copia y pega letra por letra.
@@ -327,24 +355,40 @@ ${catalogNames.join('\n')}`;
 
     testLog(`NLU productos (eventos) provider=${provider}: ${rawText}`);
 
-    let parsed = JSON.parse(rawText);
+    const jsonMatch = rawText.match(/\{[\s\S]*\}/);
+    let parsed = JSON.parse(jsonMatch ? jsonMatch[0] : (rawText || '{}'));
 
     // Normalizamos cada producto: name, quantity >= 1, litrage con formato "NL"
+    // Solo aceptamos productos que coincidan con un ítem del catálogo
     const productos = (parsed && Array.isArray(parsed.productos) ? parsed.productos : [])
       .map((p) => {
         if (!p || !p.name) return null;
+        const catalogMatch = findClosestCatalogMatch(p.name, catalogNames);
+        if (!catalogMatch) return null;
         const quantity = Math.max(1, parseInt(p.quantity, 10) || 1);
         // Aceptamos "10", "10l", "10L" → "10L"
         let litrage = String(p.litrage || defaultLitrage).toUpperCase().replace(/\s+/g, '');
         if (/^\d+$/.test(litrage)) litrage = `${litrage}L`;
         if (!/^\d+L$/.test(litrage)) litrage = defaultLitrage;
-        return { name: p.name, quantity, litrage };
+        return { name: catalogMatch, quantity, litrage };
+      })
+      .filter(Boolean);
+
+    // Dudas: solo si tienen opciones reales de catálogo
+    const dudas = (parsed && Array.isArray(parsed.dudas) ? parsed.dudas : [])
+      .map((d) => {
+        if (!d || !d.mencionado || !Array.isArray(d.opciones)) return null;
+        const opciones = d.opciones
+          .map((op) => findClosestCatalogMatch(op, catalogNames))
+          .filter(Boolean);
+        if (opciones.length < 2) return null;
+        return { mencionado: String(d.mencionado), opciones };
       })
       .filter(Boolean);
 
     return {
       productos,
-      dudas: (parsed && Array.isArray(parsed.dudas)) ? parsed.dudas : [],
+      dudas,
       quiere_avanzar: (parsed && typeof parsed.quiere_avanzar === 'boolean') ? parsed.quiere_avanzar : false,
       quiere_sugerencia: (parsed && typeof parsed.quiere_sugerencia === 'boolean') ? parsed.quiere_sugerencia : false,
       analisis: (parsed && typeof parsed.analisis === 'string') ? parsed.analisis : ''
@@ -1079,25 +1123,40 @@ export async function extractOperatorDraftWithAI(userMessage, opts = {}) {
       ? 'reserva evento confirmada (dirección + hora de inicio)'
       : 'cotización evento (draft)';
 
-  const systemInstruction = `Eres un extractor JSON para un operador interno que crea pedidos en cocktailsontap.cl.
+  const currentDraftJson = opts.currentDraft && Object.keys(opts.currentDraft).length
+    ? JSON.stringify(opts.currentDraft, null, 2)
+    : 'ninguno (primer mensaje)';
+
+  const systemInstruction = `Eres un extractor JSON de precisión para un operador interno que crea o modifica pedidos en cocktailsontap.cl.
 Tipo de acción: "${kind}" (${kindLabel}).
 
+Borrador actual registrado en el sistema:
+${currentDraftJson}
+
 Devuelve SOLO JSON válido con:
-- "patch": objeto con campos detectados (omitir los que no aparezcan con certeza):
-  firstName, lastName, email, phone (E.164 +569...), comuna, date (texto día y mes en español),
+- "patch": objeto con campos detectados o modificados (omitir los que no aparezcan):
+  firstName, lastName, email, phone (E.164 +569...), comuna, date (formato DD-MM-YYYY o texto día y mes en español),
   address (${kind === 'barriles' ? 'despacho' : 'del evento si aplica'}), eventoFormato ("Dispensador Portátil" o "Muro de Coctelería"),
-  guests (número), celebrationType (texto libre), drinksPerPerson (número),
+  guests (número entero de personas/invitados), celebrationType (temática o tipo de evento), drinksPerPerson (número),
   startTime (HH:MM 24h, solo reserva), pickupSameDay (true si retiro el mismo día),
   pickupNextDay (true si retiro al día siguiente), pickupTime (rango "12:00 a 14:00" | "14:00 a 16:00" | "16:00 a 18:00"),
   products: [{ name (catálogo exacto), quantity, litrage (solo eventos: 5L/10L/20L/30L) }]
 - "dudas": array de strings con campos ambiguos (ej. "email", "spritz") — NO adivinar.
 
-Reglas:
-- Si el mensaje corrige un dato ("cambié el correo a x@y.com"), solo patch con ese campo.
-- phone es del CLIENTE final, no del operador.
-- products: nombres EXACTOS del catálogo. Barriles: litrage siempre 5L implícito.
-- Si spritz sin marca → dudas incluye "spritz", products vacío para spritz.
-- Si email tiene typo dudoso → dudas incluye "email".
+Reglas esenciales:
+- Si el mensaje es una CORRECCIÓN de un campo (ej: "nombre cambia a Feli oñate", "cambia el correo a x@y.com", "son 40 invitados", "la comuna es en Las Condes"), extrae el nuevo valor en patch.
+- Si el usuario dice "nombre cambia a Feli oñate", firstName es "Feli" y lastName es "Oñate".
+- guests: número de invitados o personas. Si el usuario escribe un número solo o en lista como "50, Santiago, 3 de noviembre", o "50 personas", guests es 50. IMPORTANTE: NO confundir con la edad de un cumpleaños (ej. "Cumpleaños 50" significa celebración celebrationType: "Cumpleaños", no 50 invitados a menos que especifique "50 personas").
+- celebrationType: temática o tipo de evento. Las categorías oficiales predefinidas en base de datos son: "Cumpleaños", "Matrimonio", "Empresa", "Otro".
+  * Si el usuario escribe "cumple", "cumpleaños" o edad de cumple -> "Cumpleaños".
+  * Si escribe "matrimonio", "boda", "casamiento" -> "Matrimonio".
+  * Si escribe "empresa", "corporativo", "oficina" -> "Empresa".
+  * Si escribe "otro" u "otra" -> "Otro".
+  * Si es cualquier otra celebración no predefinida (ej: "despedida", "bautizo", "aniversario", "baby shower", "graduación"), debes devolver "Otra / <Nombre>" (ej: "Otra / Despedida", "Otra / Bautizo").
+- date: si es posible devuélvelo en formato estándar DD-MM-YYYY (ej. "03-11-2026") o texto legible día y mes.
+- phone es del CLIENTE final (+569...), no del operador.
+- products: nombres del catálogo. Si dicen "Mojito" a secas, el nombre es "Mojito Tradicional". Si dicen "Pisco Sour", asume "Pisco Sour Clásico". NUNCA pongas "Mojito", "Pisco Sour" ni "Piscola" en dudas.
+- Solo añade a dudas si hay una ambigüedad crítica no resuelta: por ejemplo "spritz" sin especificar Aperol o Ramazzotti ("spritz"), o si un email tiene typo evidente ("email").
 
 Catálogo (muestra): ${catalogSample}`;
 
@@ -1130,7 +1189,21 @@ Catálogo (muestra): ${catalogSample}`;
 
     const jsonMatch = rawText.match(/\{[\s\S]*\}/);
     const parsed = JSON.parse(jsonMatch ? jsonMatch[0] : rawText);
-    const patch = parsed?.patch && typeof parsed.patch === 'object' ? parsed.patch : {};
+    let patch = {};
+    if (parsed?.patch && typeof parsed.patch === 'object') {
+      patch = parsed.patch;
+    } else if (parsed && typeof parsed === 'object') {
+      patch = { ...parsed };
+      delete patch.dudas;
+      delete patch.patch;
+    }
+
+    if (patch.firstName) patch.firstName = formatTitleCase(String(patch.firstName));
+    if (patch.lastName) patch.lastName = formatTitleCase(String(patch.lastName));
+    if (patch.email) patch.email = normalizeEmail(String(patch.email));
+    if (patch.comuna) patch.comuna = formatTitleCase(String(patch.comuna));
+    if (patch.celebrationType) patch.celebrationType = normalizeCelebrationType(String(patch.celebrationType));
+
     const dudas = Array.isArray(parsed?.dudas) ? parsed.dudas.map(String) : [];
     return { patch, dudas };
   } catch (err) {

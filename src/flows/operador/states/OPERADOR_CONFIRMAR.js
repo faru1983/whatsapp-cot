@@ -1,6 +1,8 @@
 // ==============================================================================
-// OBJETIVO: Paso OPERADOR_CONFIRMAR — resumen + OK o correcciones en lenguaje natural.
-// Tras OK ejecuta POST a la API (si /cotapi on).
+// OBJETIVO: Paso OPERADOR_CONFIRMAR — resumen final (datos + cócteles) + OK → API.
+// Corresponde al Paso 2B del flujo admin: confirmar antes de enviar.
+// Correcciones de productos → OPERADOR_CAPTURA_PRODUCTOS.
+// Correcciones de datos → OPERADOR_CAPTURA (vuelve al inicio).
 // ==============================================================================
 import { defineState } from '../../../logic/compile-state.js';
 import { resolveDecisionIntent } from '../../../logic/decision-intent.js';
@@ -11,6 +13,7 @@ import {
   formatOperatorSummary,
   formatMissingFieldsMessage,
   formatOperatorDoubtsMessage,
+  getMissingProductFields,
   submitOperatorQuote,
   beginOperatorApiModeAskIfNeeded,
   clearOperatorDraft
@@ -25,12 +28,11 @@ import {
 export const OPERADOR_CONFIRMAR = defineState({
   id: 'OPERADOR_CONFIRMAR',
   promptQuestion: (session) => formatOperatorSummary(session),
-  shortQuestion: 'Escribe *OK*, qué cambiar, o */menu* / *cancelar* para anular.',
-  aiPrompt: `[SISTEMA - OPERADOR CONFIRMAR] Solo OK para enviar o correcciones puntuales.`,
+  shortQuestion: 'Escribe *OK* para enviar, qué cambiar, o */menu* / *cancelar* para anular.',
+  aiPrompt: `[SISTEMA - OPERADOR CONFIRMAR] Resumen final. Solo OK para enviar o correcciones puntuales.`,
 
   async validateAndProcess(messageText, session) {
     const trimmed = String(messageText || '').trim();
-    const lower = trimmed.toLowerCase();
 
     if (isOperatorCancelCommand(trimmed)) {
       clearOperatorDraft(session);
@@ -64,7 +66,7 @@ export const OPERADOR_CONFIRMAR = defineState({
       return submitOperatorQuote(session);
     }
 
-    // Corrección en lenguaje natural → merge y nuevo resumen
+    // Corrección en lenguaje natural → merge y decidir a qué estado volver
     const result = await ingestOperatorMessage(session, trimmed);
 
     if (result.doubts.length) {
@@ -75,11 +77,13 @@ export const OPERADOR_CONFIRMAR = defineState({
       };
     }
 
-    if (!result.complete) {
+    // Si faltan productos → volver a captura de productos
+    const missingProducts = getMissingProductFields(session);
+    if (missingProducts.length) {
       return {
         success: true,
-        nextState: 'OPERADOR_CAPTURA',
-        customReply: `${formatMissingFieldsMessage(result.missing, session.operatorKind)}\n\n${formatOperatorSummary(session)}`
+        nextState: 'OPERADOR_CAPTURA_PRODUCTOS',
+        customReply: `${formatMissingFieldsMessage(missingProducts, session.operatorKind)}\n\n${formatOperatorSummary(session)}`
       };
     }
 

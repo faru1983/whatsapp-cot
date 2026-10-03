@@ -4,6 +4,7 @@
 // La usan el flujo de Barriles Desechables (tipo 'desechable') y el de
 // Eventos (tipos 'dispensador' | 'muro') para armar totales sin inventar precios.
 // ==============================================================================
+import { normalizeString } from './utils.js';
 
 /**
  * OrderBuilder: Representa un pedido en construcción.
@@ -120,12 +121,21 @@ export class OrderBuilder {
       const entry = this.normalizeProductEntry(key, value);
       if (!entry) continue;
 
-      const coctel = cocteles[entry.name];
+      let coctel = cocteles[entry.name];
+      if (!coctel) {
+        const norm = normalizeString(entry.name);
+        const matchKey = Object.keys(cocteles).find((k) => normalizeString(k) === norm);
+        if (matchKey) coctel = cocteles[matchKey];
+      }
       if (!coctel) continue; // Si el nombre no existe en el catálogo, lo ignoramos
 
       // Según el tipo de pedido, buscamos la clave correcta en el JSON de precios
       const priceKey = this.type === 'desechable' ? 'desechable' : this.type;
-      const price = coctel[priceKey]?.[entry.litrage];
+      let litKey = entry.litrage;
+      if (typeof litKey === 'string' && /^\d+$/.test(litKey)) {
+        litKey = `${litKey}L`;
+      }
+      const price = coctel[priceKey]?.[litKey] ?? coctel[priceKey]?.[entry.litrage];
 
       // Si el litraje no existe para ese formato, lo anotamos (no inventamos precio)
       if (price == null || price === 0) {

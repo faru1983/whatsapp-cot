@@ -19,6 +19,7 @@ import { OrderBuilder } from './order-builder.js';
 import { img } from './media.js';
 import { normalizeBotDateText } from './cot-event-quote.js';
 import { quoteCatalogShipping } from './cot-catalog.js';
+import { formatTitleCase } from './cot-contact.js';
 
 /** Ejemplo canónico Dispensador (compat legacy). */
 export const EVENT_COCKTAIL_ORDER_EXAMPLE = '5L Mojito y 10L Aperol';
@@ -143,6 +144,54 @@ export function normalizeCelebrationLabel(raw) {
 
   // Capitalizar primera letra; el resto se deja como vino (nombres propios)
   return cleaned.charAt(0).toUpperCase() + cleaned.slice(1);
+}
+
+/**
+ * normalizeCelebrationType: Normaliza la temática según las opciones predefinidas de la base de datos/API:
+ * "Cumpleaños", "Matrimonio", "Empresa", "Otro".
+ * Si es un subtipo no predefinido (ej: "Despedida", "Bautizo"), se normaliza como "Otra / <Subtipo>".
+ *
+ * @param {string} raw
+ * @returns {string}
+ */
+export function normalizeCelebrationType(raw) {
+  if (!raw || typeof raw !== 'string') return '';
+  const clean = raw.trim();
+  if (!clean) return '';
+
+  const lower = clean.toLowerCase();
+
+  // Si ya viene con prefijo "Otra / ..." u "Otro / ..."
+  const matchPrefix = clean.match(/^(?:Otro|Otra)\s*\/\s*(.+)$/i);
+  if (matchPrefix) {
+    const sub = matchPrefix[1].trim();
+    return `Otra / ${formatTitleCase(sub)}`;
+  }
+
+  // Cumpleaños (ej: "cumple", "cumpleaños", "cumple 50")
+  if (/cumplea[nñ]os|cumple/i.test(lower)) {
+    return 'Cumpleaños';
+  }
+  // Matrimonio (ej: "matrimonio", "boda", "casamiento", "wedding")
+  if (/matrimonio|casamiento|boda|wedding/i.test(lower)) {
+    return 'Matrimonio';
+  }
+  // Empresa (ej: "empresa", "corporativ|oficina|trabajo")
+  if (/empresa|corporativ|oficina|trabajo/i.test(lower)) {
+    return 'Empresa';
+  }
+  // Otro a secas
+  if (/^(?:otro|otra|otros|otras)$/i.test(lower)) {
+    return 'Otro';
+  }
+
+  // Cualquier otra temática (ej: "Despedida", "Bautizo", "Aniversario", "Graduación", etc.)
+  const recognized = parseCelebrationType(clean);
+  const label = recognized && !['Cumpleaños', 'Matrimonio', 'Empresa', 'Otro'].includes(recognized)
+    ? recognized
+    : formatTitleCase(clean);
+
+  return `Otra / ${label}`;
 }
 
 /**

@@ -106,7 +106,8 @@ function cliLog(message) {
  * Si una sesión SQLite quedó en un id viejo, la migramos antes de procesar el mensaje.
  */
 const REMOVED_STATE_ALIASES = {
-  EVENTOS_COTIZACION: 'EVENTOS_ELECCION_MENU'
+  EVENTOS_COTIZACION: 'EVENTOS_ELECCION_MENU',
+  OPERADOR_CONFIRMAR_DATOS: 'OPERADOR_CAPTURA_DETALLES'
 };
 
 /**
