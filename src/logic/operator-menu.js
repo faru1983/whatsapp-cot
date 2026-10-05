@@ -29,8 +29,8 @@ ${flags}
 /iniciarbot <número>
 /reiniciarbot <número>
 
-Escribe *1*, *2* o *3* para empezar, o */menu* para ver esto de nuevo.
-En captura: */menu* o *cancelar* anula el borrador y vuelve aquí.`;
+Escribe *1*, *2* o *3* para empezar, o */salir* para cerrar el panel.
+En captura: */menu* o *cancelar* anula el borrador y vuelve al menú, o */salir* cierra el panel.`;
 }
 
 /**
@@ -40,11 +40,11 @@ En captura: */menu* o *cancelar* anula el borrador y vuelve aquí.`;
  * @returns {string}
  */
 export function buildOperatorCancelHint() {
-  return 'Para anular y volver al panel: escribe */menu* o *cancelar*.';
+  return 'Para anular y volver al panel: escribe */menu* o *cancelar* (o */salir* para cerrar).';
 }
 
 /**
- * isOperatorCancelCommand: ¿El admin quiere salir del borrador?
+ * isOperatorCancelCommand: ¿El admin quiere anular el borrador y volver al menú?
  * Mensaje completo (no un dato que mencione "cancelar" a medias).
  *
  * @param {string} text
@@ -65,6 +65,33 @@ export function isOperatorCancelCommand(text) {
 }
 
 /**
+ * isOperatorExitCommand: ¿El admin quiere salir del panel operador y dejar el chat en silencio?
+ *
+ * @param {string} text
+ * @returns {boolean}
+ */
+export function isOperatorExitCommand(text) {
+  const lower = String(text || '').trim().toLowerCase();
+  return (
+    lower === '/salir'
+    || lower === 'salir'
+    || lower === '/exit'
+    || lower === 'exit'
+    || lower === '/cerrar'
+    || lower === 'cerrar'
+  );
+}
+
+/**
+ * buildOperatorExitReply: Mensaje de confirmación al cerrar el panel.
+ *
+ * @returns {string}
+ */
+export function buildOperatorExitReply() {
+  return '👋 Panel operador cerrado. Escribe */menu* cuando quieras volver a abrirlo.';
+}
+
+/**
  * buildOperatorHintText: Cuando el admin escribe sin /menu y no está en captura.
  *
  * @returns {string}
@@ -74,7 +101,7 @@ export function buildOperatorHintText() {
 }
 
 /**
- * isOperatorConsoleMessage: ¿Es exactamente /menu (case insensitive)?
+ * isOperatorMenuCommand: ¿Es exactamente /menu (case insensitive)?
  *
  * @param {string} text
  * @returns {boolean}
@@ -90,5 +117,9 @@ export function isOperatorMenuCommand(text) {
  * @returns {boolean}
  */
 export function isOperatorMidFlowState(stateId) {
-  return stateId === 'OPERADOR_CAPTURA' || stateId === 'OPERADOR_CONFIRMAR';
+  return stateId === 'OPERADOR_CAPTURA'
+    || stateId === 'OPERADOR_CAPTURA_DETALLES'
+    || stateId === 'OPERADOR_CAPTURA_PRODUCTOS'
+    || stateId === 'OPERADOR_CONFIRMAR';
 }
+

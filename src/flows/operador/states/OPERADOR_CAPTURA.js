@@ -5,7 +5,12 @@
 // Cuando el contacto está completo, avanza al Paso 2 (OPERADOR_CAPTURA_DETALLES).
 // ==============================================================================
 import { defineState } from '../../../logic/compile-state.js';
-import { buildOperatorMenuText, isOperatorCancelCommand } from '../../../logic/operator-menu.js';
+import {
+  buildOperatorMenuText,
+  isOperatorCancelCommand,
+  isOperatorExitCommand,
+  buildOperatorExitReply
+} from '../../../logic/operator-menu.js';
 import {
   ingestOperatorMessage,
   formatMissingContactMessage,
@@ -34,11 +39,21 @@ export const OPERADOR_CAPTURA = defineState({
         : 'cotización evento';
     return `Indícame los datos de contacto del cliente para *${kind}*.`;
   },
-  shortQuestion: 'Envía los datos de contacto, o */menu* / *cancelar* para anular.',
+  shortQuestion: 'Envía los datos de contacto, o */menu* / *cancelar* para anular (o */salir* para cerrar).',
   aiPrompt: `[SISTEMA - OPERADOR CONTACTO] Extrae nombre, apellido, email y teléfono móvil chileno (+569...). No inventar.`,
 
   async validateAndProcess(messageText, session) {
     const trimmed = String(messageText || '').trim();
+
+    if (isOperatorExitCommand(trimmed)) {
+      clearOperatorDraft(session);
+      session.operatorMode = false;
+      session.currentState = null;
+      return {
+        success: true,
+        customReply: buildOperatorExitReply()
+      };
+    }
 
     if (isOperatorCancelCommand(trimmed)) {
       clearOperatorDraft(session);

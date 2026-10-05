@@ -4,7 +4,12 @@
 // Usa getMissingProductFields. Cuando está completo => OPERADOR_CONFIRMAR (resumen final).
 // ==============================================================================
 import { defineState } from '../../../logic/compile-state.js';
-import { buildOperatorMenuText, isOperatorCancelCommand } from '../../../logic/operator-menu.js';
+import {
+  buildOperatorMenuText,
+  isOperatorCancelCommand,
+  isOperatorExitCommand,
+  buildOperatorExitReply
+} from '../../../logic/operator-menu.js';
 import {
   ingestOperatorMessage,
   formatMissingFieldsMessage,
@@ -18,11 +23,21 @@ import {
 export const OPERADOR_CAPTURA_PRODUCTOS = defineState({
   id: 'OPERADOR_CAPTURA_PRODUCTOS',
   promptQuestion: (session) => buildOperatorProductsRequestCopy(session.operatorKind, session),
-  shortQuestion: 'Envía cócteles/formato, o */menu* / *cancelar* para anular.',
+  shortQuestion: 'Envía cócteles/formato, o */menu* / *cancelar* para anular (o */salir* para cerrar).',
   aiPrompt: '[SISTEMA - OPERADOR PRODUCTOS] Extrae cócteles y formato. No inventar.',
 
   async validateAndProcess(messageText, session) {
     const trimmed = String(messageText || '').trim();
+
+    if (isOperatorExitCommand(trimmed)) {
+      clearOperatorDraft(session);
+      session.operatorMode = false;
+      session.currentState = null;
+      return {
+        success: true,
+        customReply: buildOperatorExitReply()
+      };
+    }
 
     if (isOperatorCancelCommand(trimmed)) {
       clearOperatorDraft(session);

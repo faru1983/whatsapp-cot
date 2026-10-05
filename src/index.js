@@ -33,10 +33,12 @@ import {
   handleRuntimeToggleCommand
 } from './logic/bot-runtime-flags.js';
 import {
-  buildOperatorHintText,
   isOperatorMenuCommand,
-  isOperatorMidFlowState
+  isOperatorMidFlowState,
+  isOperatorExitCommand,
+  buildOperatorExitReply
 } from './logic/operator-menu.js';
+import { clearOperatorDraft } from './logic/operator-draft.js';
 import {
   isSelfChat,
   isClientCustomerChat,
@@ -332,6 +334,7 @@ async function handleOperatorConsoleMessage({
   content
 }) {
   const cleanText = stripTriggerPrefix(text, config);
+  const rawCmd = (cleanText || text || '').trim();
   if (!cleanText && !getMessageText(content).trim()) {
     return;
   }
@@ -344,11 +347,21 @@ async function handleOperatorConsoleMessage({
 
   const sessionId = remoteJid;
   const session = getSession(sessionId);
+
+  if (isOperatorExitCommand(rawCmd)) {
+    clearOperatorDraft(session);
+    session.operatorMode = false;
+    session.currentState = null;
+    saveSession(sessionId, session);
+    await deliverBotReply(sock, remoteJid, buildOperatorExitReply(), botConfig.replyTiming || {});
+    return;
+  }
+
   const inOperatorFlow = isOperatorMidFlowState(session.currentState)
     || String(session.currentState || '').startsWith('OPERADOR_');
 
-  if (!isOperatorMenuCommand(cleanText || text) && !inOperatorFlow) {
-    await deliverBotReply(sock, remoteJid, buildOperatorHintText(), botConfig.replyTiming || {});
+  // Si no es /menu ni está en un flujo operador activo: silencio total (permite notas personales, audios, etc.)
+  if (!isOperatorMenuCommand(rawCmd) && !inOperatorFlow) {
     return;
   }
 

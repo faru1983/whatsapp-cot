@@ -3,7 +3,12 @@
 // Solo admins o self-chat llegan aquí vía operatorMode en el engine.
 // ==============================================================================
 import { defineState } from '../../../logic/compile-state.js';
-import { buildOperatorMenuText, isOperatorCancelCommand } from '../../../logic/operator-menu.js';
+import {
+  buildOperatorMenuText,
+  isOperatorCancelCommand,
+  isOperatorExitCommand,
+  buildOperatorExitReply
+} from '../../../logic/operator-menu.js';
 import {
   setOperatorKind,
   buildOperatorDataRequestCopy,
@@ -14,11 +19,21 @@ import { matchesMenuOption } from '../../../logic/keyword-intent.js';
 export const OPERADOR_MENU = defineState({
   id: 'OPERADOR_MENU',
   promptQuestion: () => buildOperatorMenuText(),
-  shortQuestion: 'Escribe *1*, *2* o *3*, o */menu*.',
-  aiPrompt: `[SISTEMA - OPERADOR] Panel interno. 1 cotización draft / 2 venta barriles / 3 reserva confirmada. No inventar datos.`,
+  shortQuestion: 'Escribe *1*, *2* o *3*, o */salir* para cerrar.',
+  aiPrompt: `[SISTEMA - OPERADOR] Panel interno. 1 reserva confirmada / 2 venta barriles / 3 cotización draft. No inventar datos.`,
 
   async validateAndProcess(messageText, session) {
     const trimmed = String(messageText || '').trim();
+
+    if (isOperatorExitCommand(trimmed)) {
+      clearOperatorDraft(session);
+      session.operatorMode = false;
+      session.currentState = null;
+      return {
+        success: true,
+        customReply: buildOperatorExitReply()
+      };
+    }
 
     if (isOperatorCancelCommand(trimmed)) {
       clearOperatorDraft(session);

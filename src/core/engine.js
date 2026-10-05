@@ -51,7 +51,12 @@ import {
   isCotApiConfigured
 } from '../logic/cot-api.js';
 import { clearOperatorDraft } from '../logic/operator-draft.js';
-import { buildOperatorMenuText, isOperatorCancelCommand } from '../logic/operator-menu.js';
+import {
+  buildOperatorMenuText,
+  isOperatorCancelCommand,
+  isOperatorExitCommand,
+  buildOperatorExitReply
+} from '../logic/operator-menu.js';
 import { handleRuntimeToggleCommand } from '../logic/bot-runtime-flags.js';
 
 const isMainModule = process.argv[1] === fileURLToPath(import.meta.url);
@@ -351,6 +356,14 @@ async function processMessageUnlocked(sessionId, messageText, options = {}) {
     : null;
 
   let session = getSession(sessionId);
+
+  if (isOperatorExitCommand(messageText) && (operatorMode || session.operatorMode || String(session.currentState || '').startsWith('OPERADOR_'))) {
+    clearOperatorDraft(session);
+    session.operatorMode = false;
+    session.currentState = null;
+    saveSession(sessionId, session);
+    return buildOperatorExitReply();
+  }
 
   if (operatorMode) {
     session.operatorMode = true;
@@ -1313,6 +1326,21 @@ function cliChat() {
         for (const part of parts) {
           if (typeof part === 'string') console.log(`\nBot: ${part}\n`);
         }
+      }
+      cliChat();
+      return;
+    }
+
+    if (cmd === '/salir' || cmd === 'salir') {
+      const sess = getSession(sessionId);
+      if (sess.operatorMode || String(sess.currentState || '').startsWith('OPERADOR_')) {
+        clearOperatorDraft(sess);
+        sess.operatorMode = false;
+        sess.currentState = null;
+        saveSession(sessionId, sess);
+        console.log(`\nBot: ${buildOperatorExitReply()}\n`);
+      } else {
+        cliLog('No estabas en el panel operador.');
       }
       cliChat();
       return;

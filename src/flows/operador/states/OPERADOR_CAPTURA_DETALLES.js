@@ -5,7 +5,12 @@
 // Cuando los detalles están completos, avanza al Paso 3 (OPERADOR_CAPTURA_PRODUCTOS).
 // ==============================================================================
 import { defineState } from '../../../logic/compile-state.js';
-import { buildOperatorMenuText, isOperatorCancelCommand } from '../../../logic/operator-menu.js';
+import {
+  buildOperatorMenuText,
+  isOperatorCancelCommand,
+  isOperatorExitCommand,
+  buildOperatorExitReply
+} from '../../../logic/operator-menu.js';
 import {
   ingestOperatorMessage,
   formatMissingDetailsMessage,
@@ -29,11 +34,21 @@ export const OPERADOR_CAPTURA_DETALLES = defineState({
     if (kind === 'event_reserva') return 'Indícame la dirección del evento, invitados, fecha y hora de inicio.';
     return 'Indícame la cantidad de invitados, comuna y fecha del evento.';
   },
-  shortQuestion: 'Envía los detalles del evento/pedido, o */menu* / *cancelar* para anular.',
+  shortQuestion: 'Envía los detalles del evento/pedido, o */menu* / *cancelar* para anular (o */salir* para cerrar).',
   aiPrompt: `[SISTEMA - OPERADOR DETALLES] Extrae invitados, comuna, fecha, dirección y hora de inicio. No inventar.`,
 
   async validateAndProcess(messageText, session) {
     const trimmed = String(messageText || '').trim();
+
+    if (isOperatorExitCommand(trimmed)) {
+      clearOperatorDraft(session);
+      session.operatorMode = false;
+      session.currentState = null;
+      return {
+        success: true,
+        customReply: buildOperatorExitReply()
+      };
+    }
 
     if (isOperatorCancelCommand(trimmed)) {
       clearOperatorDraft(session);

@@ -4414,7 +4414,12 @@ console.log('\n-- Modo operador: flags, checklist y borrador --');
     syncOperatorDraftToSession,
     parseOperatorDraftLocal
   } = await import('../src/logic/operator-draft.js');
-  const { buildOperatorMenuText, isOperatorCancelCommand } = await import('../src/logic/operator-menu.js');
+  const {
+    buildOperatorMenuText,
+    isOperatorCancelCommand,
+    isOperatorExitCommand,
+    buildOperatorExitReply
+  } = await import('../src/logic/operator-menu.js');
   const { canSubmitCotApiWrite } = await import('../src/logic/cot-api.js');
   const {
     isSelfChat,
@@ -4459,11 +4464,17 @@ console.log('\n-- Modo operador: flags, checklist y borrador --');
   assert(menu.includes('1️⃣'), 'operador: menú muestra cotización');
   assert(menu.includes('3️⃣'), 'operador: menú muestra reserva confirmada');
   assert(menu.includes('cancelar'), 'operador: panel menciona cancelar');
+  assert(menu.includes('/salir'), 'operador: panel menciona /salir');
 
   assert(isOperatorCancelCommand('cancelar') === true, 'operador: cancelar es comando de anular');
   assert(isOperatorCancelCommand('/cancelar') === true, 'operador: /cancelar es comando de anular');
   assert(isOperatorCancelCommand('anular') === true, 'operador: anular es comando de anular');
   assert(isOperatorCancelCommand('Ana Pérez') === false, 'operador: nombre no es cancelar');
+
+  assert(isOperatorExitCommand('/salir') === true, 'operador: /salir es comando de salida');
+  assert(isOperatorExitCommand('salir') === true, 'operador: salir es comando de salida');
+  assert(isOperatorExitCommand('/exit') === true, 'operador: /exit es comando de salida');
+  assert(isOperatorExitCommand('Pedro') === false, 'operador: nombre no es salida');
 
   const eventAsk = buildOperatorDataRequestCopy('event');
   const barrilesAsk = buildOperatorDataRequestCopy('barriles');
@@ -4500,6 +4511,24 @@ console.log('\n-- Modo operador: flags, checklist y borrador --');
   assert(String(pickBarriles || '').includes('cancelar'), 'operador: tras 2 explica cómo anular');
   const slashCancel = await processMessage(opSessionId, '/cancelar', { operatorMode: true });
   assert(String(slashCancel || '').includes('Panel operador'), 'operador: /cancelar vuelve al panel');
+
+  // Test /salir desde menú y desde captura
+  const exitFromMenu = await processMessage(opSessionId, '/salir', { operatorMode: true });
+  assert(String(exitFromMenu || '').includes('cerrado'), 'operador: /salir desde menú cierra panel');
+  const sessionAfterExit = getSession(opSessionId);
+  assert(!sessionAfterExit.operatorMode, 'operador: /salir apaga operatorMode');
+  assert(!String(sessionAfterExit.currentState || '').startsWith('OPERADOR_'), 'operador: /salir no deja estado operador');
+
+  await processMessage(opSessionId, '/menu', { operatorMode: true });
+  await processMessage(opSessionId, '1', { operatorMode: true });
+  const exitFromCapture = await processMessage(opSessionId, '/salir', { operatorMode: true });
+  assert(String(exitFromCapture || '').includes('cerrado'), 'operador: /salir desde captura cierra panel');
+  const sessionAfterExitCapture = getSession(opSessionId);
+  assert(!sessionAfterExitCapture.operatorMode, 'operador: /salir apaga operatorMode tras captura');
+  assert(!String(sessionAfterExitCapture.currentState || '').startsWith('OPERADOR_'), 'operador: /salir limpia estado operador');
+  assert(!sessionAfterExitCapture.operatorKind, 'operador: /salir limpia operatorKind');
+
+  await processMessage(opSessionId, '/menu', { operatorMode: true });
 
   // 3️⃣ es ahora Cotizar evento (sin confirmar) — test nombre anterior era "1 de nuevo"
   const pickEventAgain = await processMessage(opSessionId, '3', { operatorMode: true });
