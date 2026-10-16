@@ -30,8 +30,10 @@ import { startNudgeRunner, stopNudgeRunner } from './core/nudge-runner.js';
 import { waitBeforeFirstReply, waitBetweenBubbles } from './logic/reply-timing.js';
 import {
   isCustomerBotEnabled,
+  getActiveAgentEngine,
   handleRuntimeToggleCommand
 } from './logic/bot-runtime-flags.js';
+import { processAiAgentMessage } from './agent-ia/index.js';
 import {
   isOperatorMenuCommand,
   isOperatorMidFlowState,
@@ -793,12 +795,20 @@ async function startBot() {
           return applyChatLabel(sock, message, sessionId, labelConfig);
         };
 
-        const reply = await processMessage(sessionId, cleanText, {
+        const activeEngine = getActiveAgentEngine();
+        const clientOptions = {
           sendAdminAlert,
           applyBusinessLabel,
           clientPhoneE164: clientPhoneE164 || session.clientPhoneE164 || undefined,
           pushName: pushName || session.clientPushName || undefined,
-        });
+        };
+
+        let reply = null;
+        if (activeEngine === 'ia') {
+          reply = await processAiAgentMessage(sessionId, cleanText, clientOptions);
+        } else {
+          reply = await processMessage(sessionId, cleanText, clientOptions);
+        }
 
         await deliverBotReply(sock, message.key.remoteJid, reply, botConfig.replyTiming || {});
 

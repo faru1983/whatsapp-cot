@@ -7,7 +7,7 @@ import fs from 'node:fs';
 import path from 'node:path';
 import { PROJECT_ROOT } from '../core/paths.js';
 
-/** @type {{ customerBotEnabled: boolean, cotApiWritesEnabled: boolean }|null} */
+/** @type {{ customerBotEnabled: boolean, cotApiWritesEnabled: boolean, activeAgentEngine: 'legacy'|'ia' }|null} */
 let cachedFlags = null;
 
 const FLAGS_PATH = path.join(PROJECT_ROOT, 'db', 'bot-runtime.json');
@@ -29,7 +29,7 @@ function parseEnvBool(value, defaultValue) {
 /**
  * readPersistedOverrides: Lee overrides guardados en disco (si existen).
  *
- * @returns {{ customerBotEnabled?: boolean, cotApiWritesEnabled?: boolean }}
+ * @returns {{ customerBotEnabled?: boolean, cotApiWritesEnabled?: boolean, activeAgentEngine?: 'legacy'|'ia' }}
  */
 function readPersistedOverrides() {
   try {
@@ -46,7 +46,7 @@ function readPersistedOverrides() {
 /**
  * writePersistedOverrides: Guarda overrides en disco.
  *
- * @param {{ customerBotEnabled: boolean, cotApiWritesEnabled: boolean }} flags
+ * @param {{ customerBotEnabled: boolean, cotApiWritesEnabled: boolean, activeAgentEngine: 'legacy'|'ia' }} flags
  */
 function writePersistedOverrides(flags) {
   try {
@@ -60,22 +60,28 @@ function writePersistedOverrides(flags) {
 /**
  * getDefaultRuntimeFlags: Valores base desde .env (sin overrides en memoria).
  *
- * @returns {{ customerBotEnabled: boolean, cotApiWritesEnabled: boolean }}
+ * @returns {{ customerBotEnabled: boolean, cotApiWritesEnabled: boolean, activeAgentEngine: 'legacy'|'ia' }}
  */
 export function getDefaultRuntimeFlags() {
   const persisted = readPersistedOverrides();
+  const envEngine = String(process.env.ACTIVE_AGENT_ENGINE || '').toLowerCase() === 'ia' ? 'ia' : 'legacy';
+  const activeAgentEngine = (persisted.activeAgentEngine === 'ia' || persisted.activeAgentEngine === 'legacy')
+    ? persisted.activeAgentEngine
+    : envEngine;
+
   return {
     customerBotEnabled: persisted.customerBotEnabled
       ?? parseEnvBool(process.env.CUSTOMER_BOT_ENABLED, true),
     cotApiWritesEnabled: persisted.cotApiWritesEnabled
-      ?? parseEnvBool(process.env.COT_API_WRITES_ENABLED, true)
+      ?? parseEnvBool(process.env.COT_API_WRITES_ENABLED, true),
+    activeAgentEngine
   };
 }
 
 /**
  * getRuntimeFlags: Flags efectivos (caché en memoria + persistencia).
  *
- * @returns {{ customerBotEnabled: boolean, cotApiWritesEnabled: boolean }}
+ * @returns {{ customerBotEnabled: boolean, cotApiWritesEnabled: boolean, activeAgentEngine: 'legacy'|'ia' }}
  */
 export function getRuntimeFlags() {
   if (!cachedFlags) {
@@ -103,6 +109,15 @@ export function areCotApiWritesEnabled() {
 }
 
 /**
+ * getActiveAgentEngine: ¿Qué motor atiende a clientes? 'legacy' (estados) | 'ia' (nuevo agente).
+ *
+ * @returns {'legacy'|'ia'}
+ */
+export function getActiveAgentEngine() {
+  return getRuntimeFlags().activeAgentEngine || 'legacy';
+}
+
+/**
  * setCustomerBotEnabled: Activa/desactiva respuestas automáticas a clientes.
  *
  * @param {boolean} enabled
@@ -125,6 +140,18 @@ export function setCotApiWritesEnabled(enabled) {
 }
 
 /**
+ * setActiveAgentEngine: Alterna en caliente entre motor clásico 'legacy' e inteligente 'ia'.
+ *
+ * @param {'legacy'|'ia'} engine
+ */
+export function setActiveAgentEngine(engine) {
+  const normalized = String(engine || '').toLowerCase() === 'ia' ? 'ia' : 'legacy';
+  const next = { ...getRuntimeFlags(), activeAgentEngine: normalized };
+  cachedFlags = next;
+  writePersistedOverrides(next);
+}
+
+/**
  * formatRuntimeFlagsStatus: Texto corto para el menú operador.
  *
  * @returns {string}
@@ -133,11 +160,12 @@ export function formatRuntimeFlagsStatus() {
   const f = getRuntimeFlags();
   const resp = f.customerBotEnabled ? 'ON' : 'OFF';
   const api = f.cotApiWritesEnabled ? 'ON' : 'OFF';
-  return `Respuestas clientes: *${resp}* | API cotizaciones/ventas: *${api}*`;
+  const agente = (f.activeAgentEngine || 'legacy').toUpperCase();
+  return `Respuestas clientes: *${resp}* | Motor activo: *${agente}* | API cotizaciones/ventas: *${api}*`;
 }
 
 /**
- * handleRuntimeToggleCommand: Procesa /respuestas y /cotapi (on|off).
+ * handleRuntimeToggleCommand: Procesa /respuestas, /cotapi y /agente (ia|legacy).
  *
  * @param {string} text - Mensaje completo
  * @returns {string|null} Respuesta al admin o null si no es comando
@@ -161,6 +189,15 @@ export function handleRuntimeToggleCommand(text) {
     }
     setCotApiWritesEnabled(arg === 'on');
     return `Escrituras a la API (cotizaciones/ventas): *${arg === 'on' ? 'ON' : 'OFF'}*.`;
+  }
+
+  if (cmd === '/agente') {
+    if (arg !== 'ia' && arg !== 'legacy') {
+      const actual = getActiveAgentEngine().toUpperCase();
+      return `Uso: /agente ia | /agente legacy\nMotor actual activo: *${actual}*.`;
+    }
+    setActiveAgentEngine(arg);
+    return `🤖 Motor de atención a clientes cambiado a: *${arg.toUpperCase()}* (${arg === 'ia' ? 'Nuevo Agente IA Autónomo' : 'Flujos Deterministas Clásicos'}).`;
   }
 
   return null;

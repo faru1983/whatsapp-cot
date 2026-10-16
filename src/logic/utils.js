@@ -125,9 +125,9 @@ export function sanitizeCustomerFacingReply(text) {
 
 	// Espacios y puntuación que quedan raros tras borrar frases
 	out = out
-		.replace(/\s{2,}/g, ' ')
-		.replace(/\s+([.,;:!?])/g, '$1')
-		.replace(/([.!?])\s*\1+/g, '$1')
+		.replace(/[^\S\r\n]{2,}/g, ' ')
+		.replace(/[^\S\r\n]+([.,;:!?])/g, '$1')
+		.replace(/([.!?])[^\S\r\n]*\1+/g, '$1')
 		.replace(/\n{3,}/g, '\n\n')
 		.trim();
 
