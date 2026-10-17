@@ -23,6 +23,7 @@ ${flags}
 *Interruptores*
 /respuestas on | off — flujos automáticos a clientes
 /cotapi on | off — crear cotizaciones y ventas en la web
+/agente ia | legacy — motor clientes (IA autónomo vs flujos clásicos)
 
 *Por cliente*
 /detenerbot <número>

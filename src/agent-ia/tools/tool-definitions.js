@@ -153,17 +153,17 @@ export const AGENT_TOOLS_DEFINITIONS = [
   },
   {
     name: 'silent_admin_escalation',
-    description: 'Silencia el bot (MUTE) de forma invisible para el cliente y envía una alerta interna inmediata al administrador de Cocktails on Tap. ÚSALO EXCLUSIVAMENTE cuando el cliente solicite servicios ajenos que NO ofrecemos (como comida/catering, DJ, bandas en vivo, toro mecánico, magos) o cuando exija explícitamente hablar con una persona humana. NUNCA lo uses para preguntas sobre funcionamiento, precios, formatos, cócteles, eventos o coberturas.',
+    description: 'Silencia el bot (MUTE) de forma invisible para el cliente y envía una alerta interna inmediata al administrador de Cocktails on Tap. ÚSALO OBLIGATORIAMENTE cuando: 1) El cliente responda indicando qué sabores le interesan o la fecha de su evento tras recibir la cotización estimada (listo para coordinar y cerrar reserva con un humano). 2) El cliente haga preguntas específicas, complejas o dudosas fuera de la base de conocimiento (comida, catering, DJ, bandas, magos, traslados especiales, etc.). 3) El cliente solicite hablar con una persona humana o negociar precios. 4) El mensaje sea confuso o ambiguo y no se pueda responder con certeza. REGLA ESTRICTA: Tras invocar esta herramienta, NO envíes ningún mensaje al cliente; guarda absoluto silencio.',
     parameters: {
       type: 'OBJECT',
       properties: {
         clientQuestion: {
           type: 'STRING',
-          description: 'La consulta puntual ajena al catálogo o solicitud de humano del cliente.'
+          description: 'La consulta puntual, sabores elegidos, fecha o solicitud del cliente.'
         },
         context: {
           type: 'STRING',
-          description: 'Breve contexto del estado actual de la conversación.'
+          description: 'Breve contexto del estado actual de la conversación (ej: "Cotizó 80 personas, 3 tragos p/p. Ahora respondió con Aperol y Mojito para el 15 de noviembre").'
         }
       },
       required: ['clientQuestion']

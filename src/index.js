@@ -162,6 +162,58 @@ function hasHumanChatContent(content) {
 }
 
 /**
+ * getMessageTimestampSeconds: Extrae el timestamp en segundos (Unix) de un mensaje de Baileys.
+ *
+ * @param {object} message - Mensaje Baileys
+ * @returns {number} Timestamp en segundos
+ */
+function getMessageTimestampSeconds(message) {
+  const raw = message?.messageTimestamp;
+  if (!raw) return Math.floor(Date.now() / 1000);
+  if (typeof raw === 'number') return raw;
+  if (typeof raw === 'bigint') return Number(raw);
+  if (typeof raw.toNumber === 'function') return raw.toNumber();
+  if (typeof raw.low === 'number') return raw.low;
+  const parsed = Number(raw);
+  return Number.isFinite(parsed) ? parsed : Math.floor(Date.now() / 1000);
+}
+
+/**
+ * isLikelyMetaAdsAutoReply: Detecta si un mensaje saliente (fromMe) es la auto-respuesta
+ * instantánea de Meta Ads / WhatsApp Business basándose en la física del envío (tiempo y posición).
+ * Cero textos fijos: Meta responde en milisegundos (<= 3s) del mensaje del cliente y solo al inicio del chat.
+ * Un ser humano tarda físicamente >= 4-5 segundos en leer, pensar, escribir y presionar enviar.
+ *
+ * @param {object} opts
+ * @param {object} opts.session - Sesión SQLite del cliente
+ * @param {number} opts.msgSec - Timestamp en segundos de este mensaje saliente
+ * @returns {boolean}
+ */
+function isLikelyMetaAdsAutoReply({ session, msgSec }) {
+  if (!session) return false;
+  // Solo puede ocurrir una sola vez por chat
+  if (session.metaAutoReplyReceived) return false;
+
+  const turnsCount = session.history?.turns?.length || 0;
+  // Solo puede ocurrir en el turno inicial (Turno 0 o recién empezando)
+  if (turnsCount > 1) return false;
+
+  // Tiempo transcurrido desde el último mensaje entrante del cliente
+  const lastInboundSec = session.lastInboundMsgSec
+    || (session.lastInboundAt ? Math.floor(session.lastInboundAt / 1000) : 0);
+
+  if (lastInboundSec > 0) {
+    const elapsedSeconds = Math.abs(msgSec - lastInboundSec);
+    // Si llegó en 3 segundos o menos del mensaje del cliente, es una máquina (Meta Ads instantáneo).
+    return elapsedSeconds <= 3;
+  }
+
+  // Respaldo por si el mensaje entrante y saliente llegaron en el mismo paquete de red
+  const nowSec = Math.floor(Date.now() / 1000);
+  return turnsCount === 0 && Math.abs(msgSec - nowSec) <= 3;
+}
+
+/**
  * toClientJid: Normaliza un número o JID al formato @s.whatsapp.net.
  *
  * @param {string} rawTarget - "569..." o JID completo
@@ -694,8 +746,30 @@ async function startBot() {
         && isClientCustomerChat(remoteJid, adminList, sock, message)
         && hasHumanChatContent(content)
       ) {
-        const targetIds = await resolveSessionIdsForCommand(sock, remoteJid);
         const preferredId = getPreferredSessionId(message);
+        const session = getSession(preferredId);
+        const msgSec = getMessageTimestampSeconds(message);
+
+        // Si el mensaje saliente es una auto-respuesta de Meta Ads / WhatsApp Business:
+        // Cero strings fijos: se detecta por velocidad (<= 3 segundos del mensaje del cliente)
+        // y por turno inicial. Guardamos el texto real en el historial del agente IA.
+        if (isLikelyMetaAdsAutoReply({ session, msgSec })) {
+          const targetIds = await resolveSessionIdsForCommand(sock, remoteJid);
+          if (!targetIds.includes(preferredId)) targetIds.push(preferredId);
+
+          for (const id of targetIds) {
+            const tgtSession = getSession(id);
+            tgtSession.history = tgtSession.history || { turns: [] };
+            tgtSession.history.turns.push({ role: 'model', text });
+            tgtSession.metaAutoReplyReceived = true;
+            tgtSession.lastOutboundAt = Date.now();
+            saveSession(id, tgtSession);
+          }
+          console.log(`🤖 Auto-respuesta de Meta Ads detectada por timing/posición (delta <= 3s). Guardada en historial para: ${preferredId}`);
+          return;
+        }
+
+        const targetIds = await resolveSessionIdsForCommand(sock, remoteJid);
         if (!targetIds.includes(preferredId)) targetIds.push(preferredId);
 
         for (const id of targetIds) {
@@ -729,6 +803,10 @@ async function startBot() {
         return;
       }
 
+      // Guardamos timestamp del mensaje del cliente para medir delta con auto-respuestas
+      session.lastInboundAt = Date.now();
+      session.lastInboundMsgSec = getMessageTimestampSeconds(message);
+
       const clientPhoneE164 = await resolveClientPhoneE164({ message, sock, sessionId });
       const pushName = String(message.pushName || '').trim();
       if (clientPhoneE164) session.clientPhoneE164 = clientPhoneE164;
@@ -746,9 +824,7 @@ async function startBot() {
         );
       }
 
-      if (clientPhoneE164 || pushName || ctwaChanged) {
-        saveSession(sessionId, session);
-      }
+      saveSession(sessionId, session);
 
       // Si el clid llegó tarde (después del Lead curious), backfill touchpoint sin re-disparar CAPI
       if (ctwaChanged && session.metaCtwaClid) {

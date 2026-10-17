@@ -83,13 +83,20 @@ export function formatWhatsAppReply(text) {
   // 7. Formato específico para la pregunta de tragos por persona (sin duplicaciones)
   out = out.replace(
     /(?:\*|_)*¿Cuántos tragos por persona te gustaría calcular\?(?:\*|_)*[ \t]*(?:\*|_)*Con eso te entrego un presupuesto estimado\.?(?:\*|_)*|¿Cuántos tragos por persona te gustaría calcular\?/gi,
-    '*¿Cuántos tragos por persona te gustaría calcular?* _Con eso te entrego un presupuesto estimado._'
+    '*¿Cuántos tragos por persona te gustaría calcular?*'
   );
 
-  // 8. Si la pregunta de cierre quedó pegada después de una viñeta, separar con doble salto
+  // 8. Asegurar que preguntas con ¿ ... ? queden siempre en negrita WhatsApp
+  out = out.replace(/(?:^|\n)([ \t]*)(¿[^?\n]+\?)/gm, (match, prefix, q) => {
+    const cleanQ = q.trim();
+    if (cleanQ.startsWith('*') && cleanQ.endsWith('*')) return `${prefix}${cleanQ}`;
+    return `${prefix}*${cleanQ.replace(/^\*+|\*+$/g, '')}*`;
+  });
+
+  // 9. Si la pregunta de cierre quedó pegada después de una viñeta, separar con doble salto
   out = out.replace(/(•[^\n]+?)[ \t]+(\*?¿)/g, '$1\n\n$2');
 
-  // 9. Separar bloques clave de cotización si quedaron en la misma línea o con salto simple
+  // 10. Separar bloques clave de cotización si quedaron en la misma línea o con salto simple
   out = out.replace(/([^\n])[ \t]+(\*Presupuesto Estimado\*)/g, '$1\n\n$2');
   out = out.replace(/([^\n])\n(?!\n)[ \t]*(\*Presupuesto Estimado\*)/g, '$1\n\n$2');
 
@@ -111,7 +118,7 @@ export function formatWhatsAppReply(text) {
   out = out.replace(/([^\n])[ \t]+(🍹[ \t*\*]*Cócteles)/gi, '$1\n\n$2');
   out = out.replace(/([^\n])\n(?!\n)[ \t]*(🍹[ \t*\*]*Cócteles)/gi, '$1\n\n$2');
 
-  // 10. Limpiar espacios horizontales duplicados en cada línea y espacios antes de puntuación
+  // 11. Limpiar espacios horizontales duplicados en cada línea y espacios antes de puntuación
   out = out.replace(/[ \t]{2,}/g, ' ');
   out = out.replace(/[ \t]+([.,;:!?])/g, '$1');
 
@@ -201,27 +208,33 @@ export async function runAiAgentTurn(conversationTurns, userMessage, context = {
   const guestsKnown = session.guests || context.contextMeta?.detectedGuests;
   const celebrationKnown = session.celebrationType || context.contextMeta?.detectedCelebration;
   const drinksKnown = session.drinksPerGuest || context.contextMeta?.detectedDrinksPerPerson;
+  const proposalDelivered = session.proposalDelivered || context.contextMeta?.waitingForFlavors;
 
   let stateContextBlock = '\n\n=== ESTADO ACTUAL DE LA CONVERSACIÓN ===\n';
-  if (guestsKnown && !drinksKnown) {
+  if (proposalDelivered) {
+    stateContextBlock += `- La propuesta estimada de coctelería YA FUE ENTREGADA al cliente con los 6 sabores top y la pregunta por la fecha.\n`
+      + `- Si el cliente responde indicando qué sabores le gustan, para qué fecha es su evento, o hace preguntas de cierre/reserva:\n`
+      + `  INSTRUCCIÓN OBLIGATORIA: Llama INMEDIATAMENTE a la herramienta silent_admin_escalation(clientQuestion, context).\n`
+      + `  REGLA DE ORO: Guarda ABSOLUTO SILENCIO hacia el cliente. NO generes ninguna respuesta de texto.\n`
+      + `- Si el cliente hace una consulta compleja o no estás 100% seguro: llama a silent_admin_escalation y guarda silencio.\n`;
+  } else if (guestsKnown && !drinksKnown) {
     stateContextBlock += `- Invitados indicados: ${guestsKnown} personas.\n- Tragos por persona: AÚN NO DEFINIDOS.\n- INSTRUCCIÓN OBLIGATORIA: NO uses herramientas de cálculo todavía. Tu respuesta obligatoria debe ser exactamente:
-"¡Genial! 🍹 Ahora necesitamos definir cuántos tragos quieres calcular por persona:
+"¡Súper! 🍹 Ahora definamos el consumo por persona para calcular los litros ideales:
 
-• *2 tragos p/p:* ideal como complemento de otras bebidas.
-• *3 o más tragos p/p:* recomendado si será la barra principal.
+• *2 tragos p/p:* ideal como complemento si habrá cerveza, vino u otras bebidas.
+• *3 o más tragos p/p:* recomendado si será la barra principal de la fiesta.
 
-*¿Cuántos tragos por persona te gustaría calcular?* _Con eso te entrego un presupuesto estimado."\n`;
+*¿Cuántos tragos por persona te gustaría calcular?*"\n`;
   } else if (guestsKnown && drinksKnown) {
     stateContextBlock += `- Invitados: ${guestsKnown} personas.\n- Tragos por persona: ${drinksKnown}.\n- INSTRUCCIÓN: Llama a calculate_event_estimate con guests=${guestsKnown} y drinksPerPerson=${drinksKnown} para entregar la "Propuesta de Barra Sugerida" con el formato oficial.\n`;
   } else {
     stateContextBlock += `- Invitados: AÚN NO INDICADOS POR EL CLIENTE. PROHIBIDO ASUMIR O INVENTAR NÚMERO DE INVITADOS. NO USES TOOLS DE CÁLCULO NI CATÁLOGO.
 - Si el cliente pregunta por valores, precios o cuánto cuesta en general: explica las dos modalidades (Eventos desde $109.990 vs Barriles Desechables de 5L desde $31.990) y pregunta cuál de las dos le interesa.
-- Si pregunta por servicio de eventos: explica que parte desde $109.990 y pregunta cuántos invitados tendrán.
-- NO uses silent_admin_escalation a menos que pidan comida, magos, DJ, toro mecánico o hablar con un humano.\n`;
+- Si pregunta por servicio de eventos: explica que el bar portátil parte desde $109.990 (incluye 10L ~ 50 cócteles con dispensador portátil, hielo, vasos, garnish e instalación gratuita) y pregunta: *¿Cuántos invitados tendrás aproximadamente en tu evento?*
+- Si el cliente hace una consulta fuera de catálogo, sobre comida/mago/DJ o pide un humano: llama a silent_admin_escalation y guarda silencio.\n`;
   }
 
   const systemInstruction = `${baseSystemInstruction}${stateContextBlock}`;
-  // console.log('[DEBUG LLM STATE BLOCK]:', stateContextBlock);
   const toolCallsMade = [];
 
   // ===========================================================================
@@ -268,10 +281,16 @@ export async function runAiAgentTurn(conversationTurns, userMessage, context = {
 
       // Ejecutamos las llamadas a tools
       const responseParts = [];
+      let shouldMuteImmediately = false;
+
       for (const part of functionCalls) {
         const { name, args } = part.functionCall;
         toolCallsMade.push({ name, args });
         const toolResult = await executeAgentTool(name, args, context);
+
+        if (name === 'silent_admin_escalation' || toolResult?.silenceClient || session?.isMuted) {
+          shouldMuteImmediately = true;
+        }
 
         responseParts.push({
           functionResponse: {
@@ -279,6 +298,14 @@ export async function runAiAgentTurn(conversationTurns, userMessage, context = {
             response: toolResult
           }
         });
+      }
+
+      if (shouldMuteImmediately || session?.isMuted) {
+        return {
+          replyText: null,
+          toolCallsMade,
+          muted: true
+        };
       }
 
       // Enviamos el resultado de las tools de vuelta al modelo
@@ -295,11 +322,19 @@ export async function runAiAgentTurn(conversationTurns, userMessage, context = {
       loopCount++;
     }
 
+    if (session?.isMuted) {
+      return {
+        replyText: null,
+        toolCallsMade,
+        muted: true
+      };
+    }
+
     const rawReply = currentResponse.response?.text?.() || '';
     const cleaned = sanitizeCustomerFacingReply(rawReply);
     const formatted = formatWhatsAppReply(cleaned);
     return {
-      replyText: formatted || '¡Hola! Cuéntame cuántos invitados calculas para tu evento y te armo una propuesta de inmediato.',
+      replyText: formatted || null,
       toolCallsMade
     };
   }
@@ -354,6 +389,14 @@ export async function runAiAgentTurn(conversationTurns, userMessage, context = {
           toolCallsMade.push({ name: fnName, args: fnArgs });
           const toolResult = await executeAgentTool(fnName, fnArgs, context);
 
+          if (fnName === 'silent_admin_escalation' || toolResult?.silenceClient || session?.isMuted) {
+            return {
+              replyText: null,
+              toolCallsMade,
+              muted: true
+            };
+          }
+
           messages.push({
             role: 'tool',
             tool_call_id: tc.id,
@@ -397,6 +440,14 @@ export async function runAiAgentTurn(conversationTurns, userMessage, context = {
         toolCallsMade.push({ name: fnName, args: fnArgs });
         const toolResult = await executeAgentTool(fnName, fnArgs, context);
 
+        if (fnName === 'silent_admin_escalation' || toolResult?.silenceClient || session?.isMuted) {
+          return {
+            replyText: null,
+            toolCallsMade,
+            muted: true
+          };
+        }
+
         messages.push({
           role: 'assistant',
           content: textContent
@@ -420,11 +471,19 @@ export async function runAiAgentTurn(conversationTurns, userMessage, context = {
       break;
     }
 
+    if (session?.isMuted) {
+      return {
+        replyText: null,
+        toolCallsMade,
+        muted: true
+      };
+    }
+
     const rawReply = completion.choices[0]?.message?.content || '';
     const cleaned = sanitizeCustomerFacingReply(rawReply);
     const formatted = formatWhatsAppReply(cleaned);
     return {
-      replyText: formatted || '¡Hola! Cuéntame cuántos invitados calculas para tu evento y te armo una propuesta de inmediato.',
+      replyText: formatted || null,
       toolCallsMade
     };
   }

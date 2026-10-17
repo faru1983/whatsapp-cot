@@ -79,7 +79,7 @@ export async function processAiAgentMessage(sessionId, messageText, options = {}
 
     session.lastInboundAt = Date.now();
 
-    // Petición explícita de humano
+    // Petición explícita de humano: silencio absoluto hacia el cliente y alerta inmediata a admin
     if (/^(humano|asesor|vendedor|operador|hablar con alguien|persona real|sos)$/i.test(cleanText)) {
       session.isMuted = true;
       session.silenciado_timestamp = Date.now();
@@ -87,15 +87,12 @@ export async function processAiAgentMessage(sessionId, messageText, options = {}
         await alertAdmin({
           type: 'SOS',
           title: 'CLIENTE PIDIÓ ATENCIÓN HUMANA',
-          body: `El cliente escribió: "${cleanText}".\n\n🤫 *El bot se silenció automáticamente para que un asesor responda.*`
+          body: `El cliente escribió: "${cleanText}".\n\n🤫 *El bot se silenció automáticamente (MUTE). Responde directamente desde WhatsApp.*`
         });
       }
       session.history.turns.push({ role: 'user', text: cleanText });
-      const humanReply = '¡Por supuesto! Te comunico de inmediato con un asesor del equipo para que te ayude con todos los detalles. 🙌';
-      session.history.turns.push({ role: 'model', text: humanReply });
-      session.lastOutboundAt = Date.now();
       saveSession(sessionId, session);
-      return humanReply;
+      return null;
     }
 
     // =========================================================================
@@ -120,15 +117,15 @@ export async function processAiAgentMessage(sessionId, messageText, options = {}
         contextMeta
       });
 
-      // Registrar turno del usuario y del bot
+      // Registrar turno del usuario y del bot (solo si no fue silenciado)
       session.history.turns.push({ role: 'user', text: cleanText });
-      if (replyText) {
+      if (replyText && !session.isMuted) {
         session.history.turns.push({ role: 'model', text: replyText });
         session.lastOutboundAt = Date.now();
       }
 
       saveSession(sessionId, session);
-      return replyText || null;
+      return session.isMuted ? null : (replyText || null);
 
     } catch (err) {
       console.error('[Agent-IA] Error en ejecución:', err.message);

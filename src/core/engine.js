@@ -1212,7 +1212,7 @@ function printCliStartupIntro(session) {
   Rails: estado · stall · strikes · FAQ
   API escritura: ${apiHint}
 
-  Comandos: /status /help /api /menu /respuestas /cotapi /reset /mute /unmute /exit
+  Comandos: /status /help /api /menu /respuestas /cotapi /agente /reset /mute /unmute /exit
 
 Estado: ${stateId}
 ─────────────────────────────────────────
@@ -1250,6 +1250,7 @@ Comandos:
   cancelar   — anula el borrador y vuelve al panel
   /respuestas on|off — flujos automáticos a clientes
   /cotapi on|off     — escrituras API web
+  /agente ia|legacy  — alternar motor clientes (ia autónomo vs legacy)
   /reset   — borrar sesión
   /mute    — silenciar a mano
   /unmute  — reactivar

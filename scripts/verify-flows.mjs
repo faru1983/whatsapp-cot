@@ -4465,6 +4465,7 @@ console.log('\n-- Modo operador: flags, checklist y borrador --');
   assert(menu.includes('3️⃣'), 'operador: menú muestra reserva confirmada');
   assert(menu.includes('cancelar'), 'operador: panel menciona cancelar');
   assert(menu.includes('/salir'), 'operador: panel menciona /salir');
+  assert(menu.includes('/agente'), 'operador: panel menciona /agente');
 
   assert(isOperatorCancelCommand('cancelar') === true, 'operador: cancelar es comando de anular');
   assert(isOperatorCancelCommand('/cancelar') === true, 'operador: /cancelar es comando de anular');

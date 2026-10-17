@@ -33,11 +33,11 @@ export function analyzeMessageContext(session, currentText) {
   const lastBotTurn = [...turns].reverse().find((t) => t.role === 'model');
   if (lastBotTurn) {
     const botText = lastBotTurn.text.toLowerCase();
-    if (botText.includes('cuántos invitados') || botText.includes('cuantos invitados') || botText.includes('invitados aprox') || botText.includes('tendrás en tu evento')) {
+    if (botText.includes('invitados') || botText.includes('personas') || botText.includes('cuántos') || botText.includes('cuantos') || botText.includes('gente') || botText.includes('calcularlo')) {
       waitingForGuests = true;
-    } else if (botText.includes('cócteles por persona') || botText.includes('tragos por persona')) {
+    } else if (botText.includes('tragos') || botText.includes('cócteles') || botText.includes('cocteles') || botText.includes('copas') || botText.includes('p/p') || botText.includes('por persona')) {
       waitingForDrinksPerPerson = true;
-    } else if (botText.includes('favoritos') || botText.includes('qué cócteles') || botText.includes('sabores')) {
+    } else if (botText.includes('variedades') || botText.includes('fecha') || botText.includes('sabores') || botText.includes('favoritos') || botText.includes('carta')) {
       waitingForFlavors = true;
     }
   }
@@ -61,11 +61,17 @@ export function analyzeMessageContext(session, currentText) {
     }
   }
 
+  // Detección de preguntas típicas de anuncios Meta Ads (icebreakers)
+  const isPriceInquiry = /cu[aá]nto\s+cuesta(\s+el\s+servicio)?|cu[aá]les\s+son\s+los\s+(valores|precios)|precios?\b|valor(es)?\b/i.test(text);
+  const isHowItWorksInquiry = /c[oó]mo\s+funciona(\s+el\s+servicio)?/i.test(text);
+
   // Detección de intención directa vs eventos
   const isDirectBarrelQuery = /\b(desechable|barril(?:es)? de 5\s*l|5\s*l|para la casa|para mi casa|asado)\b/i.test(text);
 
   return {
     isFromMetaAd,
+    isPriceInquiry,
+    isHowItWorksInquiry,
     waitingForGuests,
     waitingForDrinksPerPerson,
     waitingForFlavors,

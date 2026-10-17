@@ -116,29 +116,36 @@ export async function executeAgentTool(toolName, args, context = {}) {
       const pricePerCocktail = Math.round(estimatedTotal / totalCocktails);
       const formatLabel = formatKey === 'muro' ? 'Muro de Coctelería' : 'Dispensador Portátil';
 
-      const varietiesWord = varietiesCount === 1 ? '1 variedad sugerida' : `${varietiesCount} variedades sugeridas`;
-      const formattedProposalText = `*Tu Propuesta de Barra Sugerida* 🍹
-Para tus ${guests} invitados y ${drinksPerPerson} tragos por persona, hemos calculado la siguiente configuración ideal:
+      if (session) {
+        session.lastEstimatedTotal = formatPrice(estimatedTotal);
+        session.lastCocktailsCount = totalCocktails;
+        session.lastTotalLiters = totalLiters;
+        session.proposalDelivered = true;
+      }
 
-• Aprox. ${totalCocktails} cócteles
-• Equivalente a ${totalLiters} Litros en ${varietiesWord}.
+      const alternativeNote = totalLiters > 10
+        ? `\n\n_💡 Si prefieres una barra más acotada de bienvenida, también podemos armar opciones menores desde 10L o 15L (desde $109.990)._`
+        : '';
+
+      const formattedProposalText = `*Tu Propuesta de Barra Sugerida* 🍹
+Para tus ${guests} invitados y ${drinksPerPerson} tragos por persona, calculamos:
+
+• Aprox. ${totalCocktails} cócteles (${totalLiters} Litros).
 
 *Presupuesto Estimado*
 *${formatPrice(estimatedTotal)}*
-Aprox. *${formatPrice(pricePerCocktail)}* por cóctel servido.
-_(precios netos, no incluyen IVA)_
+_Aprox. ${formatPrice(pricePerCocktail)} por cóctel servido (neto)._${alternativeNote}
 
-Lo mejor es que solo pagas los cócteles que elijas. El servicio incluye sin costo adicional:
-
-🧊 Hielo para todo el evento
-🍋 Decoraciones deshidratadas
-🥂 Vasos y/o copas en préstamo
+*Todo Incluido ($0 adicional):*
+🧊 Hielo suficiente para todo el evento
+🍋 Decoraciones y frutas deshidratadas
+🥂 Vasos y copas en préstamo
 🍸 Hieleras y herramientas de bar
-🚚 Instalación y retiro incluidos (provincia de Santiago)
+🚚 Instalación previa y retiro al día siguiente
 
-📌 *Importante:* Este es un presupuesto estimado. El valor final dependerá de las variedades de cócteles y la cantidad que finalmente elijas.
+Puedes armar tu barra con nuestros cócteles más pedidos: *Aperol Spritz, Ramazzotti Spritz, Mojito Tradicional, Pisco Sour Clásico, Moscow Mule o Gin & Tonic* (también tenemos combinados y mocktails).
 
-🤔 *¿Tienes alguna duda o te gustaría que te envíe la lista de variedades disponibles con sus precios?*`;
+*¿Qué variedades te tincan más para tu barra y para qué fecha estás pensando el evento?*`;
 
       return {
         success: true,
@@ -415,10 +422,18 @@ ${clasicos.slice(0, 8).join('\n')}
       }
 
       if (typeof alertAdmin === 'function') {
-        const bodyText = `❓ *Pregunta no cubierta:* "${question}"\n\n📌 *Contexto:* ${summaryContext || 'El cliente hizo una consulta que requiere atención de un asesor humano.'}\n\n🤫 *El bot se silenció automáticamente (Mute).*`;
+        const guests = session?.guests || '';
+        const drinks = session?.drinksPerGuest || '';
+        let extraInfo = '';
+        if (guests) extraInfo += `\n👥 *Invitados:* ${guests}`;
+        if (drinks) extraInfo += `\n🍹 *Tragos p/p:* ${drinks}`;
+        if (session?.lastEstimatedTotal) extraInfo += `\n💰 *Presupuesto mostrado:* ${session.lastEstimatedTotal} (${session.lastTotalLiters || ''}L / ~${session.lastCocktailsCount || ''} cócteles)`;
+
+        const bodyText = `🚨 *TRASPASO SILENCIOSO A ADMINISTRADOR*${extraInfo}\n\n💬 *Mensaje cliente:* "${question}"\n📌 *Contexto:* ${summaryContext || 'El cliente indicó sabores/fecha o realizó una consulta para cierre humano.'}\n\n🤫 *El bot se silenció automáticamente (MUTE). Responde directamente desde WhatsApp.*`;
+
         await alertAdmin({
           type: 'SOS',
-          title: 'CONSULTA PENDIENTE DE CLIENTE',
+          title: 'TRASPASO A HUMANO (MUTE SILENCIOSO)',
           body: bodyText
         });
       }
@@ -426,7 +441,8 @@ ${clasicos.slice(0, 8).join('\n')}
       return {
         success: true,
         muted: true,
-        message: 'Escalación silenciosa completada. El bot está en silencio y el administrador fue notificado por WhatsApp.'
+        silenceClient: true,
+        message: 'Escalación silenciosa completada. El bot está en MUTE y el administrador fue notificado. NO envíes ningún mensaje al cliente; guarda absoluto silencio.'
       };
     }
 
