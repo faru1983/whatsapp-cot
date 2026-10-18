@@ -13,7 +13,8 @@
     "test:cot-api-mocked": "node scripts/test-cot-api-mocked.mjs",
     "verify": "npm run check && npm run test:flows && npm run test:cot-api-mocked",
     "check": "node scripts/syntax-check.mjs",
-    "deploy:remote": "chcp 65001 >nul && powershell -ExecutionPolicy Bypass -File scripts/deploy-remote.ps1"
+    "deploy:remote": "chcp 65001 >nul && powershell -ExecutionPolicy Bypass -File scripts/deploy-remote.ps1",
+    "ssh:oracle": "ssh -i ./oracle/whatsapp-bot.key ubuntu@161.153.217.164"
   },
   "engines": {
     "node": ">=20.0.0"

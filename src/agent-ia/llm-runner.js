@@ -139,44 +139,99 @@ export function formatWhatsAppReply(text) {
 
 /**
  * parseReplyToBubbles: Parsea la respuesta del bot hacia WhatsApp.
- * Si contiene '===BURBUJA===', separa en múltiples burbujas (array).
- * Si contiene '[IMG:archivo.webp]', crea el objeto de imagen { type: 'image', file: '...' }.
+ * - Si contiene '===BURBUJA===', separa en múltiples burbujas (array).
+ * - Si contiene '[IMG:archivo.webp]' o '[VID:archivo.mp4]', crea el objeto de media { type: 'image'|'video', file: '...' }.
+ * - Soporta tags multimedia en cualquier posición (inicio, medio o final del texto).
+ * - Garantiza que si se envía la carta de precios, la imagen sea la primera burbuja y siempre vaya acompañada de la guía de litros.
  * 
  * @param {string} text - Texto completo a procesar
+ * @param {object} [session={}] - Sesión actual para extraer litros cotizados
  * @returns {string|object|Array<string|object>|null}
  */
-export function parseReplyToBubbles(text) {
+export function parseReplyToBubbles(text, session = {}) {
   if (!text) return null;
   const rawStr = String(text).trim();
   if (!rawStr) return null;
 
-  const rawParts = rawStr.split(/\n*[ \t]*===BURBUJA===[ \t]*\n*/i);
+  // 1. Separar primero por el delimitador explícito ===BURBUJA=== si existe
+  const rawChunks = rawStr.split(/\n*[ \t]*===BURBUJA===[ \t]*\n*/i);
   const outBubbles = [];
 
-  for (const part of rawParts) {
-    const trimmed = part.trim();
-    if (!trimmed) continue;
+  for (const chunk of rawChunks) {
+    const trimmedChunk = chunk.trim();
+    if (!trimmedChunk) continue;
 
-    // Caso 1: La burbuja es solo una etiqueta de imagen [IMG:archivo.webp]
-    const singleImgMatch = trimmed.match(/^\[IMG:([^\]]+)\]$/i);
-    if (singleImgMatch) {
-      outBubbles.push({ type: 'image', file: singleImgMatch[1].trim() });
-      continue;
+    // 2. Extraer cualquier tag [IMG:archivo] o [VID:archivo] que esté en cualquier posición
+    const segments = trimmedChunk.split(/(\[(?:IMG|VID):[^\]]+\])/gi);
+
+    for (const seg of segments) {
+      const trimmedSeg = seg.trim();
+      if (!trimmedSeg) continue;
+
+      const imgMatch = trimmedSeg.match(/^\[IMG:([^\]]+)\]$/i);
+      if (imgMatch) {
+        outBubbles.push({ type: 'image', file: imgMatch[1].trim() });
+        continue;
+      }
+
+      const vidMatch = trimmedSeg.match(/^\[VID:([^\]]+)\]$/i);
+      if (vidMatch) {
+        outBubbles.push({ type: 'video', file: vidMatch[1].trim() });
+        continue;
+      }
+
+      // Segmento de texto normal
+      const cleaned = sanitizeCustomerFacingReply(trimmedSeg);
+      const formatted = formatWhatsAppReply(cleaned);
+      if (formatted) {
+        outBubbles.push(formatted);
+      }
+    }
+  }
+
+  // 3. Garantía para la carta de variedades:
+  // Si se envió lista_precios_completa.webp pero el texto no incluye la pregunta de avance
+  const hasCatalogImg = outBubbles.some((b) => typeof b === 'object' && b.file === 'lista_precios_completa.webp');
+  const hasCatalogQuestion = outBubbles.some((b) => typeof b === 'string' && /¿Qué variedades|Para cubrir tus/i.test(b));
+
+  if (hasCatalogImg && !hasCatalogQuestion) {
+    const liters = session?.lastTotalLiters || session?.cartLiters || 20;
+    let exampleBullets = '';
+    if (liters <= 10) {
+      exampleBullets = `• *10L* de Mojito Tradicional\n• _(O 2 variedades de 5L como 5L Mojito y 5L Sangría)_`;
+    } else if (liters === 15) {
+      exampleBullets = `• *10L* de Mojito Tradicional\n• *5L* de Sangría`;
+    } else if (liters === 20) {
+      exampleBullets = `• *10L* de Mojito Tradicional\n• *10L* de Sangría`;
+    } else if (liters === 25) {
+      exampleBullets = `• *10L* de Mojito Tradicional\n• *10L* de Aperol Spritz\n• *5L* de Sangría`;
+    } else {
+      const mitad = Math.round(liters / 20) * 10;
+      const resto = liters - mitad;
+      exampleBullets = `• *${mitad}L* de Mojito Tradicional\n• *${resto}L* de Sangría`;
     }
 
-    // Caso 2: Contiene una etiqueta de imagen al inicio seguida de texto
-    const leadingImgMatch = trimmed.match(/^\[IMG:([^\]]+)\]\s*([\s\S]+)$/i);
-    if (leadingImgMatch) {
-      outBubbles.push({ type: 'image', file: leadingImgMatch[1].trim() });
-      const cleanRemaining = sanitizeCustomerFacingReply(leadingImgMatch[2]);
-      const formattedRemaining = formatWhatsAppReply(cleanRemaining);
-      if (formattedRemaining) outBubbles.push(formattedRemaining);
-      continue;
-    }
+    const followUpBubble = `👆 *¡Aquí tienes nuestra carta completa!*
 
-    const cleaned = sanitizeCustomerFacingReply(trimmed);
-    const formatted = formatWhatsAppReply(cleaned);
-    if (formatted) outBubbles.push(formatted);
+Para cubrir tus *${liters} Litros*, puedes armar tu combinación favorita en formatos de 5L o 10L.
+
+Por ejemplo:
+${exampleBullets}
+
+_(También puedes sumar combinados como Piscola o Mocktails sin alcohol)._
+
+*¿Qué variedades te gustaría incluir en tu barra?*`;
+
+    outBubbles.push(formatWhatsAppReply(followUpBubble));
+  }
+
+  // Si hay imagen de catálogo, nos aseguramos de que la imagen sea la primera burbuja
+  if (hasCatalogImg && outBubbles.length >= 2) {
+    const imgIndex = outBubbles.findIndex((b) => typeof b === 'object' && b.file === 'lista_precios_completa.webp');
+    if (imgIndex > 0) {
+      const [imgObj] = outBubbles.splice(imgIndex, 1);
+      outBubbles.unshift(imgObj);
+    }
   }
 
   if (outBubbles.length === 0) return null;
@@ -455,7 +510,7 @@ export async function runAiAgentTurn(conversationTurns, userMessage, context = {
     if (!rawReply && lastToolFormattedText) {
       rawReply = lastToolFormattedText;
     }
-    const bubbles = parseReplyToBubbles(rawReply);
+    const bubbles = parseReplyToBubbles(rawReply, session);
     return {
       replyText: bubbles || null,
       toolCallsMade
@@ -600,7 +655,7 @@ export async function runAiAgentTurn(conversationTurns, userMessage, context = {
     if (!rawReply && lastToolFormattedText) {
       rawReply = lastToolFormattedText;
     }
-    const bubbles = parseReplyToBubbles(rawReply);
+    const bubbles = parseReplyToBubbles(rawReply, session);
     return {
       replyText: bubbles || null,
       toolCallsMade

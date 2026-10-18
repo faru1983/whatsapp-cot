@@ -34,6 +34,7 @@ import {
   handleRuntimeToggleCommand
 } from './logic/bot-runtime-flags.js';
 import { processAiAgentMessage } from './agent-ia/index.js';
+import { parseReplyToBubbles } from './agent-ia/llm-runner.js';
 import {
   isOperatorMenuCommand,
   isOperatorMidFlowState,
@@ -293,7 +294,21 @@ async function resolveClientPhoneLabel(message, sock, sessionId) {
 async function deliverBotReply(sock, targetJid, reply, timing = {}) {
   if (!reply) return;
 
-  const replies = Array.isArray(reply) ? reply : [reply];
+  const rawReplies = Array.isArray(reply) ? reply : [reply];
+  const replies = [];
+
+  for (const item of rawReplies) {
+    if (typeof item === 'string' && /\[(?:IMG|VID):[^\]]+\]/i.test(item)) {
+      const parsed = parseReplyToBubbles(item);
+      if (Array.isArray(parsed)) {
+        replies.push(...parsed);
+      } else if (parsed) {
+        replies.push(parsed);
+      }
+    } else if (item) {
+      replies.push(item);
+    }
+  }
 
   try {
     await sock.assertSessions([targetJid], true);
