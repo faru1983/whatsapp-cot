@@ -6,9 +6,11 @@
 
 import { parseGuestsFromText } from '../logic/operator-draft.js';
 import { parseCelebrationType } from '../logic/eventos-helpers.js';
+import { parseDate, findLocationByFuzzyMatch } from '../logic/utils.js';
 
 /**
- * analyzeMessageContext: Analiza el contexto de la conversación.
+ * analyzeMessageContext: Analiza el contexto de la conversación leyendo todo el chat
+ * para extraer invitados, fecha, comuna, tragos por persona y estado del flujo.
  * 
  * @param {object} session - Sesión SQLite del cliente
  * @param {string} currentText - Texto que acaba de enviar el cliente
@@ -18,6 +20,10 @@ export function analyzeMessageContext(session, currentText) {
   const turns = session?.history?.turns || [];
   const text = String(currentText || '').trim();
 
+  // Historial de mensajes enviados por el cliente
+  const userTurns = turns.filter((t) => t.role === 'user').map((t) => t.text);
+  const allUserTexts = [...userTurns, text].filter(Boolean);
+
   // 1. Detectar si viene de anuncio Meta
   const isFromMetaAd = Boolean(
     session?.metaFromCtwa ||
@@ -25,7 +31,7 @@ export function analyzeMessageContext(session, currentText) {
     session?.metaAdSourceId
   );
 
-  // 2. Extraer si el último mensaje previo del asistente preguntaba por invitados
+  // 2. Extraer qué estaba esperando el asistente en su último mensaje
   let waitingForGuests = false;
   let waitingForDrinksPerPerson = false;
   let waitingForFlavors = false;
@@ -42,12 +48,49 @@ export function analyzeMessageContext(session, currentText) {
     }
   }
 
-  // 3. Extracción de señales en el mensaje del cliente
+  // 3. Extracción de señales en el mensaje actual y memoria del chat
   const isTragosOnly = /\b(?:tragos?|c[oó]cteles?|copas?|p\/p|por persona|pp)\b/i.test(text);
-  const detectedGuests = (isTragosOnly || waitingForDrinksPerPerson || (session?.guests && !waitingForGuests))
+
+  // Extracción de invitados: busca en mensaje actual o en turnos previos del cliente
+  let detectedGuests = (isTragosOnly || waitingForDrinksPerPerson)
     ? null
     : parseGuestsFromText(text);
-  const detectedCelebration = parseCelebrationType(text);
+
+  if (!detectedGuests && !session?.guests) {
+    for (const pastMsg of [...userTurns].reverse()) {
+      const g = parseGuestsFromText(pastMsg);
+      if (g) {
+        detectedGuests = g;
+        break;
+      }
+    }
+  }
+
+  // Extracción de fecha tentativa: busca en mensaje actual o en turnos previos
+  let detectedDate = parseDate(text);
+  if (!detectedDate && !session?.eventDate) {
+    for (const pastMsg of [...userTurns].reverse()) {
+      const d = parseDate(pastMsg);
+      if (d) {
+        detectedDate = d;
+        break;
+      }
+    }
+  }
+
+  // Extracción de comuna o ciudad: busca en mensaje actual o en turnos previos
+  let detectedCommune = findLocationByFuzzyMatch(text)?.name || null;
+  if (!detectedCommune && !session?.commune) {
+    for (const pastMsg of [...userTurns].reverse()) {
+      const loc = findLocationByFuzzyMatch(pastMsg)?.name;
+      if (loc) {
+        detectedCommune = loc;
+        break;
+      }
+    }
+  }
+
+  const detectedCelebration = parseCelebrationType(text) || (session?.celebrationType ? null : parseCelebrationType(allUserTexts.join(' ')));
 
   // Detección de tragos por persona (ej: "2", "3", "3 tragos", "3 trago por persona", "dos", "tres")
   let detectedDrinksPerPerson = null;
@@ -76,6 +119,8 @@ export function analyzeMessageContext(session, currentText) {
     waitingForDrinksPerPerson,
     waitingForFlavors,
     detectedGuests,
+    detectedDate,
+    detectedCommune,
     detectedCelebration,
     detectedDrinksPerPerson,
     isDirectBarrelQuery

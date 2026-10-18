@@ -461,6 +461,9 @@ assert(isValidFreeformLocationCapture('Talca'), `Talca libre sigue siendo válid
   const { applyContactFromMessage, splitStreetAndComuna } = await import('../src/logic/cot-contact.js');
   assert(extractGuestsFromMessage('15 diciembre') == null, `fecha "15 diciembre" ≠ invitados`);
   assert(extractGuestsFromMessage('15 de diciembre') == null, `fecha "15 de diciembre" ≠ invitados`);
+  assert(extractGuestsFromMessage('el 23 de dic.') == null, `fecha abreviada "el 23 de dic." ≠ invitados`);
+  assert(extractGuestsFromMessage('En Coquimbo el 23 de dic.') == null, `fecha y comuna "En Coquimbo el 23 de dic." ≠ invitados`);
+  assert(extractGuestsFromMessage('Para 50 pers.') === 50, `explícito "Para 50 pers." === 50`);
   assert(extractGuestsFromMessage('50 invitados') === 50, `explícito 50 invitados`);
   assert(extractGuestsFromMessage('treinta personas') === 30, `palabras + unidad → invitados`);
   assert(extractGuestsFromMessage('somos como cincuenta') === 50, `decena en palabras ≥12 → invitados`);

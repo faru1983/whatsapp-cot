@@ -179,41 +179,6 @@ function getMessageTimestampSeconds(message) {
 }
 
 /**
- * isLikelyMetaAdsAutoReply: Detecta si un mensaje saliente (fromMe) es la auto-respuesta
- * instantánea de Meta Ads / WhatsApp Business basándose en la física del envío (tiempo y posición).
- * Cero textos fijos: Meta responde en milisegundos (<= 3s) del mensaje del cliente y solo al inicio del chat.
- * Un ser humano tarda físicamente >= 4-5 segundos en leer, pensar, escribir y presionar enviar.
- *
- * @param {object} opts
- * @param {object} opts.session - Sesión SQLite del cliente
- * @param {number} opts.msgSec - Timestamp en segundos de este mensaje saliente
- * @returns {boolean}
- */
-function isLikelyMetaAdsAutoReply({ session, msgSec }) {
-  if (!session) return false;
-  // Solo puede ocurrir una sola vez por chat
-  if (session.metaAutoReplyReceived) return false;
-
-  const turnsCount = session.history?.turns?.length || 0;
-  // Solo puede ocurrir en el turno inicial (Turno 0 o recién empezando)
-  if (turnsCount > 1) return false;
-
-  // Tiempo transcurrido desde el último mensaje entrante del cliente
-  const lastInboundSec = session.lastInboundMsgSec
-    || (session.lastInboundAt ? Math.floor(session.lastInboundAt / 1000) : 0);
-
-  if (lastInboundSec > 0) {
-    const elapsedSeconds = Math.abs(msgSec - lastInboundSec);
-    // Si llegó en 3 segundos o menos del mensaje del cliente, es una máquina (Meta Ads instantáneo).
-    return elapsedSeconds <= 3;
-  }
-
-  // Respaldo por si el mensaje entrante y saliente llegaron en el mismo paquete de red
-  const nowSec = Math.floor(Date.now() / 1000);
-  return turnsCount === 0 && Math.abs(msgSec - nowSec) <= 3;
-}
-
-/**
  * toClientJid: Normaliza un número o JID al formato @s.whatsapp.net.
  *
  * @param {string} rawTarget - "569..." o JID completo
@@ -748,12 +713,22 @@ async function startBot() {
       ) {
         const preferredId = getPreferredSessionId(message);
         const session = getSession(preferredId);
-        const msgSec = getMessageTimestampSeconds(message);
 
-        // Si el mensaje saliente es una auto-respuesta de Meta Ads / WhatsApp Business:
-        // Cero strings fijos: se detecta por velocidad (<= 3 segundos del mensaje del cliente)
-        // y por turno inicial. Guardamos el texto real en el historial del agente IA.
-        if (isLikelyMetaAdsAutoReply({ session, msgSec })) {
+        // Contabilizar mensajes salientes externos (no enviados por el socket del bot)
+        session.externalOutboundCount = (session.externalOutboundCount || 0) + 1;
+
+        // Detectar si este mensaje saliente es la auto-respuesta inicial de Meta Ads / WhatsApp Business:
+        // En campañas de Meta Ads, el primer mensaje saliente es SIEMPRE el saludo automático de Meta.
+        // Guardamos el texto en el historial del agente IA para que tenga contexto y NO silenciamos el bot.
+        const isFromMeta = Boolean(
+          session.metaFromCtwa ||
+          session.metaCtwaClid ||
+          session.metaAdSourceId ||
+          session.waitingForMetaAutoReply
+        );
+        const isInitialMetaAutoReply = isFromMeta && session.externalOutboundCount === 1;
+
+        if (isInitialMetaAutoReply) {
           const targetIds = await resolveSessionIdsForCommand(sock, remoteJid);
           if (!targetIds.includes(preferredId)) targetIds.push(preferredId);
 
@@ -762,13 +737,16 @@ async function startBot() {
             tgtSession.history = tgtSession.history || { turns: [] };
             tgtSession.history.turns.push({ role: 'model', text });
             tgtSession.metaAutoReplyReceived = true;
+            tgtSession.waitingForMetaAutoReply = false;
+            tgtSession.externalOutboundCount = 1;
             tgtSession.lastOutboundAt = Date.now();
             saveSession(id, tgtSession);
           }
-          console.log(`🤖 Auto-respuesta de Meta Ads detectada por timing/posición (delta <= 3s). Guardada en historial para: ${preferredId}`);
+          console.log(`🤖 [Meta Ads Auto-Reply] Primer mensaje saliente externo guardado en memoria. Bot sigue ACTIVO en: ${preferredId}`);
           return;
         }
 
+        // Si no es la auto-respuesta inicial de Meta, es una intervención humana real de un vendedor:
         const targetIds = await resolveSessionIdsForCommand(sock, remoteJid);
         if (!targetIds.includes(preferredId)) targetIds.push(preferredId);
 
@@ -776,9 +754,10 @@ async function startBot() {
           const tgtSession = getSession(id);
           tgtSession.isMuted = true;
           tgtSession.silenciado_timestamp = Date.now();
+          tgtSession.externalOutboundCount = session.externalOutboundCount;
           saveSession(id, tgtSession);
         }
-        console.log(`🔇 Bot SILENCIADO automáticamente por intervención humana en: ${targetIds.join(', ')}`);
+        console.log(`🔇 Bot SILENCIADO automáticamente por intervención humana manual (mensaje saliente #${session.externalOutboundCount}) en: ${targetIds.join(', ')}`);
         return;
       }
 
@@ -845,6 +824,28 @@ async function startBot() {
         return;
       }
 
+      const activeEngine = getActiveAgentEngine();
+
+      // Si el cliente llega desde un anuncio Meta Ads y es su primer mensaje (clic de anuncio):
+      // Meta Ads enviará inmediatamente su propio saludo/auto-respuesta preconfigurado.
+      // Guardamos el clic inicial en el historial y NO enviamos una respuesta duplicada desde el bot.
+      // El bot responderá a partir del siguiente mensaje del cliente ("desde la segunda respuesta que salga de nosotros").
+      const isInitialMetaIcebreaker = Boolean(
+        activeEngine === 'ia' &&
+        (ctwaAttr.isCtwaSignal || session.metaFromCtwa || session.metaCtwaClid) &&
+        (!session.history?.turns || session.history.turns.length === 0) &&
+        !session.metaAutoReplyReceived
+      );
+
+      if (isInitialMetaIcebreaker) {
+        session.history = session.history || { turns: [] };
+        session.history.turns.push({ role: 'user', text: cleanText });
+        session.waitingForMetaAutoReply = true;
+        saveSession(sessionId, session);
+        console.log(`📎 Clic en anuncio Meta Ads registrado ("${cleanText}"). Esperando saludo automático de Meta antes de responder.`);
+        return;
+      }
+
       try {
         // Callback por mensaje: captura sock/sessionId de ESTE chat.
         // Así, si hay varios clientes a la vez, un SOS no se mezcla con otro.
@@ -871,7 +872,6 @@ async function startBot() {
           return applyChatLabel(sock, message, sessionId, labelConfig);
         };
 
-        const activeEngine = getActiveAgentEngine();
         const clientOptions = {
           sendAdminAlert,
           applyBusinessLabel,

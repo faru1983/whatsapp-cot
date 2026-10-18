@@ -488,7 +488,7 @@ export function parseGuestsFromText(text) {
 
   // Respaldo para prefijos comunes: "somos 25", "para 25", "unos 25", "25 aprox"
   const prefixMatch = String(text).match(/(?:somos|para|seremos|alrededor\s+de|unos|cerca\s+de|aprox\s*:?)\s*(\d{1,4})\b/i)
-    || String(text).match(/\b(\d{1,4})\s*(?:aprox|aproximado|personas?|invitados?|pax)\b/i);
+    || String(text).match(/\b(\d{1,4})\s*(?:aprox|aproximado|personas?|invitados?|pax|pers\.?)\b/i);
   if (prefixMatch) {
     const n = Number(prefixMatch[1]);
     if (n > 0 && n <= 5000) return n;

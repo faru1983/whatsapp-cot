@@ -127,6 +127,10 @@ export async function executeAgentTool(toolName, args, context = {}) {
         ? `\n\n_💡 Si prefieres una barra más acotada de bienvenida, también podemos armar opciones menores desde 10L o 15L (desde $109.990)._`
         : '';
 
+      const closingQuestion = session?.eventDate
+        ? `*¿Qué variedades te tincan más para tu barra el ${session.eventDate}?*`
+        : `*¿Qué variedades te tincan más para tu barra y para qué fecha estás pensando el evento?*`;
+
       const formattedProposalText = `*Tu Propuesta de Barra Sugerida* 🍹
 Para tus ${guests} invitados y ${drinksPerPerson} tragos por persona, calculamos:
 
@@ -145,7 +149,7 @@ _Aprox. ${formatPrice(pricePerCocktail)} por cóctel servido (neto)._${alternati
 
 Puedes armar tu barra con nuestros cócteles más pedidos: *Aperol Spritz, Ramazzotti Spritz, Mojito Tradicional, Pisco Sour Clásico, Moscow Mule o Gin & Tonic* (también tenemos combinados y mocktails).
 
-*¿Qué variedades te tincan más para tu barra y para qué fecha estás pensando el evento?*`;
+${closingQuestion}`;
 
       return {
         success: true,

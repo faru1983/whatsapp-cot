@@ -1196,18 +1196,18 @@ export function parseDate(text) {
 	if (!text) return null;
 
 	const months =
-		'enero|febrero|marzo|abril|mayo|junio|julio|agosto|septiembre|octubre|noviembre|diciembre';
+		'enero|febrero|marzo|abril|mayo|junio|julio|agosto|septiembre|octubre|noviembre|diciembre|ene|feb|mar|abr|may|jun|jul|ago|sep|sept|oct|nov|dic';
 
 	const datePatterns = [
-		// Día + mes (+ año opcional): "15 de mayo", "15 diciembre", "el 3 dic… 2027"
+		// Día + mes (+ año opcional): "15 de mayo", "15 diciembre", "el 23 de dic.", "el 3 dic… 2027"
 		// \b evita falsos positivos (ej. "enero" dentro de "género")
 		new RegExp(
-			`\\b((?:el\\s+)?\\d{1,2}\\s+(?:de\\s+)?(?:${months})(?:\\s+(?:de\\s+)?\\d{4})?)\\b`,
+			`\\b((?:el\\s+)?\\d{1,2}\\s+(?:de\\s+)?(?:${months})\\b\\.?(?:\\s+(?:de\\s+)?\\d{4})?)\\b`,
 			'i'
 		),
 		// Solo mes (con o sin preposición/año): "diciembre", "para diciembre", "en marzo 2027"
 		new RegExp(
-			`\\b((?:(?:para|en|durante|este|el)\\s+)?(?:${months})(?:\\s+(?:de\\s+)?\\d{4})?)\\b`,
+			`\\b((?:(?:para|en|durante|este|el)\\s+)?(?:${months})\\b\\.?(?:\\s+(?:de\\s+)?\\d{4})?)\\b`,
 			'i'
 		),
 		/(\d{1,2}\s*[-/]\s*\d{1,2}(?:\s*[-/]\s*\d{2,4})?)/,

@@ -103,6 +103,8 @@ export async function processAiAgentMessage(sessionId, messageText, options = {}
     if (contextMeta.detectedGuests) session.guests = contextMeta.detectedGuests;
     if (contextMeta.detectedCelebration) session.celebrationType = contextMeta.detectedCelebration;
     if (contextMeta.detectedDrinksPerPerson) session.drinksPerGuest = contextMeta.detectedDrinksPerPerson;
+    if (contextMeta.detectedDate) session.eventDate = contextMeta.detectedDate;
+    if (contextMeta.detectedCommune) session.commune = contextMeta.detectedCommune;
 
     // Preparar historial de turnos recientes (máximo 12 turnos)
     const rawTurns = session?.history?.turns || [];
@@ -130,17 +132,22 @@ export async function processAiAgentMessage(sessionId, messageText, options = {}
     } catch (err) {
       console.error('[Agent-IA] Error en ejecución:', err.message);
       
-      // Fallback de seguridad en caso de falla de API externa: silenciar y alertar
+      // Fallback de seguridad en caso de falla de API externa: silenciar y alertar en silencio
       session.isMuted = true;
+      session.silenciado_timestamp = Date.now();
+      session.history = session.history || { turns: [] };
+      session.history.turns.push({ role: 'user', text: cleanText });
+
       if (alertAdmin) {
         await alertAdmin({
           type: 'SOS',
           title: 'ERROR EN MOTOR IA (AGENTE SILENCIADO)',
-          body: `Ocurrió un error al contactar el LLM (${err.message}). El bot se silenció para no fallar ante el cliente.`
+          body: `Ocurrió un error al contactar el LLM (${err.message}). El bot se silenció automáticamente para no fallar ante el cliente. Atiende directamente desde WhatsApp.`
         });
       }
       saveSession(sessionId, session);
-      return '¡Hola! Estamos revisando tu solicitud y un asesor del equipo te escribirá enseguida para responderte.';
+      // REGLA SUPREMA: NUNCA avisar al usuario de errores ni traspasos. Retornar null (silencio absoluto).
+      return null;
     }
   });
 }

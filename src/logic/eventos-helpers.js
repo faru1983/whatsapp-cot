@@ -452,8 +452,8 @@ function extractSpanishGuestCount(text) {
 export function extractGuestsFromMessage(messageText) {
   let clean = String(messageText || '');
 
-  // Prioridad: "25 invitados" en el texto original (antes de quitar "cumpleaños 25")
-  const explicitOriginal = clean.match(/\b(\d+)\s*(personas|invitados|pax|inv)\b/i);
+  // Prioridad: "25 invitados" o "50 pers." en el texto original (antes de quitar "cumpleaños 25")
+  const explicitOriginal = clean.match(/\b(\d+)\s*(?:personas?|invitados?|pax|inv|pers\.?)\b/i);
   if (explicitOriginal) {
     return parseInt(explicitOriginal[1], 10);
   }
@@ -461,17 +461,17 @@ export function extractGuestsFromMessage(messageText) {
   const spanishUpFront = extractSpanishGuestCount(clean);
   if (spanishUpFront != null) return spanishUpFront;
 
-  // 1. Quitar fechas: "15 de mayo", "15 diciembre", "el 3 diciembre 2027"
-  // Sin esto, "15 diciembre" deja el 15 y lo toma como invitados.
+  // 1. Quitar fechas: "15 de mayo", "15 diciembre", "el 23 de dic.", "el 3 diciembre 2027"
+  // Sin esto, "23 de dic." deja el 23 y lo toma como invitados.
   const months =
-    'enero|febrero|marzo|abril|mayo|junio|julio|agosto|septiembre|octubre|noviembre|diciembre';
+    'enero|febrero|marzo|abril|mayo|junio|julio|agosto|septiembre|octubre|noviembre|diciembre|ene|feb|mar|abr|may|jun|jul|ago|sep|sept|oct|nov|dic';
   clean = clean.replace(
-    new RegExp(`\\b(?:el\\s+)?\\d{1,2}\\s+(?:de\\s+)?(?:${months})(?:\\s+(?:de\\s+)?\\d{4})?\\b`, 'gi'),
+    new RegExp(`\\b(?:el\\s+)?\\d{1,2}\\s+(?:de\\s+)?(?:${months})\\b\\.?(?:\\s+(?:de\\s+)?\\d{4})?\\b`, 'gi'),
     ' '
   );
   // Solo mes ("en diciembre", "para marzo") — no aporta invitados
   clean = clean.replace(
-    new RegExp(`\\b(?:para|en|durante|este|el)\\s+(?:${months})(?:\\s+(?:de\\s+)?\\d{4})?\\b`, 'gi'),
+    new RegExp(`\\b(?:para|en|durante|este|el)\\s+(?:${months})\\b\\.?(?:\\s+(?:de\\s+)?\\d{4})?\\b`, 'gi'),
     ' '
   );
 
@@ -488,7 +488,7 @@ export function extractGuestsFromMessage(messageText) {
   clean = clean.replace(/\b\d+\s*(l|lt|lts|litros?)\b/gi, '');
 
   // Primero buscar mención explícita de invitados (prioritario)
-  const explicitMatch = clean.match(/\b(\d+)\s*(personas|invitados|pax|inv)\b/i);
+  const explicitMatch = clean.match(/\b(\d+)\s*(?:personas?|invitados?|pax|inv|pers\.?)\b/i);
   if (explicitMatch) {
     return parseInt(explicitMatch[1], 10);
   }

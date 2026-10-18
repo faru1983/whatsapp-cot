@@ -187,6 +187,57 @@ function mapToolsForOpenAI() {
 }
 
 /**
+ * extractTextToolCall: Extrae llamadas a herramientas cuando el LLM las devuelve en texto plano
+ * (ej: JSON {"name": "..."}, formato bracket [silent_admin_escalation(...)], o XML <function=...>)
+ * muy común en modelos como Llama 3 en Nvidia/Groq/OpenAI.
+ */
+function extractTextToolCall(textContent) {
+  if (!textContent) return null;
+  const raw = String(textContent).trim();
+
+  // 1. JSON puro o dentro del texto: { "name": "...", ... }
+  if (raw.startsWith('{') && raw.endsWith('}')) {
+    try {
+      const parsed = JSON.parse(raw);
+      if (parsed.name && (parsed.parameters || parsed.arguments || parsed.args)) {
+        return { name: parsed.name, args: parsed.parameters || parsed.arguments || parsed.args || {} };
+      }
+    } catch (_) {}
+  }
+
+  // 2. Formato función estilo Python o bracket:
+  // [silent_admin_escalation(clientQuestion="...", context="...")]
+  // o silent_admin_escalation(clientQuestion="...")
+  const fnMatch = raw.match(/\[?\b([a-zA-Z0-9_]+)\(([\s\S]*?)\)\]?/);
+  if (fnMatch) {
+    const fnName = fnMatch[1];
+    const knownTools = ['silent_admin_escalation', 'calculate_event_estimate', 'calculate_formal_quote', 'calculate_direct_sale', 'get_available_cocktails_catalog', 'sync_lead_crm'];
+    if (knownTools.includes(fnName)) {
+      const rawArgs = fnMatch[2].trim();
+      const args = {};
+      const argRegex = /([a-zA-Z0-9_]+)\s*=\s*(?:"([^"\\]*(?:\\.[^"\\]*)*)"|'([^'\\]*(?:\\.[^'\\]*)*)'|(\d+(?:\.\d+)?)|true|false)/gi;
+      let m;
+      while ((m = argRegex.exec(rawArgs)) !== null) {
+        const key = m[1];
+        const val = m[2] !== undefined ? m[2] : (m[3] !== undefined ? m[3] : (m[4] !== undefined ? Number(m[4]) : true));
+        args[key] = val;
+      }
+      return { name: fnName, args };
+    }
+  }
+
+  // 3. Formato tag XML <function=name>{...}</function>
+  const xmlMatch = raw.match(/<function=([a-zA-Z0-9_]+)>(.*?)<\/function>/s);
+  if (xmlMatch) {
+    let args = {};
+    try { args = JSON.parse(xmlMatch[2]); } catch (_) {}
+    return { name: xmlMatch[1], args };
+  }
+
+  return null;
+}
+
+/**
  * runAiAgentTurn: Ejecuta un turno del agente IA resolviendo posibles tool calls.
  * 
  * @param {Array<{ role: string, text: string }>} conversationTurns - Historial previo
@@ -208,23 +259,36 @@ export async function runAiAgentTurn(conversationTurns, userMessage, context = {
   const guestsKnown = session.guests || context.contextMeta?.detectedGuests;
   const celebrationKnown = session.celebrationType || context.contextMeta?.detectedCelebration;
   const drinksKnown = session.drinksPerGuest || context.contextMeta?.detectedDrinksPerPerson;
+  const dateKnown = session.eventDate || context.contextMeta?.detectedDate;
+  const communeKnown = session.commune || context.contextMeta?.detectedCommune;
   const proposalDelivered = session.proposalDelivered || context.contextMeta?.waitingForFlavors;
 
   let stateContextBlock = '\n\n=== ESTADO ACTUAL DE LA CONVERSACIÓN ===\n';
+  if (dateKnown) {
+    stateContextBlock += `- Fecha indicada por el cliente: "${dateKnown}". (¡Ya se conoce la fecha, PROHIBIDO volver a preguntarla!).\n`;
+  }
+  if (communeKnown) {
+    stateContextBlock += `- Comuna / Ciudad indicada: "${communeKnown}". (¡Ya se conoce la ubicación, PROHIBIDO volver a preguntarla!).\n`;
+  }
+
   if (proposalDelivered) {
-    stateContextBlock += `- La propuesta estimada de coctelería YA FUE ENTREGADA al cliente con los 6 sabores top y la pregunta por la fecha.\n`
-      + `- Si el cliente responde indicando qué sabores le gustan, para qué fecha es su evento, o hace preguntas de cierre/reserva:\n`
+    stateContextBlock += `- La propuesta estimada de coctelería YA FUE ENTREGADA al cliente con los 6 sabores top y opciones salvavidas.\n`
+      + `- Si el cliente responde indicando qué sabores le gustan, fecha o hace preguntas de cierre/reserva:\n`
       + `  INSTRUCCIÓN OBLIGATORIA: Llama INMEDIATAMENTE a la herramienta silent_admin_escalation(clientQuestion, context).\n`
       + `  REGLA DE ORO: Guarda ABSOLUTO SILENCIO hacia el cliente. NO generes ninguna respuesta de texto.\n`
       + `- Si el cliente hace una consulta compleja o no estás 100% seguro: llama a silent_admin_escalation y guarda silencio.\n`;
   } else if (guestsKnown && !drinksKnown) {
-    stateContextBlock += `- Invitados indicados: ${guestsKnown} personas.\n- Tragos por persona: AÚN NO DEFINIDOS.\n- INSTRUCCIÓN OBLIGATORIA: NO uses herramientas de cálculo todavía. Tu respuesta obligatoria debe ser exactamente:
-"¡Súper! 🍹 Ahora definamos el consumo por persona para calcular los litros ideales:
+    let introMention = `tus ${guestsKnown} invitados`;
+    if (communeKnown && dateKnown) introMention += ` en ${communeKnown} (${dateKnown})`;
+    else if (communeKnown) introMention += ` en ${communeKnown}`;
+    else if (dateKnown) introMention += ` para el ${dateKnown}`;
 
-• *2 tragos p/p:* ideal como complemento si habrá cerveza, vino u otras bebidas.
-• *3 o más tragos p/p:* recomendado si será la barra principal de la fiesta.
-
-*¿Cuántos tragos por persona te gustaría calcular?*"\n`;
+    stateContextBlock += `- Invitados indicados: ${guestsKnown} personas.\n`
+      + `- Tragos por persona: AÚN NO DEFINIDOS.\n`
+      + `- INSTRUCCIÓN OBLIGATORIA: NO uses herramientas de cálculo todavía. Valida con entusiasmo y calidez (menciona brevemente ${introMention}) y dale las dos referencias para definir el consumo:\n\n`
+      + `• *2 tragos p/p:* ideal como complemento si habrá cerveza, vino u otras bebidas.\n`
+      + `• *3 o más tragos p/p:* recomendado si será la barra principal de la fiesta.\n\n`
+      + `Cierra preguntando en negrita: *¿Cuántos tragos por persona te gustaría calcular?*\n`;
   } else if (guestsKnown && drinksKnown) {
     stateContextBlock += `- Invitados: ${guestsKnown} personas.\n- Tragos por persona: ${drinksKnown}.\n- INSTRUCCIÓN: Llama a calculate_event_estimate con guests=${guestsKnown} y drinksPerPerson=${drinksKnown} para entregar la "Propuesta de Barra Sugerida" con el formato oficial.\n`;
   } else {
@@ -415,20 +479,9 @@ export async function runAiAgentTurn(conversationTurns, userMessage, context = {
         continue;
       }
 
-      // 2. Tool calls devueltos en texto plano JSON por modelos como Llama 3
+      // 2. Tool calls devueltos en texto plano (JSON, Python/Llama [fn(...)], o XML)
       const textContent = (message.content || '').trim();
-      let parsedJsonCall = null;
-      if (textContent.startsWith('{') && textContent.endsWith('}')) {
-        try {
-          const parsed = JSON.parse(textContent);
-          if (parsed.name && (parsed.parameters || parsed.arguments || parsed.args)) {
-            parsedJsonCall = {
-              name: parsed.name,
-              args: parsed.parameters || parsed.arguments || parsed.args || {}
-            };
-          }
-        } catch (_) {}
-      }
+      const parsedJsonCall = extractTextToolCall(textContent);
 
       if (parsedJsonCall) {
         const fnName = parsedJsonCall.name;
