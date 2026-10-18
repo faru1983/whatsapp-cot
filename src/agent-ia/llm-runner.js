@@ -80,25 +80,31 @@ export function formatWhatsAppReply(text) {
   // 6. Arreglar viñetas consecutivas que quedaron en la misma línea
   out = out.replace(/([^\n])[ \t]+•[ \t]+/g, '$1\n• ');
 
-  // 7. Formato específico para la pregunta de tragos por persona (sin duplicaciones)
+  // 7. Separar preguntas que quedaron en la misma línea después de viñeta o texto
+  out = out.replace(/([^\n])[ \t]+([*_]*¿[^?\n]+\?[*_]*)/g, '$1\n\n$2');
+  // Asegurar doble salto si quedó con salto simple después de una viñeta
+  out = out.replace(/(•[^\n]+)\n(?!\n)[ \t]*([*_]*¿[^?\n]+\?[*_]*)/g, '$1\n\n$2');
+
+  // 8. Normalizar formato específico para la pregunta de tragos por persona (consumiendo asteriscos existentes)
   out = out.replace(
-    /(?:\*|_)*¿Cuántos tragos por persona te gustaría calcular\?(?:\*|_)*[ \t]*(?:\*|_)*Con eso te entrego un presupuesto estimado\.?(?:\*|_)*|¿Cuántos tragos por persona te gustaría calcular\?/gi,
+    /[*_]*¿Cuántos tragos por persona te gustaría calcular\?[*_]*([ \t]*[*_]*Con eso te entrego un presupuesto estimado\.?[*_]*)?/gi,
     '*¿Cuántos tragos por persona te gustaría calcular?*'
   );
 
-  // 8. Asegurar que preguntas con ¿ ... ? queden siempre en negrita WhatsApp
-  out = out.replace(/(?:^|\n)([ \t]*)(¿[^?\n]+\?)/gm, (match, prefix, q) => {
-    const cleanQ = q.trim();
-    if (cleanQ.startsWith('*') && cleanQ.endsWith('*')) return `${prefix}${cleanQ}`;
-    return `${prefix}*${cleanQ.replace(/^\*+|\*+$/g, '')}*`;
-  });
+  // 9. Asegurar que preguntas con ¿ ... ? queden siempre en negrita WhatsApp (*¿...?*)
+  out = out.replace(/(^|\n)([ \t]*)[*_]*(¿[^?\n]+\?)[*_]*/gm, '$1$2*$3*');
 
-  // 9. Si la pregunta de cierre quedó pegada después de una viñeta, separar con doble salto
-  out = out.replace(/(•[^\n]+?)[ \t]+(\*?¿)/g, '$1\n\n$2');
+  // 10. Colapsar cualquier asterisco múltiple remanente (ej: ** o *** -> *) para formato WhatsApp
+  out = out.replace(/\*{2,}/g, '*');
 
-  // 10. Separar bloques clave de cotización si quedaron en la misma línea o con salto simple
-  out = out.replace(/([^\n])[ \t]+(\*Presupuesto Estimado\*)/g, '$1\n\n$2');
-  out = out.replace(/([^\n])\n(?!\n)[ \t]*(\*Presupuesto Estimado\*)/g, '$1\n\n$2');
+  // 11. Separar bloques clave de cotización si quedaron en la misma línea o con salto simple
+  out = out.replace(/([^\n])[ \t]+(\*Presupuesto Estimado:?\*?)/gi, '$1\n\n$2');
+  out = out.replace(/([^\n])\n(?!\n)[ \t]*(\*Presupuesto Estimado:?\*?)/gi, '$1\n\n$2');
+
+  out = out.replace(/([^\n])[ \t]+(\*Servicio Todo Incluido:?\*?)/gi, '$1\n\n$2');
+  out = out.replace(/([^\n])\n(?!\n)[ \t]*(\*Servicio Todo Incluido:?\*?)/gi, '$1\n\n$2');
+  out = out.replace(/([^\n])[ \t]+(\*Todo Incluido:?\*?)/gi, '$1\n\n$2');
+  out = out.replace(/([^\n])\n(?!\n)[ \t]*(\*Todo Incluido:?\*?)/gi, '$1\n\n$2');
 
   out = out.replace(/([^\n])[ \t]+(Lo mejor es que solo pagas)/gi, '$1\n\n$2');
   out = out.replace(/([^\n])\n(?!\n)[ \t]*(Lo mejor es que solo pagas)/gi, '$1\n\n$2');
@@ -118,17 +124,63 @@ export function formatWhatsAppReply(text) {
   out = out.replace(/([^\n])[ \t]+(🍹[ \t*\*]*Cócteles)/gi, '$1\n\n$2');
   out = out.replace(/([^\n])\n(?!\n)[ \t]*(🍹[ \t*\*]*Cócteles)/gi, '$1\n\n$2');
 
-  // 11. Limpiar espacios horizontales duplicados en cada línea y espacios antes de puntuación
+  // 12. Limpiar espacios horizontales duplicados en cada línea y espacios antes de puntuación
   out = out.replace(/[ \t]{2,}/g, ' ');
   out = out.replace(/[ \t]+([.,;:!?])/g, '$1');
 
-  // 11. Limpiar espacios vacíos al final de cada línea
+  // 13. Limpiar espacios vacíos al final de cada línea
   out = out.replace(/[ \t]+$/gm, '');
 
-  // 12. Máximo 2 saltos de línea consecutivos
+  // 14. Máximo 2 saltos de línea consecutivos
   out = out.replace(/\n{3,}/g, '\n\n');
 
   return out.trim();
+}
+
+/**
+ * parseReplyToBubbles: Parsea la respuesta del bot hacia WhatsApp.
+ * Si contiene '===BURBUJA===', separa en múltiples burbujas (array).
+ * Si contiene '[IMG:archivo.webp]', crea el objeto de imagen { type: 'image', file: '...' }.
+ * 
+ * @param {string} text - Texto completo a procesar
+ * @returns {string|object|Array<string|object>|null}
+ */
+export function parseReplyToBubbles(text) {
+  if (!text) return null;
+  const rawStr = String(text).trim();
+  if (!rawStr) return null;
+
+  const rawParts = rawStr.split(/\n*[ \t]*===BURBUJA===[ \t]*\n*/i);
+  const outBubbles = [];
+
+  for (const part of rawParts) {
+    const trimmed = part.trim();
+    if (!trimmed) continue;
+
+    // Caso 1: La burbuja es solo una etiqueta de imagen [IMG:archivo.webp]
+    const singleImgMatch = trimmed.match(/^\[IMG:([^\]]+)\]$/i);
+    if (singleImgMatch) {
+      outBubbles.push({ type: 'image', file: singleImgMatch[1].trim() });
+      continue;
+    }
+
+    // Caso 2: Contiene una etiqueta de imagen al inicio seguida de texto
+    const leadingImgMatch = trimmed.match(/^\[IMG:([^\]]+)\]\s*([\s\S]+)$/i);
+    if (leadingImgMatch) {
+      outBubbles.push({ type: 'image', file: leadingImgMatch[1].trim() });
+      const cleanRemaining = sanitizeCustomerFacingReply(leadingImgMatch[2]);
+      const formattedRemaining = formatWhatsAppReply(cleanRemaining);
+      if (formattedRemaining) outBubbles.push(formattedRemaining);
+      continue;
+    }
+
+    const cleaned = sanitizeCustomerFacingReply(trimmed);
+    const formatted = formatWhatsAppReply(cleaned);
+    if (formatted) outBubbles.push(formatted);
+  }
+
+  if (outBubbles.length === 0) return null;
+  return outBubbles.length === 1 ? outBubbles[0] : outBubbles;
 }
 
 /**
@@ -272,11 +324,11 @@ export async function runAiAgentTurn(conversationTurns, userMessage, context = {
   }
 
   if (proposalDelivered) {
-    stateContextBlock += `- La propuesta estimada de coctelería YA FUE ENTREGADA al cliente con los 6 sabores top y opciones salvavidas.\n`
-      + `- Si el cliente responde indicando qué sabores le gustan, fecha o hace preguntas de cierre/reserva:\n`
-      + `  INSTRUCCIÓN OBLIGATORIA: Llama INMEDIATAMENTE a la herramienta silent_admin_escalation(clientQuestion, context).\n`
-      + `  REGLA DE ORO: Guarda ABSOLUTO SILENCIO hacia el cliente. NO generes ninguna respuesta de texto.\n`
-      + `- Si el cliente hace una consulta compleja o no estás 100% seguro: llama a silent_admin_escalation y guarda silencio.\n`;
+    stateContextBlock += `- La propuesta estimada de coctelería YA FUE ENTREGADA al cliente en 2 burbujas (con la pregunta si desea ver la carta de variedades).\n`
+      + `- Si el cliente responde afirmativamente ("sí", "dale", "porfa", "mándala", "bueno") o pide la carta: LLAMA OBLIGATORIAMENTE a send_cocktails_catalog().\n`
+      + `- Si el cliente indica qué variedades o sabores quiere (ej: "10L Mojito y 10L Sangría", "Mojito y Aperol"): LLAMA OBLIGATORIAMENTE a build_custom_cart_quote(items).\n`
+      + `- Si el cliente confirma que el carrito está correcto ("sí", "me parece bien", "perfecto así"): responde entusiasmado y pregunta la fecha del evento (*¿Para qué fecha estás cotizando tu evento, así revisamos la disponibilidad de inmediato en el calendario?*).\n`
+      + `- Si el cliente responde con la fecha del evento (ej: "15 de noviembre") o consultas complejas de reserva: LLAMA INMEDIATAMENTE a silent_admin_escalation(clientQuestion, context) y GUARDA ABSOLUTO SILENCIO.\n`;
   } else if (guestsKnown && !drinksKnown) {
     let introMention = `tus ${guestsKnown} invitados`;
     if (communeKnown && dateKnown) introMention += ` en ${communeKnown} (${dateKnown})`;
@@ -332,6 +384,7 @@ export async function runAiAgentTurn(conversationTurns, userMessage, context = {
 
     // Loop de Tool Calling (máximo 4 rondas para evitar bucles infinitos)
     let loopCount = 0;
+    let lastToolFormattedText = null;
     while (loopCount < 4) {
       const candidates = currentResponse.response?.candidates || [];
       const functionCalls = candidates[0]?.content?.parts?.filter((p) => p.functionCall) || [];
@@ -351,6 +404,10 @@ export async function runAiAgentTurn(conversationTurns, userMessage, context = {
         const { name, args } = part.functionCall;
         toolCallsMade.push({ name, args });
         const toolResult = await executeAgentTool(name, args, context);
+
+        if (toolResult?.formattedProposalText || toolResult?.formattedCatalogText || toolResult?.formattedCartText) {
+          lastToolFormattedText = toolResult.formattedProposalText || toolResult.formattedCatalogText || toolResult.formattedCartText;
+        }
 
         if (name === 'silent_admin_escalation' || toolResult?.silenceClient || session?.isMuted) {
           shouldMuteImmediately = true;
@@ -394,11 +451,13 @@ export async function runAiAgentTurn(conversationTurns, userMessage, context = {
       };
     }
 
-    const rawReply = currentResponse.response?.text?.() || '';
-    const cleaned = sanitizeCustomerFacingReply(rawReply);
-    const formatted = formatWhatsAppReply(cleaned);
+    let rawReply = currentResponse.response?.text?.() || '';
+    if (!rawReply && lastToolFormattedText) {
+      rawReply = lastToolFormattedText;
+    }
+    const bubbles = parseReplyToBubbles(rawReply);
     return {
-      replyText: formatted || null,
+      replyText: bubbles || null,
       toolCallsMade
     };
   }
@@ -435,6 +494,7 @@ export async function runAiAgentTurn(conversationTurns, userMessage, context = {
     });
 
     let loopCount = 0;
+    let lastToolFormattedText = null;
     while (loopCount < 4) {
       const choice = completion.choices[0];
       const message = choice.message;
@@ -452,6 +512,10 @@ export async function runAiAgentTurn(conversationTurns, userMessage, context = {
 
           toolCallsMade.push({ name: fnName, args: fnArgs });
           const toolResult = await executeAgentTool(fnName, fnArgs, context);
+
+          if (toolResult?.formattedProposalText || toolResult?.formattedCatalogText || toolResult?.formattedCartText) {
+            lastToolFormattedText = toolResult.formattedProposalText || toolResult.formattedCatalogText || toolResult.formattedCartText;
+          }
 
           if (fnName === 'silent_admin_escalation' || toolResult?.silenceClient || session?.isMuted) {
             return {
@@ -532,11 +596,13 @@ export async function runAiAgentTurn(conversationTurns, userMessage, context = {
       };
     }
 
-    const rawReply = completion.choices[0]?.message?.content || '';
-    const cleaned = sanitizeCustomerFacingReply(rawReply);
-    const formatted = formatWhatsAppReply(cleaned);
+    let rawReply = completion.choices[0]?.message?.content || '';
+    if (!rawReply && lastToolFormattedText) {
+      rawReply = lastToolFormattedText;
+    }
+    const bubbles = parseReplyToBubbles(rawReply);
     return {
-      replyText: formatted || null,
+      replyText: bubbles || null,
       toolCallsMade
     };
   }

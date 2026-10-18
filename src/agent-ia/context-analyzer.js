@@ -43,7 +43,7 @@ export function analyzeMessageContext(session, currentText) {
       waitingForGuests = true;
     } else if (botText.includes('tragos') || botText.includes('cócteles') || botText.includes('cocteles') || botText.includes('copas') || botText.includes('p/p') || botText.includes('por persona')) {
       waitingForDrinksPerPerson = true;
-    } else if (botText.includes('variedades') || botText.includes('fecha') || botText.includes('sabores') || botText.includes('favoritos') || botText.includes('carta')) {
+    } else if (botText.includes('variedades') || botText.includes('fecha') || botText.includes('sabores') || botText.includes('favoritos') || botText.includes('carta') || botText.includes('propuesta') || botText.includes('acomoda')) {
       waitingForFlavors = true;
     }
   }

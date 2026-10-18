@@ -122,7 +122,10 @@ export async function processAiAgentMessage(sessionId, messageText, options = {}
       // Registrar turno del usuario y del bot (solo si no fue silenciado)
       session.history.turns.push({ role: 'user', text: cleanText });
       if (replyText && !session.isMuted) {
-        session.history.turns.push({ role: 'model', text: replyText });
+        const textForHistory = Array.isArray(replyText)
+          ? replyText.map((p) => (typeof p === 'string' ? p : `[IMG:${p.file}]`)).join('\n\n')
+          : replyText;
+        session.history.turns.push({ role: 'model', text: textForHistory });
         session.lastOutboundAt = Date.now();
       }
 

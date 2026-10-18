@@ -6,3 +6,5 @@ auth/
 db/bot-runtime.json
 .DS_Store
 Thumbs.db
+oracle/
+scripts/deploy-remote.ps1

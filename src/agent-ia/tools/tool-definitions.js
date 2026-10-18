@@ -132,38 +132,61 @@ export const AGENT_TOOLS_DEFINITIONS = [
     }
   },
   {
-    name: 'get_available_cocktails_catalog',
-    description: 'Obtiene la carta de sabores de cócteles. ESTÁ ESTRICTAMENTE PROHIBIDO USAR ante preguntas genéricas de precios como "¿cuáles son los valores?" o "¿cuánto cuesta?". ÚSALO ÚNICAMENTE cuando el cliente ya esté cotizando y pida ver la carta de sabores o la lista de cócteles disponibles (ej: "qué sabores tienen", "muéstrame las variedades", "qué cócteles hay").',
+    name: 'send_cocktails_catalog',
+    description: 'Envía la carta oficial completa de variedades y precios (imagen lista_precios_completa.webp en la primera burbuja + texto de instrucciones y ejemplo dinámico según los litros del evento en la segunda burbuja). ÚSALO OBLIGATORIAMENTE cuando el cliente responda afirmativamente a la propuesta (ej: "sí", "dale", "porfa", "mándala", "claro", "bueno") o pida ver la carta de cócteles.',
     parameters: {
       type: 'OBJECT',
       properties: {
         format: {
           type: 'STRING',
           enum: ['dispensador', 'muro'],
-          description: 'Formato a consultar (dispensador o muro).'
-        },
-        category: {
-          type: 'STRING',
-          enum: ['all', 'cocteles', 'combinados', 'mocktails'],
-          description: 'Categoría a consultar (all por defecto).'
+          description: 'Formato del evento (opcional, por defecto dispensador).'
         }
       },
-      required: ['format']
+      required: []
+    }
+  },
+  {
+    name: 'build_custom_cart_quote',
+    description: 'Arma el resumen oficial tipo carrito de compras con los cócteles y litros elegidos por el cliente, calculando los subtotales por ítem, el total neto, las estadísticas de consumo (cócteles, tragos p/p y valor unitario) y los servicios incluidos ($0). ÚSALO OBLIGATORIAMENTE cuando el cliente indique las variedades o sabores que quiere para su evento (ej: "10L de Mojito y 10L de Sangría", "quiero Mojito y Aperol").',
+    parameters: {
+      type: 'OBJECT',
+      properties: {
+        items: {
+          type: 'ARRAY',
+          items: {
+            type: 'OBJECT',
+            properties: {
+              flavor: {
+                type: 'STRING',
+                description: 'Nombre del cóctel elegido (ej: "Mojito Tradicional", "Sangría", "Aperol Spritz", "Pisco Sour Clásico", "Moscow Mule", "Gin & Tonic", "Caipiriña", "Piscola").'
+              },
+              liters: {
+                type: 'INTEGER',
+                description: 'Litros del sabor (ej: 5, 10, 20 o 30).'
+              }
+            },
+            required: ['flavor', 'liters']
+          },
+          description: 'Lista de variedades elegidas con sus respectivos litros.'
+        }
+      },
+      required: ['items']
     }
   },
   {
     name: 'silent_admin_escalation',
-    description: 'Silencia el bot (MUTE) de forma invisible para el cliente y envía una alerta interna inmediata al administrador de Cocktails on Tap. ÚSALO OBLIGATORIAMENTE cuando: 1) El cliente responda indicando qué sabores le interesan o la fecha de su evento tras recibir la cotización estimada (listo para coordinar y cerrar reserva con un humano). 2) El cliente haga preguntas específicas, complejas o dudosas fuera de la base de conocimiento (comida, catering, DJ, bandas, magos, traslados especiales, etc.). 3) El cliente solicite hablar con una persona humana o negociar precios. 4) El mensaje sea confuso o ambiguo y no se pueda responder con certeza. REGLA ESTRICTA: Tras invocar esta herramienta, NO envíes ningún mensaje al cliente; guarda absoluto silencio.',
+    description: 'Silencia el bot (MUTE) de forma invisible para el cliente y envía una alerta interna inmediata al administrador de Cocktails on Tap. ÚSALO OBLIGATORIAMENTE cuando: 1) El cliente responda con la fecha de su evento tras confirmar el carrito de compras (o en cualquier momento que indique la fecha final para coordinar reserva). 2) El cliente haga preguntas específicas complejas fuera de catálogo o pida hablar con un humano. REGLA ESTRICTA: Tras invocar esta herramienta, NO envíes ningún mensaje al cliente; guarda absoluto silencio.',
     parameters: {
       type: 'OBJECT',
       properties: {
         clientQuestion: {
           type: 'STRING',
-          description: 'La consulta puntual, sabores elegidos, fecha o solicitud del cliente.'
+          description: 'La fecha indicada por el cliente, su solicitud o mensaje.'
         },
         context: {
           type: 'STRING',
-          description: 'Breve contexto del estado actual de la conversación (ej: "Cotizó 80 personas, 3 tragos p/p. Ahora respondió con Aperol y Mojito para el 15 de noviembre").'
+          description: 'Breve contexto del estado actual de la conversación (ej: "Cliente confirmó carrito de 20L y fecha 15 de noviembre").'
         }
       },
       required: ['clientQuestion']
