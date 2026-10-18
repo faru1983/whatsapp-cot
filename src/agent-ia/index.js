@@ -5,7 +5,7 @@
 
 import { getSession, saveSession, resetSession } from '../core/db.js';
 import { runAiAgentTurn } from './llm-runner.js';
-import { analyzeMessageContext } from './context-analyzer.js';
+import { analyzeMessageContext, isPaymentConfirmationText } from './context-analyzer.js';
 import { jidToE164 } from '../logic/cot-event-quote.js';
 import { syncCrmCuriousAsync, syncCrmNameAsync } from '../logic/cot-crm-sync.js';
 
@@ -95,6 +95,30 @@ export async function processAiAgentMessage(sessionId, messageText, options = {}
       return null;
     }
 
+    // Confirmación de pago / comprobante de transferencia (ej: compra de barril desechable o web)
+    if (isPaymentConfirmationText(cleanText)) {
+      session.isMuted = true;
+      session.silenciado_timestamp = Date.now();
+      session.paymentConfirmationReceived = true;
+      session.history = session.history || { turns: [] };
+      session.history.turns.push({ role: 'user', text: cleanText });
+
+      const reply = '¡Muchas gracias! Revisamos y te confirmamos enseguida 🍹';
+      session.history.turns.push({ role: 'model', text: reply });
+      session.lastOutboundAt = Date.now();
+
+      if (alertAdmin) {
+        await alertAdmin({
+          type: 'SUCCESS',
+          title: 'COMPROBANTE DE PAGO RECIBIDO (BARRIL/COMPRA)',
+          body: `💰 *Nuevo comprobante de pago recibido*\n\n💬 *Mensaje cliente:* "${cleanText}"\n\n✅ *El bot respondió:* "${reply}"\n\n🤫 *El bot quedó silenciado (MUTE) para que verifiques la transferencia en la cuenta y confirmes el pedido directamente desde WhatsApp.*`
+        });
+      }
+
+      saveSession(sessionId, session);
+      return reply;
+    }
+
     // =========================================================================
     // 2. ANÁLISIS DE CONTEXTO Y LLAMADA AL MOTOR IA
     // =========================================================================
@@ -119,9 +143,10 @@ export async function processAiAgentMessage(sessionId, messageText, options = {}
         contextMeta
       });
 
-      // Registrar turno del usuario y del bot (solo si no fue silenciado)
+      // Registrar turno del usuario y del bot (permite entregar respuesta única si allowSingleReply está activo)
       session.history.turns.push({ role: 'user', text: cleanText });
-      if (replyText && !session.isMuted) {
+      const canDeliverReply = Boolean(replyText && (!session.isMuted || session.allowSingleReply));
+      if (canDeliverReply) {
         const textForHistory = Array.isArray(replyText)
           ? replyText.map((p) => (typeof p === 'string' ? p : `[IMG:${p.file}]`)).join('\n\n')
           : replyText;
@@ -129,8 +154,9 @@ export async function processAiAgentMessage(sessionId, messageText, options = {}
         session.lastOutboundAt = Date.now();
       }
 
+      delete session.allowSingleReply;
       saveSession(sessionId, session);
-      return session.isMuted ? null : (replyText || null);
+      return canDeliverReply ? (replyText || null) : null;
 
     } catch (err) {
       console.error('[Agent-IA] Error en ejecución:', err.message);

@@ -126,3 +126,58 @@ export function analyzeMessageContext(session, currentText) {
     isDirectBarrelQuery
   };
 }
+
+/**
+ * isPaymentConfirmationText: Detecta si el mensaje entrante es una confirmación de pago,
+ * comprobante de transferencia bancaria o aviso de compra realizada (ej: barril desechable).
+ *
+ * @param {string} rawText - Texto o descripción del mensaje recibido
+ * @returns {boolean} true si corresponde a un comprobante o confirmación de pago
+ */
+export function isPaymentConfirmationText(rawText) {
+  const original = String(rawText || '').trim();
+  if (!original) return false;
+
+  // Si es un adjunto multimedia (imagen o documento de comprobante)
+  if (original.includes('[comprobante') || original.includes('[adjunto') || original.includes('imagen adjunta') || original.includes('documento adjunto')) {
+    return true;
+  }
+
+  // Normalizar a minúsculas y sin acentos para regex con límites de palabra ASCII (\b) seguros
+  const text = original
+    .toLowerCase()
+    .normalize('NFD')
+    .replace(/[\u0300-\u036f]/g, '');
+
+  // Descartar consultas de datos de pago o preguntas de cómo pagar
+  const isQuestion = original.includes('?') || original.includes('¿');
+  if (isQuestion && /\b(como|cuales|aceptan|se puede|puedo|donde|cuando|cuanto|tienen)\b/i.test(text)) {
+    return false;
+  }
+  if (/\b(datos|cuenta|datos de transferencia|datos para transferir)\b/i.test(text) && !/\b(ya|listo|adjunto|hice|mande|envie|aqui)\b/i.test(text)) {
+    return false;
+  }
+
+  // 1. Mención explícita de comprobante
+  if (/\bcomprobantes?\b/i.test(text)) {
+    return true;
+  }
+
+  // 2. Verbos de pago en pasado / acción realizada
+  if (/\b(?:ya\s+pague|acabo\s+de\s+pagar|pago\s+realizado|pago\s+listo|listo\s+el\s+pago|pagado|pagada|pague\s+el\s+barril|pague\s+mi\s+barril|pague\s+por\s+la\s+web|pago\s+del\s+barril|pago\s+de\s+mi\s+barril|pago\s+de\s+la\s+compra|pago\s+confirmado|pague)\b/i.test(text)) {
+    return true;
+  }
+
+  // 3. Verbos de transferencia en pasado / acción realizada
+  if (/\b(?:ya\s+transferi|acabo\s+de\s+transferir|transferi|hice\s+la\s+transferencia|transferencia\s+realizada|transferencia\s+lista|te\s+transferi|te\s+hice\s+la\s+transferencia|envio\s+la\s+transferencia|mande\s+la\s+transferencia)\b/i.test(text)) {
+    return true;
+  }
+
+  // 4. Depósito realizado
+  if (/\b(?:ya\s+deposite|deposito\s+realizado|hice\s+el\s+deposito|deposite)\b/i.test(text)) {
+    return true;
+  }
+
+  return false;
+}
+

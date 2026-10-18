@@ -834,7 +834,12 @@ async function startBot() {
         return;
       }
 
-      const cleanText = stripTriggerPrefix(text, config);
+      let cleanText = stripTriggerPrefix(text, config);
+      const hasMediaAttachment = Boolean(content?.imageMessage || content?.documentMessage);
+      if (!cleanText && hasMediaAttachment) {
+        cleanText = '[Comprobante de pago / transferencia adjunto]';
+      }
+
       if (!cleanText) {
         return;
       }

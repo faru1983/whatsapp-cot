@@ -532,6 +532,34 @@ ${itemsText}
       };
     }
 
+    case 'handle_payment_confirmation': {
+      const details = args.details || 'Confirmación de pago recibida';
+
+      if (session) {
+        session.isMuted = true;
+        session.silenciado_timestamp = Date.now();
+        session.paymentConfirmationReceived = true;
+        session.allowSingleReply = true;
+      }
+
+      if (typeof alertAdmin === 'function') {
+        await alertAdmin({
+          type: 'SUCCESS',
+          title: 'COMPROBANTE DE PAGO RECIBIDO (BARRIL/COMPRA)',
+          body: `💰 *Nuevo comprobante de pago recibido de cliente*\n\n💬 *Detalle:* "${details}"\n\n✅ *El bot respondió:* "¡Muchas gracias! Revisamos y te confirmamos enseguida 🍹"\n\n🤫 *El bot quedó silenciado (MUTE) para que verifiques la transferencia en la cuenta y confirmes el pedido directamente desde WhatsApp.*`
+        });
+      }
+
+      const reply = '¡Muchas gracias! Revisamos y te confirmamos enseguida 🍹';
+      return {
+        success: true,
+        muted: true,
+        allowSingleReply: true,
+        reply,
+        instruction: 'Responde obligatoriamente al cliente con este mensaje exacto:\n\n¡Muchas gracias! Revisamos y te confirmamos enseguida 🍹'
+      };
+    }
+
     default:
       return { success: false, error: `Herramienta desconocida: ${toolName}` };
   }

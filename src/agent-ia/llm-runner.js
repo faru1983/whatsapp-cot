@@ -405,6 +405,7 @@ export async function runAiAgentTurn(conversationTurns, userMessage, context = {
     stateContextBlock += `- Invitados: AÚN NO INDICADOS POR EL CLIENTE. PROHIBIDO ASUMIR O INVENTAR NÚMERO DE INVITADOS. NO USES TOOLS DE CÁLCULO NI CATÁLOGO.
 - Si el cliente pregunta por valores, precios o cuánto cuesta en general: explica las dos modalidades (Eventos desde $109.990 vs Barriles Desechables de 5L desde $31.990) y pregunta cuál de las dos le interesa.
 - Si pregunta por servicio de eventos: explica que el bar portátil parte desde $109.990 (incluye 10L ~ 50 cócteles con dispensador portátil, hielo, vasos, garnish e instalación gratuita, lo que da un costo por trago de solo ~$2.200 con todo incluido) y pregunta: *¿Cuántos invitados tendrás aproximadamente en tu evento?*
+- Si el cliente envía un comprobante de pago o confirmación de compra de barril: llama a handle_payment_confirmation.
 - Si el cliente hace una consulta fuera de catálogo, sobre comida/mago/DJ o pide un humano: llama a silent_admin_escalation y guarda silencio.\n`;
   }
 
@@ -465,6 +466,14 @@ export async function runAiAgentTurn(conversationTurns, userMessage, context = {
 
         if (toolResult?.formattedProposalText || toolResult?.formattedCatalogText || toolResult?.formattedCartText) {
           lastToolFormattedText = toolResult.formattedProposalText || toolResult.formattedCatalogText || toolResult.formattedCartText;
+        }
+
+        if (toolResult?.allowSingleReply) {
+          return {
+            replyText: toolResult.reply,
+            toolCallsMade,
+            muted: true
+          };
         }
 
         if (name === 'silent_admin_escalation' || toolResult?.silenceClient || session?.isMuted) {
@@ -575,6 +584,14 @@ export async function runAiAgentTurn(conversationTurns, userMessage, context = {
             lastToolFormattedText = toolResult.formattedProposalText || toolResult.formattedCatalogText || toolResult.formattedCartText;
           }
 
+          if (toolResult?.allowSingleReply) {
+            return {
+              replyText: toolResult.reply,
+              toolCallsMade,
+              muted: true
+            };
+          }
+
           if (fnName === 'silent_admin_escalation' || toolResult?.silenceClient || session?.isMuted) {
             return {
               replyText: null,
@@ -614,6 +631,14 @@ export async function runAiAgentTurn(conversationTurns, userMessage, context = {
 
         toolCallsMade.push({ name: fnName, args: fnArgs });
         const toolResult = await executeAgentTool(fnName, fnArgs, context);
+
+        if (toolResult?.allowSingleReply) {
+          return {
+            replyText: toolResult.reply,
+            toolCallsMade,
+            muted: true
+          };
+        }
 
         if (fnName === 'silent_admin_escalation' || toolResult?.silenceClient || session?.isMuted) {
           return {

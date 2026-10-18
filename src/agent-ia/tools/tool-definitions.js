@@ -191,5 +191,19 @@ export const AGENT_TOOLS_DEFINITIONS = [
       },
       required: ['clientQuestion']
     }
+  },
+  {
+    name: 'handle_payment_confirmation',
+    description: 'Úsala obligatoriamente cuando el cliente envíe una confirmación de pago, comprobante de transferencia bancaria o indique que ya pagó/transfirió por la compra de un barril desechable o pedido web. Envía la confirmación al cliente ("¡Muchas gracias! Revisamos y te confirmamos enseguida 🍹"), alerta al administrador y activa MUTE para revisión humana.',
+    parameters: {
+      type: 'OBJECT',
+      properties: {
+        details: {
+          type: 'STRING',
+          description: 'Detalle de la confirmación de pago o comprobante enviado por el cliente (ej: "Comprobante de transferencia barril Mojito", "Cliente pagó compra web").'
+        }
+      },
+      required: ['details']
+    }
   }
 ];
