@@ -101,6 +101,9 @@ export function formatWhatsAppReply(text) {
   out = out.replace(/([^\n])[ \t]+(\*Presupuesto Estimado:?\*?)/gi, '$1\n\n$2');
   out = out.replace(/([^\n])\n(?!\n)[ \t]*(\*Presupuesto Estimado:?\*?)/gi, '$1\n\n$2');
 
+  out = out.replace(/([^\n])[ \t]+([*•👉]*[ \t]*Costo por trago:?\*?)/gi, '$1\n$2');
+  out = out.replace(/([^\n])\n(?!\n)[ \t]*([*•👉]*[ \t]*Costo por trago:?\*?)/gi, '$1\n$2');
+
   out = out.replace(/([^\n])[ \t]+(\*Servicio Todo Incluido:?\*?)/gi, '$1\n\n$2');
   out = out.replace(/([^\n])\n(?!\n)[ \t]*(\*Servicio Todo Incluido:?\*?)/gi, '$1\n\n$2');
   out = out.replace(/([^\n])[ \t]+(\*Todo Incluido:?\*?)/gi, '$1\n\n$2');
@@ -397,11 +400,11 @@ export async function runAiAgentTurn(conversationTurns, userMessage, context = {
       + `• *3 o más tragos p/p:* recomendado si será la barra principal de la fiesta.\n\n`
       + `Cierra preguntando en negrita: *¿Cuántos tragos por persona te gustaría calcular?*\n`;
   } else if (guestsKnown && drinksKnown) {
-    stateContextBlock += `- Invitados: ${guestsKnown} personas.\n- Tragos por persona: ${drinksKnown}.\n- INSTRUCCIÓN: Llama a calculate_event_estimate con guests=${guestsKnown} y drinksPerPerson=${drinksKnown} para entregar la "Propuesta de Barra Sugerida" con el formato oficial.\n`;
+    stateContextBlock += `- Invitados: ${guestsKnown} personas.\n- Tragos por persona: ${drinksKnown}.\n- INSTRUCCIÓN: Llama a calculate_event_estimate con guests=${guestsKnown} y drinksPerPerson=${drinksKnown} para entregar la "Propuesta de Barra Sugerida" destacando siempre el costo por trago.\n`;
   } else {
     stateContextBlock += `- Invitados: AÚN NO INDICADOS POR EL CLIENTE. PROHIBIDO ASUMIR O INVENTAR NÚMERO DE INVITADOS. NO USES TOOLS DE CÁLCULO NI CATÁLOGO.
 - Si el cliente pregunta por valores, precios o cuánto cuesta en general: explica las dos modalidades (Eventos desde $109.990 vs Barriles Desechables de 5L desde $31.990) y pregunta cuál de las dos le interesa.
-- Si pregunta por servicio de eventos: explica que el bar portátil parte desde $109.990 (incluye 10L ~ 50 cócteles con dispensador portátil, hielo, vasos, garnish e instalación gratuita) y pregunta: *¿Cuántos invitados tendrás aproximadamente en tu evento?*
+- Si pregunta por servicio de eventos: explica que el bar portátil parte desde $109.990 (incluye 10L ~ 50 cócteles con dispensador portátil, hielo, vasos, garnish e instalación gratuita, lo que da un costo por trago de solo ~$2.200 con todo incluido) y pregunta: *¿Cuántos invitados tendrás aproximadamente en tu evento?*
 - Si el cliente hace una consulta fuera de catálogo, sobre comida/mago/DJ o pide un humano: llama a silent_admin_escalation y guarda silencio.\n`;
   }
 

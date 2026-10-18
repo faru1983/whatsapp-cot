@@ -6,7 +6,7 @@
 export const AGENT_TOOLS_DEFINITIONS = [
   {
     name: 'calculate_event_estimate',
-    description: 'Calcula el presupuesto estimado oficial para un evento. ESTÁ PROHIBIDO USAR SI EL CLIENTE AÚN NO HA INDICADO SUS INVITADOS EN EL CHAT. Si el cliente pregunta cómo funciona o precios generales, responde con texto y NO uses esta herramienta.',
+    description: 'Calcula el presupuesto estimado oficial para un evento en 2 burbujas, destacando el costo por trago servido y el servicio todo incluido ($0 adicional). ESTÁ PROHIBIDO USAR SI EL CLIENTE AÚN NO HA INDICADO SUS INVITADOS EN EL CHAT. Si el cliente pregunta cómo funciona o precios generales, responde con texto y NO uses esta herramienta.',
     parameters: {
       type: 'OBJECT',
       properties: {

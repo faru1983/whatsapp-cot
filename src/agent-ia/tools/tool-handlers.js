@@ -130,7 +130,8 @@ Para poder brindar a *${guests} invitados* un promedio de *${drinksPerPerson} tr
 • *${totalCocktails} cócteles*, esto equivale a *${totalLiters} Litros*.
 
 *Presupuesto Estimado:* *${formatPrice(estimatedTotal)}*
-_(${formatPrice(pricePerCocktail)} por cóctel servido)_
+• *Costo por trago:* Solo *${formatPrice(pricePerCocktail)}* por trago servido.
+_(¡Te sale a solo ${formatPrice(pricePerCocktail)} por trago con todo el servicio incluido: barra, hielo, vasos y garnish!)_
 
 *Servicio Todo Incluido ($0 adicional):*
 
@@ -263,7 +264,8 @@ _(También puedes sumar combinados como Piscola o Mocktails sin alcohol)._
 ${itemsText}
 
 *TOTAL:* *${formatPrice(total)}* (neto)
-📊 _${totalCocktails} cócteles | ${drinksPerPersonCalculated} tragos p/p | ${formatPrice(pricePerCocktail)} c/u_
+• *Costo por trago:* Solo *${formatPrice(pricePerCocktail)}* por trago servido.
+📊 _${totalCocktails} cócteles | ${drinksPerPersonCalculated} tragos p/p | ${formatPrice(pricePerCocktail)} por trago_
 
 *Servicio Todo Incluido ($0 adicional):*
 • Dispensador portátil listo para servir
@@ -504,7 +506,7 @@ ${itemsText}
             .map((it) => `• ${it.liters}L ${it.flavor}: ${it.unitPriceFormatted}`)
             .join('\n');
           cartBlock += `\n💰 *TOTAL:* ${session.cartTotalFormatted || ''} (neto)`;
-          cartBlock += `\n📊 _${session.cartTotalCocktails || ''} cócteles | ${drinks} tragos p/p | ${formatPrice(session.cartPricePerCocktail || 2200)} c/u_`;
+          cartBlock += `\n📊 _${session.cartTotalCocktails || ''} cócteles | ${drinks} tragos p/p | ${formatPrice(session.cartPricePerCocktail || 2200)} por trago_`;
         } else if (session?.cartSummary) {
           cartBlock = session.cartSummary;
         } else if (session?.lastEstimatedTotal) {
