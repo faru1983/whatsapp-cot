@@ -78,10 +78,15 @@ function isRecentlyProcessedMessage(msgId) {
   return false;
 }
 
-// Buffer / Debounce para mensajes en ráfaga de clientes (evita responder múltiples veces
-// o fragmentar mensajes tipo "60" + "Aprox" + "Bautizo" enviados en segundos consecutivos)
+// Buffer / Debounce adaptativo para mensajes en ráfaga de clientes (evita responder múltiples veces
+// o fragmentar mensajes tipo "07 de diciembre, las Vizcachas" + "80 aprox" enviados en segundos consecutivos)
 const inboundDebounceMap = new Map();
-const INBOUND_DEBOUNCE_MS = 1800;
+const INBOUND_DEBOUNCE_MS = 3800; // Estándar WhatsApp 2026: permite al usuario redactar 2da o 3ra burbuja
+const MAX_DEBOUNCE_WINDOW_MS = 8500; // Límite máximo de espera acumulada con presencia de escritura
+
+// Control de turnos y cancelación in-flight (si llega una nueva burbuja mientras el LLM está pensando)
+const activeTurnEpochs = new Map(); // sessionId -> number (contador atómico de versión)
+const inFlightProcessing = new Map(); // sessionId -> { epoch: number, textChunks: string[], lastMessage: object }
 
 /**
  * unwrapMessageContent: Saca el contenido real de un mensaje.
@@ -536,6 +541,27 @@ async function startBot() {
       }
     });
 
+    // Monitoreo de presencia (composing / escribiendo): extiende la ventana de debounce si el usuario sigue redactando
+    sock.ev.on('presence.update', ({ id, presences }) => {
+      if (!id || !presences) return;
+      const presenceObj = presences[id] || Object.values(presences)[0];
+      const isComposing = presenceObj?.lastKnownPresence === 'composing';
+      if (isComposing) {
+        // Buscar si existe debounce activo para este JID (o sus variantes)
+        for (const [sId, entry] of inboundDebounceMap.entries()) {
+          const matchJid = sId === id || sId.includes(id) || id.includes(sId);
+          if (matchJid && entry?.timer && typeof entry.scheduleExecution === 'function') {
+            const elapsed = Date.now() - (entry.startedAt || Date.now());
+            if (elapsed < MAX_DEBOUNCE_WINDOW_MS) {
+              const extraMs = Math.min(2500, MAX_DEBOUNCE_WINDOW_MS - elapsed);
+              entry.scheduleExecution(extraMs);
+              console.log(`⏳ [Debounce Presence] Cliente ${id} escribiendo... buffer extendido +${extraMs}ms (total transcurrido: ${elapsed}ms)`);
+            }
+          }
+        }
+      }
+    });
+
     // Si nunca llega open/close (cuelga en "connecting"), liberamos el flag a los 60s
     const connectingWatchdog = setTimeout(() => {
       if (!connectionSettled) {
@@ -573,11 +599,12 @@ async function startBot() {
         const shouldReconnect = statusCode !== DisconnectReason.loggedOut;
         console.log('Conexión cerrada. ¿Intentar reconectar automáticamente?:', shouldReconnect);
 
-        // Limpiar timers pendientes de debounce
+        // Limpiar timers pendientes de debounce y procesos en vuelo
         for (const entry of inboundDebounceMap.values()) {
           if (entry?.timer) clearTimeout(entry.timer);
         }
         inboundDebounceMap.clear();
+        inFlightProcessing.clear();
 
         // Liberamos listeners del socket viejo para no acumular handlers
         try {
@@ -585,6 +612,7 @@ async function startBot() {
           sock.ev.removeAllListeners('messages.upsert');
           sock.ev.removeAllListeners('creds.update');
           sock.ev.removeAllListeners('labels.edit');
+          sock.ev.removeAllListeners('presence.update');
         } catch (_) { /* ignore */ }
 
         if (shouldReconnect) {
@@ -758,7 +786,8 @@ async function startBot() {
           session.metaAdSourceId ||
           session.waitingForMetaAutoReply
         );
-        const isInitialMetaAutoReply = isFromMeta && session.externalOutboundCount === 1;
+        const looksLikeMetaAutoReplyText = /fecha.*evento|comuna.*ser[aá]|invitados.*esperan|nos\s+encantar[ií]a\s+ser\s+parte/i.test(text);
+        const isInitialMetaAutoReply = (isFromMeta || looksLikeMetaAutoReplyText) && session.externalOutboundCount === 1;
 
         if (isInitialMetaAutoReply) {
           const targetIds = await resolveSessionIdsForCommand(sock, remoteJid);
@@ -917,49 +946,86 @@ async function startBot() {
         };
 
         if (activeEngine === 'ia') {
-          // Debounce de mensajes entrantes para el agente IA
-          // Si el cliente envía varios mensajes en ráfaga (ej: "60" y luego "Aprox" o "Bautizo" en < 1.8s),
+          // Debounce adaptativo y buffer de ráfagas para el Agente IA (WhatsApp 2026)
+          // Si el cliente envía varios mensajes en ráfaga (ej: "07 de diciembre, las Vizcachas" y luego "80 aprox"),
           // los consolidamos en un solo mensaje multilínea antes de invocar al LLM.
+
+          // 1. Verificar si hay un turno activo en vuelo ejecutándose en el LLM
+          const inFlight = inFlightProcessing.get(sessionId);
+          let recoveredChunks = [];
+          if (inFlight) {
+            const nextEpoch = (activeTurnEpochs.get(sessionId) || 0) + 1;
+            activeTurnEpochs.set(sessionId, nextEpoch);
+            recoveredChunks = inFlight.textChunks || [];
+            inFlightProcessing.delete(sessionId);
+            console.log(`🛑 [In-Flight Cancel] Nuevo mensaje recibido mientras el agente procesaba. Turno anterior invalidado (epoch=${nextEpoch}).`);
+          }
+
+          // 2. Si ya hay un buffer acumulando ráfagas en espera
           const existingPending = inboundDebounceMap.get(sessionId);
           if (existingPending) {
-            clearTimeout(existingPending.timer);
+            if (recoveredChunks.length > 0) {
+              existingPending.textChunks = [...recoveredChunks, ...existingPending.textChunks];
+            }
             existingPending.textChunks.push(cleanText);
             existingPending.lastMessage = message;
             existingPending.clientOptions = clientOptions;
-            existingPending.timer = setTimeout(async () => {
-              inboundDebounceMap.delete(sessionId);
-              const combinedText = existingPending.textChunks.join('\n');
-              try {
-                const reply = await processAiAgentMessage(sessionId, combinedText, existingPending.clientOptions);
-                await deliverBotReply(sock, existingPending.lastMessage.key.remoteJid, reply, botConfig.replyTiming || {});
-              } catch (err) {
-                console.error(`Error procesando mensaje IA debounced en ${sessionId}:`, err.message);
-              }
-            }, INBOUND_DEBOUNCE_MS);
-            console.log(`⏳ [Debounce IA] Mensaje acumulado en ráfaga para ${sessionId}: "${cleanText}" (total: ${existingPending.textChunks.length})`);
+            if (typeof existingPending.scheduleExecution === 'function') {
+              existingPending.scheduleExecution(INBOUND_DEBOUNCE_MS);
+            }
+            console.log(`⏳ [Debounce IA] Mensaje acumulado en ráfaga para ${sessionId}: "${cleanText}" (total mensajes: ${existingPending.textChunks.length})`);
             return;
           }
 
-          // Primer mensaje de la ráfaga
+          // 3. Primer mensaje de la ráfaga
+          const initialChunks = recoveredChunks.length > 0 ? [...recoveredChunks, cleanText] : [cleanText];
           const debounceEntry = {
-            textChunks: [cleanText],
+            sessionId,
+            textChunks: initialChunks,
             lastMessage: message,
             clientOptions,
-            timer: null
+            startedAt: Date.now(),
+            timer: null,
+            scheduleExecution(delayMs) {
+              if (this.timer) clearTimeout(this.timer);
+              this.timer = setTimeout(async () => {
+                inboundDebounceMap.delete(sessionId);
+                const combinedText = this.textChunks.join('\n');
+
+                // Asignar epoch único para este turno
+                const myEpoch = (activeTurnEpochs.get(sessionId) || 0) + 1;
+                activeTurnEpochs.set(sessionId, myEpoch);
+                inFlightProcessing.set(sessionId, {
+                  epoch: myEpoch,
+                  textChunks: this.textChunks,
+                  lastMessage: this.lastMessage
+                });
+
+                try {
+                  const reply = await processAiAgentMessage(sessionId, combinedText, this.clientOptions);
+
+                  // Comprobación de turno cancelado in-flight por llegada de nueva burbuja:
+                  if (myEpoch !== (activeTurnEpochs.get(sessionId) || 0)) {
+                    console.log(`⚠️ [In-Flight Stale Drop] Descartada respuesta obsoleta para ${sessionId} (epoch actual=${activeTurnEpochs.get(sessionId)}, este turno=${myEpoch}).`);
+                    return;
+                  }
+
+                  await deliverBotReply(sock, this.lastMessage.key.remoteJid, reply, botConfig.replyTiming || {});
+                } catch (err) {
+                  console.error(`Error procesando mensaje IA debounced en ${sessionId}:`, err.message);
+                } finally {
+                  const currentInFlight = inFlightProcessing.get(sessionId);
+                  if (currentInFlight && currentInFlight.epoch === myEpoch) {
+                    inFlightProcessing.delete(sessionId);
+                  }
+                }
+              }, delayMs);
+            }
           };
 
-          debounceEntry.timer = setTimeout(async () => {
-            inboundDebounceMap.delete(sessionId);
-            const combinedText = debounceEntry.textChunks.join('\n');
-            try {
-              const reply = await processAiAgentMessage(sessionId, combinedText, debounceEntry.clientOptions);
-              await deliverBotReply(sock, debounceEntry.lastMessage.key.remoteJid, reply, botConfig.replyTiming || {});
-            } catch (err) {
-              console.error(`Error procesando mensaje IA debounced en ${sessionId}:`, err.message);
-            }
-          }, INBOUND_DEBOUNCE_MS);
-
+          debounceEntry.scheduleExecution(INBOUND_DEBOUNCE_MS);
           inboundDebounceMap.set(sessionId, debounceEntry);
+          console.log(`⏳ [Debounce IA] Iniciado buffer para ${sessionId}: "${cleanText}" (espera: ${INBOUND_DEBOUNCE_MS}ms)`);
           return;
         }
 

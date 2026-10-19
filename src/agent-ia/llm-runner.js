@@ -269,7 +269,16 @@ _(También puedes sumar combinados como Piscola o Mocktails sin alcohol)._
 export function sanitizeRoboticReplies(rawReply, session = {}, userMessage = '') {
   if (!rawReply || typeof rawReply !== 'string') return rawReply;
 
+  // 1. Detección de mensajes robóticos de validación
   const isRobotic = /\b(?:no se puede responder|respuesta num[eé]rica|indique el n[uú]mero de tragos|formato inv[aá]lido|opci[oó]n inv[aá]lida|no es v[aá]lido|no es una respuesta v[aá]lida|por favor,? indique el n[uú]mero)\b/i.test(rawReply);
+
+  // 2. Detección de filtraciones de transferencia o falta de información ("un ejecutivo te contactará", etc.)
+  const isHandoffLeak = /\b(?:un ejecutivo|consultar[eé] con el equipo|no cuento con esa informaci[oó]n|un asesor se comunicar[aá]|te comunicar[aá]s con|derivar[eé]|te transferir[eé]|un agente humano)\b/i.test(rawReply);
+
+  if (isHandoffLeak) {
+    console.warn(`[LLM SHIELD] Interceptada filtración de traspaso en LLM: "${rawReply.slice(0, 100)}..." -> Silenciando.`);
+    return null;
+  }
 
   if (!isRobotic) return rawReply;
 
@@ -504,7 +513,7 @@ export async function runAiAgentTurn(conversationTurns, userMessage, context = {
 
     let currentResponse = await genModel.generateContent({
       contents,
-      generationConfig: { temperature: 0.7, maxOutputTokens: 500 }
+      generationConfig: { temperature: 0.15, maxOutputTokens: 500 }
     });
 
     // Loop de Tool Calling (máximo 4 rondas para evitar bucles infinitos)
@@ -562,6 +571,16 @@ export async function runAiAgentTurn(conversationTurns, userMessage, context = {
         };
       }
 
+      // Atajo de rendimiento y consistencia: si la tool ya generó la respuesta oficial estructurada
+      // la devolvemos de inmediato sin esperar una 2da llamada al LLM
+      if (lastToolFormattedText) {
+        const bubbles = parseReplyToBubbles(lastToolFormattedText, session);
+        return {
+          replyText: bubbles || null,
+          toolCallsMade
+        };
+      }
+
       // Enviamos el resultado de las tools de vuelta al modelo
       contents.push({
         role: 'user',
@@ -570,7 +589,7 @@ export async function runAiAgentTurn(conversationTurns, userMessage, context = {
 
       currentResponse = await genModel.generateContent({
         contents,
-        generationConfig: { temperature: 0.7, maxOutputTokens: 500 }
+        generationConfig: { temperature: 0.15, maxOutputTokens: 500 }
       });
 
       loopCount++;
@@ -590,6 +609,16 @@ export async function runAiAgentTurn(conversationTurns, userMessage, context = {
     }
     rawReply = sanitizeRoboticReplies(rawReply, session, userMessage);
     if (!rawReply) {
+      // Escudo: si el LLM produjo respuesta robótica o no supo responder, silenciar en vez de enviar error
+      if (typeof context.alertAdmin === 'function') {
+        await context.alertAdmin({
+          type: 'SOS',
+          title: 'IA INTERCEPTADA POR ESCUDO SILENCIOSO',
+          body: `El cliente escribió: "${userMessage}".\nEl LLM generó una respuesta insegura o no supo responder.\n\n🤫 *El bot quedó silenciado (MUTE) para que atiendas directo desde WhatsApp.*`
+        });
+      }
+      session.isMuted = true;
+      session.silenciado_timestamp = Date.now();
       return {
         replyText: null,
         toolCallsMade,
@@ -630,7 +659,7 @@ export async function runAiAgentTurn(conversationTurns, userMessage, context = {
       messages,
       tools: mapToolsForOpenAI(),
       tool_choice: 'auto',
-      temperature: 0.7,
+      temperature: 0.15,
       max_tokens: 500
     });
 
@@ -681,10 +710,19 @@ export async function runAiAgentTurn(conversationTurns, userMessage, context = {
           });
         }
 
+        // Atajo de rendimiento y consistencia
+        if (lastToolFormattedText) {
+          const bubbles = parseReplyToBubbles(lastToolFormattedText, session);
+          return {
+            replyText: bubbles || null,
+            toolCallsMade
+          };
+        }
+
         completion = await openai.chat.completions.create({
           model: model || 'meta/llama-3.1-70b-instruct',
           messages,
-          temperature: 0.7,
+          temperature: 0.15,
           max_tokens: 500
         });
 
@@ -706,6 +744,10 @@ export async function runAiAgentTurn(conversationTurns, userMessage, context = {
         toolCallsMade.push({ name: fnName, args: fnArgs });
         const toolResult = await executeAgentTool(fnName, fnArgs, context);
 
+        if (toolResult?.formattedProposalText || toolResult?.formattedCatalogText || toolResult?.formattedCartText) {
+          lastToolFormattedText = toolResult.formattedProposalText || toolResult.formattedCatalogText || toolResult.formattedCartText;
+        }
+
         if (toolResult?.allowSingleReply) {
           return {
             replyText: toolResult.reply,
@@ -722,6 +764,14 @@ export async function runAiAgentTurn(conversationTurns, userMessage, context = {
           };
         }
 
+        if (lastToolFormattedText) {
+          const bubbles = parseReplyToBubbles(lastToolFormattedText, session);
+          return {
+            replyText: bubbles || null,
+            toolCallsMade
+          };
+        }
+
         messages.push({
           role: 'assistant',
           content: textContent
@@ -734,7 +784,7 @@ export async function runAiAgentTurn(conversationTurns, userMessage, context = {
         completion = await openai.chat.completions.create({
           model: model || 'meta/llama-3.1-70b-instruct',
           messages,
-          temperature: 0.7,
+          temperature: 0.15,
           max_tokens: 500
         });
 
@@ -759,6 +809,15 @@ export async function runAiAgentTurn(conversationTurns, userMessage, context = {
     }
     rawReply = sanitizeRoboticReplies(rawReply, session, userMessage);
     if (!rawReply) {
+      if (typeof context.alertAdmin === 'function') {
+        await context.alertAdmin({
+          type: 'SOS',
+          title: 'IA INTERCEPTADA POR ESCUDO SILENCIOSO',
+          body: `El cliente escribió: "${userMessage}".\nEl LLM generó una respuesta insegura o no supo responder.\n\n🤫 *El bot quedó silenciado (MUTE) para que atiendas directo desde WhatsApp.*`
+        });
+      }
+      session.isMuted = true;
+      session.silenciado_timestamp = Date.now();
       return {
         replyText: null,
         toolCallsMade,

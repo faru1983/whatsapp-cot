@@ -6,7 +6,7 @@
 
 import { parseGuestsFromText } from '../logic/operator-draft.js';
 import { parseCelebrationType } from '../logic/eventos-helpers.js';
-import { parseDate, findLocationByFuzzyMatch } from '../logic/utils.js';
+import { parseDate, findLocationByFuzzyMatch, preciosData } from '../logic/utils.js';
 
 /**
  * analyzeMessageContext: Analiza el contexto de la conversación leyendo todo el chat
@@ -86,6 +86,13 @@ export function analyzeMessageContext(session, currentText) {
 
   // Extracción de comuna o ciudad: busca en mensaje actual o en turnos previos
   let detectedCommune = findLocationByFuzzyMatch(text)?.name || null;
+  let rawSector = null;
+  if (/las\s+vizcachas|vizcachas/i.test(text)) rawSector = 'Las Vizcachas';
+  else if (/chicureo/i.test(text)) rawSector = 'Chicureo';
+  else if (/chamiseros/i.test(text)) rawSector = 'Chamiseros';
+  else if (/piedra\s+roja/i.test(text)) rawSector = 'Piedra Roja';
+  else if (/\bnos\b/i.test(text)) rawSector = 'Nos';
+
   if (!detectedCommune && !session?.commune) {
     for (const pastMsg of [...userTurns].reverse()) {
       const loc = findLocationByFuzzyMatch(pastMsg)?.name;
@@ -98,17 +105,32 @@ export function analyzeMessageContext(session, currentText) {
 
   const detectedCelebration = parseCelebrationType(text) || (session?.celebrationType ? null : parseCelebrationType(allUserTexts.join(' ')));
 
-  // Detección de tragos por persona (ej: "2", "3", "3 tragos", "3 trago por persona", "dos", "tres")
+  // Detección de tragos por persona (ej: "2", "3", "2 o 3", "2 a 3", "entre 2 y 3", "3 tragos", "dos", "tres")
   let detectedDrinksPerPerson = null;
   const wordMap = { uno: 1, dos: 2, tres: 3, cuatro: 4, cinco: 5, seis: 6 };
-  const pMatch = text.match(/\b([1-6]|uno|dos|tres|cuatro|cinco|seis)\s*(?:c[oó]cteles?|tragos?|copas?|por persona|p\/p|pp)?\b/i);
-  if (pMatch && (!detectedGuests || session?.guests || isTragosOnly || waitingForDrinksPerPerson)) {
-    const rawNum = pMatch[1].toLowerCase();
-    const num = wordMap[rawNum] || parseInt(rawNum, 10);
-    if (num >= 1 && num <= 6) {
-      detectedDrinksPerPerson = num;
+
+  // 1. Rango explícito: "2 o 3", "2 a 3", "2-3", "entre 2 y 3" -> tomar el valor superior recomendado (3)
+  const rangeMatch = text.match(/\b(?:entre\s+)?([1-6]|uno|dos|tres|cuatro|cinco|seis)\s*(?:o|a|-|\/)\s*([1-6]|uno|dos|tres|cuatro|cinco|seis)\b/i);
+  if (rangeMatch && (!detectedGuests || session?.guests || isTragosOnly || waitingForDrinksPerPerson)) {
+    const rawNum2 = rangeMatch[2].toLowerCase();
+    const num2 = wordMap[rawNum2] || parseInt(rawNum2, 10);
+    if (num2 >= 1 && num2 <= 6) {
+      detectedDrinksPerPerson = num2;
+    }
+  } else {
+    // 2. Valor individual: "2", "3", "3 tragos", "dos", etc.
+    const pMatch = text.match(/\b([1-6]|uno|dos|tres|cuatro|cinco|seis)\s*(?:c[oó]cteles?|tragos?|copas?|por persona|p\/p|pp)?\b/i);
+    if (pMatch && (!detectedGuests || session?.guests || isTragosOnly || waitingForDrinksPerPerson)) {
+      const rawNum = pMatch[1].toLowerCase();
+      const num = wordMap[rawNum] || parseInt(rawNum, 10);
+      if (num >= 1 && num <= 6) {
+        detectedDrinksPerPerson = num;
+      }
     }
   }
+
+  // Detección de selección de cócteles o pedido de sugerencia
+  const detectedCocktails = extractRequestedCocktails(text, session);
 
   // Detección de preguntas típicas de anuncios Meta Ads (icebreakers)
   const isPriceInquiry = /cu[aá]nto\s+cuesta(\s+el\s+servicio)?|cu[aá]les\s+son\s+los\s+(valores|precios)|precios?\b|valor(es)?\b/i.test(text);
@@ -127,8 +149,10 @@ export function analyzeMessageContext(session, currentText) {
     detectedGuests,
     detectedDate,
     detectedCommune,
+    detectedSector: rawSector,
     detectedCelebration,
     detectedDrinksPerPerson,
+    detectedCocktails,
     isDirectBarrelQuery,
     isApproxClarification
   };
@@ -188,3 +212,210 @@ export function isPaymentConfirmationText(rawText) {
   return false;
 }
 
+/**
+ * extractRequestedCocktails: Extrae cócteles, litrajes o peticiones de recomendación/sugerida
+ * directamente desde el texto del cliente contra el catálogo oficial.
+ *
+ * @param {string} text - Mensaje del cliente
+ * @param {object} session - Sesión actual
+ * @returns {object|null} { isSuggested, items: [{ flavor, liters }], totalLiters, unrecognizedFlavors }
+ */
+export function extractRequestedCocktails(text, session = {}) {
+  if (!text) return null;
+  const raw = String(text).trim();
+
+  // 1. Detección de solicitud de sugerencia / recomendación / los más populares
+  const wantsSuggested = /\b(sugerid[ao]|sugerencia|recomiend[ao]|recomi[eé]ndame|populares|m[aá]s\s+pedidos|los\s+mejores|qu[eé]\s+me\s+recomiendas)\b/i.test(raw);
+
+  const formatKey = (session?.eventoFormato === 'muro' || session?.eventFormat === 'muro') ? 'muro' : 'dispensador';
+  const guests = session?.guests || 20;
+  const drinks = session?.drinksPerGuest || 3;
+  const calcLiters = Math.max(10, Math.ceil((guests * drinks * 0.2) / 5) * 5);
+  const targetLiters = session?.lastTotalLiters || session?.cartLiters || calcLiters;
+
+  if (wantsSuggested) {
+    if (formatKey === 'muro') {
+      if (targetLiters <= 30) {
+        return {
+          isSuggested: true,
+          items: [
+            { flavor: 'Mojito Tradicional', liters: 20 },
+            { flavor: 'Aperol Spritz', liters: 10 }
+          ],
+          totalLiters: 30,
+          unrecognizedFlavors: []
+        };
+      } else if (targetLiters <= 40) {
+        return {
+          isSuggested: true,
+          items: [
+            { flavor: 'Mojito Tradicional', liters: 20 },
+            { flavor: 'Aperol Spritz', liters: 20 }
+          ],
+          totalLiters: 40,
+          unrecognizedFlavors: []
+        };
+      } else {
+        return {
+          isSuggested: true,
+          items: [
+            { flavor: 'Mojito Tradicional', liters: 30 },
+            { flavor: 'Aperol Spritz', liters: 20 },
+            { flavor: 'Sangría', liters: 10 }
+          ],
+          totalLiters: 60,
+          unrecognizedFlavors: []
+        };
+      }
+    } else {
+      if (targetLiters <= 10) {
+        return {
+          isSuggested: true,
+          items: [
+            { flavor: 'Mojito Tradicional', liters: 10 }
+          ],
+          totalLiters: 10,
+          unrecognizedFlavors: []
+        };
+      } else if (targetLiters <= 15) {
+        return {
+          isSuggested: true,
+          items: [
+            { flavor: 'Mojito Tradicional', liters: 10 },
+            { flavor: 'Sangría', liters: 5 }
+          ],
+          totalLiters: 15,
+          unrecognizedFlavors: []
+        };
+      } else if (targetLiters <= 20) {
+        return {
+          isSuggested: true,
+          items: [
+            { flavor: 'Mojito Tradicional', liters: 10 },
+            { flavor: 'Aperol Spritz', liters: 10 }
+          ],
+          totalLiters: 20,
+          unrecognizedFlavors: []
+        };
+      } else if (targetLiters <= 25) {
+        return {
+          isSuggested: true,
+          items: [
+            { flavor: 'Mojito Tradicional', liters: 10 },
+            { flavor: 'Aperol Spritz', liters: 10 },
+            { flavor: 'Sangría', liters: 5 }
+          ],
+          totalLiters: 25,
+          unrecognizedFlavors: []
+        };
+      } else {
+        const mitad = Math.round(targetLiters / 20) * 10;
+        const resto = targetLiters - mitad;
+        return {
+          isSuggested: true,
+          items: [
+            { flavor: 'Mojito Tradicional', liters: mitad },
+            { flavor: 'Aperol Spritz', liters: resto }
+          ],
+          totalLiters: targetLiters,
+          unrecognizedFlavors: []
+        };
+      }
+    }
+  }
+
+  // 2. Extracción de cócteles específicos del texto
+  const recognizedNames = [];
+  const lower = raw.toLowerCase().normalize('NFD').replace(/[\u0300-\u036f]/g, '');
+
+  const flavorMappings = [
+    { regex: /\b(mojito\s+maracuya|mojito\s+de\s+maracuya)\b/i, official: 'Mojito Maracuyá' },
+    { regex: /\b(mojito\s+frambuesa|mojito\s+de\s+frambuesa)\b/i, official: 'Mojito Frambuesa' },
+    { regex: /\b(mojito\s+mango|mojito\s+de\s+mango)\b/i, official: 'Mojito Mango' },
+    { regex: /\b(mojito\s+tradicional|mojito\s+clasico|mojito)\b/i, official: 'Mojito Tradicional' },
+    { regex: /\b(aperol\s+spritz|aperol)\b/i, official: 'Aperol Spritz' },
+    { regex: /\b(ramazzotti\s+spritz|ramazzotti)\b/i, official: 'Ramazzotti Spritz' },
+    { regex: /\b(pisco\s+sour\s+clasico|pisco\s+sour|sour)\b/i, official: 'Pisco Sour Clásico' },
+    { regex: /\b(moscow\s+mule|mule)\b/i, official: 'Moscow Mule' },
+    { regex: /\b(tropical\s+gin)\b/i, official: 'Tropical Gin' },
+    { regex: /\b(gin\s+tonic|gin\s*&\s*tonic|gin)\b/i, official: 'Gin & Tonic' },
+    { regex: /\b(sangria|sangr[ií]a)\b/i, official: 'Sangría' },
+    { regex: /\b(tequila\s+margarita|margarita)\b/i, official: 'Tequila Margarita' },
+    { regex: /\b(caipiri[nñ]a|caipirinha)\b/i, official: 'Caipiriña' },
+    { regex: /\b(piscola|piscolas)\b/i, official: 'Piscola Mistral 35°' },
+    { regex: /\b(whiskcola|whiscola)\b/i, official: 'Whiskcola J.W. Black' }
+  ];
+
+  for (const fm of flavorMappings) {
+    if (fm.regex.test(raw)) {
+      if (!recognizedNames.includes(fm.official)) {
+        recognizedNames.push(fm.official);
+      }
+    }
+  }
+
+  // Detectar si mencionó sabores no existentes en la carta
+  const unrecognized = [];
+  const fakeFlavors = [
+    'pina colada', 'piña colada', 'colada', 'fernet', 'daiquiri',
+    'cosmopolitan', 'manhattan', 'negroni', 'bellini', 'bloody mary'
+  ];
+  for (const fake of fakeFlavors) {
+    if (new RegExp(`\\b${fake}\\b`, 'i').test(lower)) {
+      unrecognized.push(fake);
+    }
+  }
+
+  if (recognizedNames.length === 0 && unrecognized.length === 0) {
+    return null;
+  }
+
+  // Buscar litrajes explícitos para los nombres reconocidos
+  const items = [];
+  let allocatedTotal = 0;
+
+  for (const name of recognizedNames) {
+    const escName = name.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+    const litMatch = raw.match(new RegExp(`(\\d+)\\s*(?:l|lt|lts|litros?)[^\\w]+${escName}`, 'i'))
+      || raw.match(new RegExp(`${escName}[^\\d\\w]*(\\d+)\\s*(?:l|lt|lts|litros?)`, 'i'))
+      || raw.match(new RegExp(`(\\d+)\\s*(?:de\\s+)?${escName}`, 'i'));
+
+    let liters = null;
+    if (litMatch) {
+      const parsedL = parseInt(litMatch[1], 10);
+      if (parsedL >= 5 && parsedL <= 100) {
+        liters = parsedL;
+      }
+    }
+    items.push({ flavor: name, liters });
+    if (liters) allocatedTotal += liters;
+  }
+
+  // Si los ítems no traían litrajes explícitos (ej: "Mojito y Aperol"), repartir targetLiters
+  const unassigned = items.filter((it) => !it.liters);
+  if (unassigned.length > 0) {
+    const remainingLiters = Math.max(unassigned.length * (formatKey === 'muro' ? 10 : 5), targetLiters - allocatedTotal);
+    const step = formatKey === 'muro' ? 10 : (remainingLiters >= 20 ? 10 : 5);
+    let perFlavor = Math.floor(remainingLiters / (unassigned.length * step)) * step;
+    if (perFlavor < step) perFlavor = step;
+
+    let distributed = 0;
+    unassigned.forEach((it, idx) => {
+      if (idx === unassigned.length - 1) {
+        it.liters = Math.max(step, remainingLiters - distributed);
+      } else {
+        it.liters = perFlavor;
+        distributed += perFlavor;
+      }
+    });
+  }
+
+  const finalTotalLiters = items.reduce((acc, it) => acc + (it.liters || 0), 0);
+
+  return {
+    isSuggested: false,
+    items,
+    totalLiters: finalTotalLiters,
+    unrecognizedFlavors: unrecognized
+  };
+}

@@ -502,6 +502,8 @@ ${itemsText}
         const drinks = session?.cartDrinksPerPerson || session?.drinksPerGuest || 'XX';
         const rawDate = session?.eventDate || question || 'por confirmar';
         const date = String(rawDate).replace(/^para\s+el\s+/i, '').replace(/^el\s+/i, '').trim();
+        const commune = session?.commune || session?.location || context.contextMeta?.detectedCommune || '';
+        const communeStr = commune ? ` en *${commune}*` : '';
 
         let cartBlock = '';
         if (session?.cartItems && session.cartItems.length > 0) {
@@ -518,7 +520,7 @@ ${itemsText}
           cartBlock = 'Cotización inicial';
         }
 
-        const bodyText = `Hola, tenemos un cliente interesado en un evento para el *${date}*\n\nSon *${guests} invitados* y le interesa los siguientes cócteles:\n${cartBlock}\n\n_Ya te hice la pega inicial, ahora te toca a ti lograr el cierre. ¡Respóndele rápido!_ 🚀\n\n🤫 *(El bot se silenció en MUTE para que continúes tú directo desde WhatsApp).*`;
+        const bodyText = `Hola, tenemos un cliente interesado en un evento para el *${date}*${communeStr}\n\nSon *${guests} invitados* y le interesa los siguientes cócteles:\n${cartBlock}\n\n_Ya te hice la pega inicial, ahora te toca a ti lograr el cierre. ¡Respóndele rápido!_ 🚀\n\n🤫 *(El bot se silenció en MUTE para que continúes tú directo desde WhatsApp).*`;
 
         await alertAdmin({
           type: 'SOS',

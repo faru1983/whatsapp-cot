@@ -752,7 +752,13 @@ const LOCATION_ALIASES = {
 	'san jose de maipo': 'San José de Maipo',
 	nunoa: 'Ñuñoa',
 	penalolen: 'Peñalolén',
-	'til til': 'Tiltil'
+	'til til': 'Tiltil',
+	'las vizcachas': 'Puente Alto',
+	vizcachas: 'Puente Alto',
+	chicureo: 'Colina',
+	chamiseros: 'Colina',
+	'piedra roja': 'Colina',
+	nos: 'San Bernardo'
 };
 
 /**
