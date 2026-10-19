@@ -192,13 +192,26 @@ export function parseReplyToBubbles(text, session = {}) {
     }
   }
 
-  // 3. Garantía para la carta de variedades:
-  // Si se envió lista_precios_completa.webp pero el texto no incluye la pregunta de avance
-  const hasCatalogImg = outBubbles.some((b) => typeof b === 'object' && b.file === 'lista_precios_completa.webp');
+  // 3. Garantía absoluta para la carta de variedades:
+  let hasCatalogImg = outBubbles.some((b) => typeof b === 'object' && b.file === 'lista_precios_completa.webp');
+  const mentionsCatalog = outBubbles.some(
+    (b) => typeof b === 'string' && /carta(?: completa| de variedades)?|Para cubrir tus \*\d+ Litros\*|Para cubrir tus \d+ Litros|¿Qué variedades te gustaría incluir/i.test(b)
+  );
+
+  // A) Si el texto habla de la carta pero el LLM omitió el tag [IMG:...], insertar la imagen real de la carta
+  if (!hasCatalogImg && mentionsCatalog) {
+    outBubbles.unshift({ type: 'image', file: 'lista_precios_completa.webp' });
+    hasCatalogImg = true;
+  }
+
+  // B) Si hay imagen pero el texto no incluye la pregunta de avance con ejemplos de litros
   const hasCatalogQuestion = outBubbles.some((b) => typeof b === 'string' && /¿Qué variedades|Para cubrir tus/i.test(b));
 
   if (hasCatalogImg && !hasCatalogQuestion) {
-    const liters = session?.lastTotalLiters || session?.cartLiters || 20;
+    const guests = session?.guests || 20;
+    const drinks = session?.drinksPerGuest || 3;
+    const calcLiters = Math.max(10, Math.ceil((guests * drinks * 0.2) / 5) * 5);
+    const liters = session?.lastTotalLiters || session?.cartLiters || calcLiters;
     let exampleBullets = '';
     if (liters <= 10) {
       exampleBullets = `• *10L* de Mojito Tradicional\n• _(O 2 variedades de 5L como 5L Mojito y 5L Sangría)_`;
@@ -228,7 +241,7 @@ _(También puedes sumar combinados como Piscola o Mocktails sin alcohol)._
     outBubbles.push(formatWhatsAppReply(followUpBubble));
   }
 
-  // Si hay imagen de catálogo, nos aseguramos de que la imagen sea la primera burbuja
+  // C) Si hay imagen de catálogo, nos aseguramos de que la imagen sea la primera burbuja
   if (hasCatalogImg && outBubbles.length >= 2) {
     const imgIndex = outBubbles.findIndex((b) => typeof b === 'object' && b.file === 'lista_precios_completa.webp');
     if (imgIndex > 0) {

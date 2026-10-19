@@ -4,7 +4,8 @@
 // ==============================================================================
 
 import { getSession, saveSession, resetSession } from '../core/db.js';
-import { runAiAgentTurn } from './llm-runner.js';
+import { runAiAgentTurn, parseReplyToBubbles } from './llm-runner.js';
+import { executeAgentTool } from './tools/tool-handlers.js';
 import { analyzeMessageContext, isPaymentConfirmationText } from './context-analyzer.js';
 import { jidToE164 } from '../logic/cot-event-quote.js';
 import { syncCrmCuriousAsync, syncCrmNameAsync } from '../logic/cot-crm-sync.js';
@@ -133,6 +134,37 @@ export async function processAiAgentMessage(sessionId, messageText, options = {}
     // Preparar historial de turnos recientes (máximo 12 turnos)
     const rawTurns = session?.history?.turns || [];
     const conversationTurns = rawTurns.slice(-12);
+
+    // Intercepción determinista: si el bot acaba de preguntar por la carta y el cliente responde afirmativamente
+    const lastBotTurn = [...rawTurns].reverse().find((t) => t.role === 'model');
+    const askedForCatalog = Boolean(
+      lastBotTurn &&
+      /¿Te gustaría que te comparta la carta/i.test(lastBotTurn.text)
+    );
+    const isAffirmativeForCatalog = askedForCatalog && /^(?:s[ií]|si por favor|s[ií] porfa|dale|bueno|claro|por favor|m[aá]ndala|comp[aá]rtela|env[ií]ala|ok|de acuerdo|obvio|me gustar[ií]a|porfa|yapo|ya po)\b/i.test(cleanText.trim());
+
+    if (isAffirmativeForCatalog) {
+      session.history = session.history || { turns: [] };
+      session.history.turns.push({ role: 'user', text: cleanText });
+
+      const toolResult = await executeAgentTool('send_cocktails_catalog', {}, {
+        session,
+        sessionId,
+        alertAdmin,
+        applyBusinessLabel,
+        contextMeta
+      });
+
+      const bubbles = parseReplyToBubbles(toolResult.formattedCatalogText, session);
+      const textForHistory = Array.isArray(bubbles)
+        ? bubbles.map((p) => (typeof p === 'string' ? p : `[IMG:${p.file}]`)).join('\n\n')
+        : bubbles;
+
+      session.history.turns.push({ role: 'model', text: textForHistory });
+      session.lastOutboundAt = Date.now();
+      saveSession(sessionId, session);
+      return bubbles || null;
+    }
 
     try {
       const { replyText, toolCallsMade } = await runAiAgentTurn(conversationTurns, cleanText, {

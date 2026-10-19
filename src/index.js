@@ -341,8 +341,14 @@ async function deliverBotReply(sock, targetJid, reply, timing = {}) {
         continue;
       }
       const imageBuffer = fs.readFileSync(check.absolutePath);
-      const payload = { image: imageBuffer };
+      const ext = path.extname(check.absolutePath).toLowerCase();
+      let mimetype = 'image/jpeg';
+      if (ext === '.webp') mimetype = 'image/webp';
+      else if (ext === '.png') mimetype = 'image/png';
+
+      const payload = { image: imageBuffer, mimetype };
       if (part.caption) payload.caption = part.caption;
+      console.log(`📸 Enviando imagen ${part.file} (${imageBuffer.length} bytes, mimetype=${mimetype}) a ${targetJid}`);
       await sendTracked(sock, targetJid, payload);
     } else if (isVideoPart(part)) {
       const check = assertImageExists(part.file);

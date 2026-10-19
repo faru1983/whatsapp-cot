@@ -168,7 +168,10 @@ Puedes elegir entre nuestros cócteles clásicos, combinados o sin alcohol (Moji
 
     case 'send_cocktails_catalog':
     case 'get_available_cocktails_catalog': {
-      const liters = session?.lastTotalLiters || 20;
+      const guests = session?.guests || 20;
+      const drinks = session?.drinksPerGuest || 3;
+      const calcLiters = Math.max(10, Math.ceil((guests * drinks * 0.2) / 5) * 5);
+      const liters = session?.lastTotalLiters || session?.cartLiters || calcLiters;
       let exampleBullets = '';
 
       if (liters <= 10) {
