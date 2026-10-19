@@ -50,6 +50,7 @@ import {
 } from './logic/operator-console.js';
 import process from 'node:process';
 import fs from 'node:fs';
+import path from 'node:path';
 
 // ==============================================================================
 // OBJETIVO: Punto de entrada del bot de WhatsApp.
