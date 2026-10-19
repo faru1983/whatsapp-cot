@@ -242,6 +242,41 @@ _(También puedes sumar combinados como Piscola o Mocktails sin alcohol)._
 }
 
 /**
+ * sanitizeRoboticReplies: Escudo de seguridad contra alucinaciones o mensajes de error
+ * técnico generados por el LLM (ej: "No se puede responder...", "Se necesita una respuesta numérica").
+ * Si detecta una respuesta robótica:
+ * - Si tenemos contexto de invitados y faltan los tragos p/p, la transforma en una respuesta humana y cordial.
+ * - Si no hay forma de humanizarla limpiamente, la silencia y escala para no exponer respuestas robotizadas.
+ * 
+ * @param {string} rawReply
+ * @param {object} session
+ * @param {string} userMessage
+ * @returns {string|null}
+ */
+export function sanitizeRoboticReplies(rawReply, session = {}, userMessage = '') {
+  if (!rawReply || typeof rawReply !== 'string') return rawReply;
+
+  const isRobotic = /\b(?:no se puede responder|respuesta num[eé]rica|indique el n[uú]mero de tragos|formato inv[aá]lido|opci[oó]n inv[aá]lida|no es v[aá]lido|no es una respuesta v[aá]lida|por favor,? indique el n[uú]mero)\b/i.test(rawReply);
+
+  if (!isRobotic) return rawReply;
+
+  console.warn(`[LLM SHIELD] Interceptada respuesta robótica del LLM: "${rawReply.slice(0, 100)}..." ante mensaje: "${userMessage}"`);
+
+  const guests = session?.guests;
+  if (guests && !session?.drinksPerPerson) {
+    const isApprox = /aprox|m[aá]s\s+o\s+menos/i.test(userMessage);
+    const prefix = isApprox
+      ? `¡Perfecto! Consideramos ~${guests} personas 🙌`
+      : `¡Anotado! Tomamos en cuenta el detalle 🙌`;
+
+    return `${prefix}\n\nPara poder calcular los litros ideales:\n• *2 tragos p/p:* ideal si habrá cerveza o vino.\n• *3 o más tragos p/p:* si será la barra principal de la fiesta.\n\n*¿Cuántos tragos por persona te gustaría calcular?*`;
+  }
+
+  // Si no hay contexto seguro para responder con gracia, es mejor silenciar y que un humano atienda
+  return null;
+}
+
+/**
  * mapToolsForGemini: Convierte las definiciones de tools al formato de Google Generative AI.
  */
 function mapToolsForGemini() {
@@ -388,17 +423,35 @@ export async function runAiAgentTurn(conversationTurns, userMessage, context = {
       + `- Si el cliente confirma que el carrito está correcto ("sí", "me parece bien", "perfecto así"): responde entusiasmado y pregunta la fecha del evento (*¿Para qué fecha estás cotizando tu evento, así revisamos la disponibilidad de inmediato en el calendario?*).\n`
       + `- Si el cliente responde con la fecha del evento (ej: "15 de noviembre") o consultas complejas de reserva: LLAMA INMEDIATAMENTE a silent_admin_escalation(clientQuestion, context) y GUARDA ABSOLUTO SILENCIO.\n`;
   } else if (guestsKnown && !drinksKnown) {
-    let introMention = `tus ${guestsKnown} invitados`;
-    if (communeKnown && dateKnown) introMention += ` en ${communeKnown} (${dateKnown})`;
-    else if (communeKnown) introMention += ` en ${communeKnown}`;
-    else if (dateKnown) introMention += ` para el ${dateKnown}`;
+    const lastModelTurn = [...conversationTurns].reverse().find((t) => t.role === 'model');
+    const alreadyAskedDrinks = Boolean(lastModelTurn && (
+      lastModelTurn.text.includes('tragos por persona') ||
+      lastModelTurn.text.includes('consumo por persona')
+    ));
 
-    stateContextBlock += `- Invitados indicados: ${guestsKnown} personas.\n`
-      + `- Tragos por persona: AÚN NO DEFINIDOS.\n`
-      + `- INSTRUCCIÓN OBLIGATORIA: NO uses herramientas de cálculo todavía. Valida con entusiasmo y calidez (menciona brevemente ${introMention}) y dale las dos referencias para definir el consumo:\n\n`
-      + `• *2 tragos p/p:* ideal como complemento si habrá cerveza, vino u otras bebidas.\n`
-      + `• *3 o más tragos p/p:* recomendado si será la barra principal de la fiesta.\n\n`
-      + `Cierra preguntando en negrita: *¿Cuántos tragos por persona te gustaría calcular?*\n`;
+    if (alreadyAskedDrinks) {
+      stateContextBlock += `- Invitados indicados: ${guestsKnown} personas (aprox).\n`
+        + `- Tipo de celebración: ${celebrationKnown || 'No indicada aún'}.\n`
+        + `- Tragos por persona: AÚN PENDIENTES DE RESPONDER POR EL CLIENTE.\n`
+        + `- El cliente acaba de enviar un mensaje de seguimiento o aclaración: "${userMessage}".\n`
+        + `- INSTRUCCIÓN CLAVE: Acusa recibo con simpatía y calidez humana de lo que acaba de escribir (ej: si es "aprox" o aclaración de invitados, di "¡Perfecto! Consideramos ~${guestsKnown} personas 🙌"; si indicó la celebración como "bautizo" o "matrimonio", di "¡Qué linda celebración un ${celebrationKnown || 'bautizo'}! 🥂").\n`
+        + `- Luego recuérdale amablemente lo que necesitamos para armar su propuesta: *¿Cuántos tragos por persona te gustaría calcular?* (puedes recordar brevemente: 2 p/p de complemento o 3+ p/p para barra principal).\n`
+        + `- PROHIBICIÓN ESTRICTA: NUNCA digas que no se puede responder, que se necesita un número o que es inválido. Si no entiendes su mensaje, llama a silent_admin_escalation y guarda silencio.\n`;
+    } else {
+      let introMention = `tus ${guestsKnown} invitados`;
+      if (celebrationKnown) introMention += ` para el ${celebrationKnown}`;
+      if (communeKnown && dateKnown) introMention += ` en ${communeKnown} (${dateKnown})`;
+      else if (communeKnown) introMention += ` en ${communeKnown}`;
+      else if (dateKnown) introMention += ` para el ${dateKnown}`;
+
+      stateContextBlock += `- Invitados indicados: ${guestsKnown} personas.\n`
+        + `- Celebración: ${celebrationKnown || 'No indicada aún'}.\n`
+        + `- Tragos por persona: AÚN NO DEFINIDOS.\n`
+        + `- INSTRUCCIÓN OBLIGATORIA: NO uses herramientas de cálculo todavía. Valida con entusiasmo y calidez (menciona brevemente ${introMention}) y dale las dos referencias para definir el consumo:\n\n`
+        + `• *2 tragos p/p:* ideal como complemento si habrá cerveza, vino u otras bebidas.\n`
+        + `• *3 o más tragos p/p:* recomendado si será la barra principal de la fiesta.\n\n`
+        + `Cierra preguntando en negrita: *¿Cuántos tragos por persona te gustaría calcular?*\n`;
+    }
   } else if (guestsKnown && drinksKnown) {
     stateContextBlock += `- Invitados: ${guestsKnown} personas.\n- Tragos por persona: ${drinksKnown}.\n- INSTRUCCIÓN: Llama a calculate_event_estimate con guests=${guestsKnown} y drinksPerPerson=${drinksKnown} para entregar la "Propuesta de Barra Sugerida" destacando siempre el costo por trago.\n`;
   } else {
@@ -521,6 +574,14 @@ export async function runAiAgentTurn(conversationTurns, userMessage, context = {
     let rawReply = currentResponse.response?.text?.() || '';
     if (!rawReply && lastToolFormattedText) {
       rawReply = lastToolFormattedText;
+    }
+    rawReply = sanitizeRoboticReplies(rawReply, session, userMessage);
+    if (!rawReply) {
+      return {
+        replyText: null,
+        toolCallsMade,
+        muted: true
+      };
     }
     const bubbles = parseReplyToBubbles(rawReply, session);
     return {
@@ -682,6 +743,14 @@ export async function runAiAgentTurn(conversationTurns, userMessage, context = {
     let rawReply = completion.choices[0]?.message?.content || '';
     if (!rawReply && lastToolFormattedText) {
       rawReply = lastToolFormattedText;
+    }
+    rawReply = sanitizeRoboticReplies(rawReply, session, userMessage);
+    if (!rawReply) {
+      return {
+        replyText: null,
+        toolCallsMade,
+        muted: true
+      };
     }
     const bubbles = parseReplyToBubbles(rawReply, session);
     return {

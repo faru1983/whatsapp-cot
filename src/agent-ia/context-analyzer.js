@@ -52,9 +52,13 @@ export function analyzeMessageContext(session, currentText) {
   const isTragosOnly = /\b(?:tragos?|c[oó]cteles?|copas?|p\/p|por persona|pp)\b/i.test(text);
 
   // Extracción de invitados: busca en mensaje actual o en turnos previos del cliente
-  let detectedGuests = (isTragosOnly || waitingForDrinksPerPerson)
+  const explicitGuestMention = /\b(?:personas?|invitados?|adultos?|amigos?|pax|pers\.?)\b/i.test(text);
+  const guestCandidate = parseGuestsFromText(text);
+  const isLargeNumber = Boolean(guestCandidate && guestCandidate >= 10);
+
+  let detectedGuests = (isTragosOnly || (waitingForDrinksPerPerson && !explicitGuestMention && !isLargeNumber))
     ? null
-    : parseGuestsFromText(text);
+    : guestCandidate;
 
   if (!detectedGuests && !session?.guests) {
     for (const pastMsg of [...userTurns].reverse()) {
@@ -65,6 +69,8 @@ export function analyzeMessageContext(session, currentText) {
       }
     }
   }
+
+  const isApproxClarification = /^(?:aprox|aproximadamente|m[aá]s\s+o\s+menos)$/i.test(text);
 
   // Extracción de fecha tentativa: busca en mensaje actual o en turnos previos
   let detectedDate = parseDate(text);
@@ -123,7 +129,8 @@ export function analyzeMessageContext(session, currentText) {
     detectedCommune,
     detectedCelebration,
     detectedDrinksPerPerson,
-    isDirectBarrelQuery
+    isDirectBarrelQuery,
+    isApproxClarification
   };
 }
 

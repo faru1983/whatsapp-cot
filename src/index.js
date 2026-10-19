@@ -78,6 +78,11 @@ function isRecentlyProcessedMessage(msgId) {
   return false;
 }
 
+// Buffer / Debounce para mensajes en ráfaga de clientes (evita responder múltiples veces
+// o fragmentar mensajes tipo "60" + "Aprox" + "Bautizo" enviados en segundos consecutivos)
+const inboundDebounceMap = new Map();
+const INBOUND_DEBOUNCE_MS = 1800;
+
 /**
  * unwrapMessageContent: Saca el contenido real de un mensaje.
  * Los chats con "mensajes temporales" envuelven el texto en ephemeralMessage;
@@ -562,6 +567,12 @@ async function startBot() {
         const shouldReconnect = statusCode !== DisconnectReason.loggedOut;
         console.log('Conexión cerrada. ¿Intentar reconectar automáticamente?:', shouldReconnect);
 
+        // Limpiar timers pendientes de debounce
+        for (const entry of inboundDebounceMap.values()) {
+          if (entry?.timer) clearTimeout(entry.timer);
+        }
+        inboundDebounceMap.clear();
+
         // Liberamos listeners del socket viejo para no acumular handlers
         try {
           sock.ev.removeAllListeners('connection.update');
@@ -899,13 +910,54 @@ async function startBot() {
           pushName: pushName || session.clientPushName || undefined,
         };
 
-        let reply = null;
         if (activeEngine === 'ia') {
-          reply = await processAiAgentMessage(sessionId, cleanText, clientOptions);
-        } else {
-          reply = await processMessage(sessionId, cleanText, clientOptions);
+          // Debounce de mensajes entrantes para el agente IA
+          // Si el cliente envía varios mensajes en ráfaga (ej: "60" y luego "Aprox" o "Bautizo" en < 1.8s),
+          // los consolidamos en un solo mensaje multilínea antes de invocar al LLM.
+          const existingPending = inboundDebounceMap.get(sessionId);
+          if (existingPending) {
+            clearTimeout(existingPending.timer);
+            existingPending.textChunks.push(cleanText);
+            existingPending.lastMessage = message;
+            existingPending.clientOptions = clientOptions;
+            existingPending.timer = setTimeout(async () => {
+              inboundDebounceMap.delete(sessionId);
+              const combinedText = existingPending.textChunks.join('\n');
+              try {
+                const reply = await processAiAgentMessage(sessionId, combinedText, existingPending.clientOptions);
+                await deliverBotReply(sock, existingPending.lastMessage.key.remoteJid, reply, botConfig.replyTiming || {});
+              } catch (err) {
+                console.error(`Error procesando mensaje IA debounced en ${sessionId}:`, err.message);
+              }
+            }, INBOUND_DEBOUNCE_MS);
+            console.log(`⏳ [Debounce IA] Mensaje acumulado en ráfaga para ${sessionId}: "${cleanText}" (total: ${existingPending.textChunks.length})`);
+            return;
+          }
+
+          // Primer mensaje de la ráfaga
+          const debounceEntry = {
+            textChunks: [cleanText],
+            lastMessage: message,
+            clientOptions,
+            timer: null
+          };
+
+          debounceEntry.timer = setTimeout(async () => {
+            inboundDebounceMap.delete(sessionId);
+            const combinedText = debounceEntry.textChunks.join('\n');
+            try {
+              const reply = await processAiAgentMessage(sessionId, combinedText, debounceEntry.clientOptions);
+              await deliverBotReply(sock, debounceEntry.lastMessage.key.remoteJid, reply, botConfig.replyTiming || {});
+            } catch (err) {
+              console.error(`Error procesando mensaje IA debounced en ${sessionId}:`, err.message);
+            }
+          }, INBOUND_DEBOUNCE_MS);
+
+          inboundDebounceMap.set(sessionId, debounceEntry);
+          return;
         }
 
+        const reply = await processMessage(sessionId, cleanText, clientOptions);
         await deliverBotReply(sock, message.key.remoteJid, reply, botConfig.replyTiming || {});
 
       } catch (error) {
