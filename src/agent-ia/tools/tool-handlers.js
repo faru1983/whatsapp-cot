@@ -8,6 +8,7 @@ import { getMinLitersForFormat, getAllowedLitrages } from '../../logic/eventos-h
 import { quoteCatalogShipping, quoteBarrilesDirectShipping, resolveOfficialProductName } from '../../logic/cot-catalog.js';
 import { syncCrmEngagedAsync } from '../../logic/cot-crm-sync.js';
 import { buildAdminSosBody } from '../../views/templates.js';
+import { buildCatalogFollowUpBubble } from '../catalog-example.js';
 
 /**
  * executeAgentTool: Ejecuta una tool invocada por el modelo.
@@ -51,7 +52,7 @@ export async function executeAgentTool(toolName, args, context = {}) {
       let formatKey = args.format;
 
       if (!formatKey || formatKey === 'auto') {
-        formatKey = guests >= 80 ? 'muro' : 'dispensador';
+        formatKey = session?.eventFormat || (args.format && args.format !== 'auto' ? args.format : 'dispensador');
       }
 
       const totalRequiredDrinks = Math.ceil(guests * drinksPerPerson);
@@ -68,24 +69,28 @@ export async function executeAgentTool(toolName, args, context = {}) {
       let varietiesCount = targetVarieties;
 
       if (formatKey === 'muro') {
-        // Muro: usa combinaciones de 10L ($119.990), 20L ($169.900) y 30L ($239.990)
+        // Muro: usa combinaciones de 10L ($119.990) y 20L ($169.900)
         const exactLiters = Math.ceil(totalRequiredDrinks / 5);
         totalLiters = Math.max(30, Math.ceil(exactLiters / 10) * 10);
         
         // Simulación de costo base mínimo de catálogo
         if (totalLiters === 30) {
-          estimatedSubtotal = 239990;
+          estimatedSubtotal = 169900 + 119990; // 20L + 10L = 289.890
           varietiesCount = Math.min(varietiesCount, 2);
-        } else if (totalLiters <= 40) {
+        } else if (totalLiters === 40) {
           estimatedSubtotal = 169900 * 2; // 2 de 20L
           varietiesCount = 2;
-        } else if (totalLiters <= 60) {
+        } else if (totalLiters === 50) {
+          estimatedSubtotal = (169900 * 2) + 119990; // 2 de 20L + 1 de 10L = 459.790
+          varietiesCount = 3;
+        } else if (totalLiters === 60) {
           estimatedSubtotal = 169900 * 3; // 3 de 20L = 509.700
           varietiesCount = 3;
         } else {
-          const count30 = Math.ceil(totalLiters / 30);
-          estimatedSubtotal = count30 * 239990;
-          varietiesCount = Math.min(4, count30);
+          const count20 = Math.floor(totalLiters / 20);
+          const rem = totalLiters % 20;
+          estimatedSubtotal = (count20 * 169900) + (rem >= 10 ? 119990 : 0);
+          varietiesCount = Math.min(4, count20 + (rem > 0 ? 1 : 0));
         }
       } else {
         // Dispensador Portátil: usa barriles de 5L ($69.990) y 10L ($109.990)
@@ -117,6 +122,8 @@ export async function executeAgentTool(toolName, args, context = {}) {
       const formatLabel = formatKey === 'muro' ? 'Muro de Coctelería' : 'Dispensador Portátil';
 
       if (session) {
+        session.eventFormat = formatKey;
+        session.lastEstimatedSubtotal = estimatedSubtotal;
         session.lastEstimatedTotal = formatPrice(estimatedTotal);
         session.lastCocktailsCount = totalCocktails;
         session.lastTotalLiters = totalLiters;
@@ -172,33 +179,9 @@ Puedes elegir entre nuestros cócteles clásicos, combinados o sin alcohol (Moji
       const drinks = session?.drinksPerGuest || 3;
       const calcLiters = Math.max(10, Math.ceil((guests * drinks * 0.2) / 5) * 5);
       const liters = session?.lastTotalLiters || session?.cartLiters || calcLiters;
-      let exampleBullets = '';
-
-      if (liters <= 10) {
-        exampleBullets = `• *10L* de Mojito Tradicional\n• _(O 2 variedades de 5L como 5L Mojito y 5L Sangría)_`;
-      } else if (liters === 15) {
-        exampleBullets = `• *10L* de Mojito Tradicional\n• *5L* de Sangría`;
-      } else if (liters === 20) {
-        exampleBullets = `• *10L* de Mojito Tradicional\n• *10L* de Sangría`;
-      } else if (liters === 25) {
-        exampleBullets = `• *10L* de Mojito Tradicional\n• *10L* de Aperol Spritz\n• *5L* de Sangría`;
-      } else {
-        const mitad = Math.round(liters / 20) * 10;
-        const resto = liters - mitad;
-        exampleBullets = `• *${mitad}L* de Mojito Tradicional\n• *${resto}L* de Sangría`;
-      }
 
       const bubble1 = `[IMG:lista_precios_completa.webp]`;
-      const bubble2 = `👆 *¡Aquí tienes nuestra carta completa!*
-
-Para cubrir tus *${liters} Litros*, puedes armar tu combinación favorita en formatos de 5L o 10L.
-
-Por ejemplo:
-${exampleBullets}
-
-_(También puedes sumar combinados como Piscola o Mocktails sin alcohol)._
-
-*¿Qué variedades te gustaría incluir en tu barra?*`;
+      const bubble2 = buildCatalogFollowUpBubble(session);
 
       const formattedCatalogText = `${bubble1}\n\n===BURBUJA===\n\n${bubble2}`;
 
@@ -231,7 +214,8 @@ _(También puedes sumar combinados como Piscola o Mocktails sin alcohol)._
         const sizeLabel = `${liters}L`;
 
         const catalogCocteles = preciosData.cocteles || {};
-        const coctelData = catalogCocteles[officialName] || catalogCocteles[rawName] || null;
+        const lookupKey = officialName === 'Mojito Tradicional' ? 'Mojito' : officialName;
+        const coctelData = catalogCocteles[lookupKey] || catalogCocteles[officialName] || catalogCocteles[rawName] || null;
 
         let unitPrice = 0;
         if (coctelData && coctelData[formatKey] && coctelData[formatKey][sizeLabel]) {
@@ -318,7 +302,8 @@ ${itemsText}
         const sizeLabel = `${liters}L`;
 
         const catalogCocteles = preciosData.cocteles || {};
-        const coctelData = catalogCocteles[officialName] || catalogCocteles[rawName] || null;
+        const lookupKey = officialName === 'Mojito Tradicional' ? 'Mojito' : officialName;
+        const coctelData = catalogCocteles[lookupKey] || catalogCocteles[officialName] || catalogCocteles[rawName] || null;
 
         let unitPrice = 0;
         if (coctelData && coctelData[formatKey] && coctelData[formatKey][sizeLabel]) {
@@ -406,7 +391,8 @@ ${itemsText}
         const qty = Math.max(1, Number(item.quantity) || 1);
 
         const catalogCocteles = preciosData.cocteles || {};
-        const coctelData = catalogCocteles[officialName] || catalogCocteles[rawName] || null;
+        const lookupKey = officialName === 'Mojito Tradicional' ? 'Mojito' : officialName;
+        const coctelData = catalogCocteles[lookupKey] || catalogCocteles[officialName] || catalogCocteles[rawName] || null;
 
         let unitPrice = 47990;
         if (coctelData?.desechable?.['5L']) {

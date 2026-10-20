@@ -347,15 +347,15 @@ async function deliverBotReply(sock, targetJid, reply, timing = {}) {
         continue;
       }
       const imageBuffer = fs.readFileSync(check.absolutePath);
-      const ext = path.extname(check.absolutePath).toLowerCase();
-      let mimetype = 'image/jpeg';
-      if (ext === '.webp') mimetype = 'image/webp';
-      else if (ext === '.png') mimetype = 'image/png';
-
-      const payload = { image: imageBuffer, mimetype };
+      const payload = { image: imageBuffer };
       if (part.caption) payload.caption = part.caption;
-      console.log(`📸 Enviando imagen ${part.file} (${imageBuffer.length} bytes, mimetype=${mimetype}) a ${targetJid}`);
-      await sendTracked(sock, targetJid, payload);
+      console.log(`📸 Enviando imagen ${part.file} (${imageBuffer.length} bytes) a ${targetJid}`);
+      const sent = await sendTracked(sock, targetJid, payload);
+      if (!sent) {
+        console.error(`❌ Falló el envío de la imagen ${part.file} a ${targetJid}`);
+      } else {
+        console.log(`✅ Imagen ${part.file} enviada correctamente a ${targetJid}`);
+      }
     } else if (isVideoPart(part)) {
       const check = assertImageExists(part.file);
       if (!check.ok) {

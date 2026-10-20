@@ -49,6 +49,9 @@ async function runVerification() {
   const reply3Text = Array.isArray(reply3) ? reply3.join('\n') : String(reply3);
   assert.match(reply3Text, /Presupuesto Estimado/i, 'Debe contener el presupuesto');
   assert.match(reply3Text, /carta de variedades/i, 'Debe ofrecer la carta');
+  const hasImgInTurn3 = Array.isArray(reply3) && reply3.some(b => typeof b === 'object' && b.type === 'image');
+  assert.strictEqual(hasImgInTurn3, false, 'La propuesta NO debe incluir la imagen de la carta antes de que el cliente la pida');
+  assert.doesNotMatch(reply3Text, /¡Aquí tienes nuestra carta completa!/i, 'La propuesta no debe autoinsertar la carta completa');
 
   console.log('\n🧪 [TEST 4] Cliente responde "sí" para ver la carta:');
   const reply4 = await processAiAgentMessage(testSessionId, 'sí porfa', options);
@@ -56,6 +59,11 @@ async function runVerification() {
   assert.ok(Array.isArray(reply4), 'Debe enviar múltiples burbujas');
   const hasImg = reply4.some(b => typeof b === 'object' && b.type === 'image');
   assert.ok(hasImg, 'Debe incluir la imagen de la carta');
+  const reply4Text = reply4.filter(b => typeof b === 'string').join('\n');
+  assert.match(reply4Text, /Sangría/i, 'El ejemplo de la carta debe comenzar con Sangría');
+  assert.match(reply4Text, /Mojito Tradicional/i, 'El ejemplo de la carta debe incluir Mojito Tradicional');
+  assert.match(reply4Text, /Caipiriña/i, 'El ejemplo de la carta debe incluir Caipiriña');
+  assert.match(reply4Text, /Total:.*alineado a tu propuesta/i, 'El total debe estar alineado a la propuesta');
   const sessionAfterTurn4 = getSession(testSessionId);
   assert.ok(sessionAfterTurn4.catalogSent, 'Debe marcar catálogo enviado');
 

@@ -13,6 +13,7 @@ import { sanitizeCustomerFacingReply } from '../logic/utils.js';
 import { ensureCatalogIndex } from '../logic/cot-catalog.js';
 import { AGENT_TOOLS_DEFINITIONS } from './tools/tool-definitions.js';
 import { executeAgentTool } from './tools/tool-handlers.js';
+import { buildCatalogFollowUpBubble } from './catalog-example.js';
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
@@ -192,52 +193,21 @@ export function parseReplyToBubbles(text, session = {}) {
     }
   }
 
-  // 3. Garantía absoluta para la carta de variedades:
+  // 3. Manejo controlado para la carta de variedades:
   let hasCatalogImg = outBubbles.some((b) => typeof b === 'object' && b.file === 'lista_precios_completa.webp');
-  const mentionsCatalog = outBubbles.some(
-    (b) => typeof b === 'string' && /carta(?: completa| de variedades)?|Para cubrir tus \*\d+ Litros\*|Para cubrir tus \d+ Litros|¿Qué variedades te gustaría incluir/i.test(b)
+  const isExplicitCatalogDelivery = outBubbles.some(
+    (b) => typeof b === 'string' && /¡Aquí tienes nuestra carta completa!/i.test(b)
   );
 
-  // A) Si el texto habla de la carta pero el LLM omitió el tag [IMG:...], insertar la imagen real de la carta
-  if (!hasCatalogImg && mentionsCatalog) {
+  // A) Si el LLM emitió explícitamente la entrega de la carta pero omitió el tag [IMG:...], insertar la imagen oficial
+  if (!hasCatalogImg && isExplicitCatalogDelivery) {
     outBubbles.unshift({ type: 'image', file: 'lista_precios_completa.webp' });
     hasCatalogImg = true;
   }
 
-  // B) Si hay imagen pero el texto no incluye la pregunta de avance con ejemplos de litros
-  const hasCatalogQuestion = outBubbles.some((b) => typeof b === 'string' && /¿Qué variedades|Para cubrir tus/i.test(b));
-
-  if (hasCatalogImg && !hasCatalogQuestion) {
-    const guests = session?.guests || 20;
-    const drinks = session?.drinksPerGuest || 3;
-    const calcLiters = Math.max(10, Math.ceil((guests * drinks * 0.2) / 5) * 5);
-    const liters = session?.lastTotalLiters || session?.cartLiters || calcLiters;
-    let exampleBullets = '';
-    if (liters <= 10) {
-      exampleBullets = `• *10L* de Mojito Tradicional\n• _(O 2 variedades de 5L como 5L Mojito y 5L Sangría)_`;
-    } else if (liters === 15) {
-      exampleBullets = `• *10L* de Mojito Tradicional\n• *5L* de Sangría`;
-    } else if (liters === 20) {
-      exampleBullets = `• *10L* de Mojito Tradicional\n• *10L* de Sangría`;
-    } else if (liters === 25) {
-      exampleBullets = `• *10L* de Mojito Tradicional\n• *10L* de Aperol Spritz\n• *5L* de Sangría`;
-    } else {
-      const mitad = Math.round(liters / 20) * 10;
-      const resto = liters - mitad;
-      exampleBullets = `• *${mitad}L* de Mojito Tradicional\n• *${resto}L* de Sangría`;
-    }
-
-    const followUpBubble = `👆 *¡Aquí tienes nuestra carta completa!*
-
-Para cubrir tus *${liters} Litros*, puedes armar tu combinación favorita en formatos de 5L o 10L.
-
-Por ejemplo:
-${exampleBullets}
-
-_(También puedes sumar combinados como Piscola o Mocktails sin alcohol)._
-
-*¿Qué variedades te gustaría incluir en tu barra?*`;
-
+  // B) Si solo viene la imagen de catálogo sin burbuja de texto acompañante
+  if (hasCatalogImg && outBubbles.length === 1) {
+    const followUpBubble = buildCatalogFollowUpBubble(session);
     outBubbles.push(formatWhatsAppReply(followUpBubble));
   }
 

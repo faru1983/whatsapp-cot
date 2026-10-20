@@ -149,10 +149,14 @@ export async function processAiAgentMessage(sessionId, messageText, options = {}
 
     // Caso A: Cliente responde afirmativamente al ofrecimiento de la carta de variedades
     const askedForCatalog = /¿Te gustaría que te comparta la carta/i.test(lastBotText);
-    const wantsCatalog = /^(?:s[ií]|si por favor|s[ií] porfa|dale|bueno|claro|por favor|m[aá]ndala|comp[aá]rtela|env[ií]ala|ok|de acuerdo|obvio|me gustar[ií]a|porfa|yapo|ya po)\b/i.test(cleanText.trim()) ||
-      /m[aá]ndame la carta|ver la carta|enviar carta|qu[eé] tragos tienen|qu[eé] variedades/i.test(cleanText);
+    const isExplicitCatalogAsk = /m[aá]ndame la carta|ver la carta|enviar carta|qu[eé] tragos tienen|qu[eé] variedades|carta de precios/i.test(cleanText);
+    const wantsCatalog = /^(?:s[ií]|si por favor|s[ií] porfa|dale|bueno|claro|por favor|m[aá]ndala|comp[aá]rtela|env[ií]ala|ok|de acuerdo|obvio|me gustar[ií]a|porfa|yapo|ya po)\b/i.test(cleanText.trim()) || isExplicitCatalogAsk;
 
-    if ((askedForCatalog && wantsCatalog) || (session.proposalDelivered && wantsCatalog)) {
+    const shouldSendCatalog = (askedForCatalog && wantsCatalog) ||
+      (session.proposalDelivered && !session.catalogSent && wantsCatalog) ||
+      isExplicitCatalogAsk;
+
+    if (shouldSendCatalog) {
       session.history = session.history || { turns: [] };
       session.history.turns.push({ role: 'user', text: cleanText });
 
