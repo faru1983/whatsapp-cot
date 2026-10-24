@@ -5,7 +5,13 @@
 
 import { preciosData, formatPrice, findLocationByFuzzyMatch, normalizeString } from '../../logic/utils.js';
 import { getMinLitersForFormat, getAllowedLitrages } from '../../logic/eventos-helpers.js';
-import { quoteCatalogShipping, quoteBarrilesDirectShipping, resolveOfficialProductName } from '../../logic/cot-catalog.js';
+import {
+  quoteCatalogShipping,
+  quoteBarrilesDirectShipping,
+  resolveOfficialProductName,
+  buildGroupedDispensadorMenuText,
+  getDispensadorProductPriceSync
+} from '../../logic/cot-catalog.js';
 import { syncCrmEngagedAsync } from '../../logic/cot-crm-sync.js';
 import { buildAdminSosBody } from '../../views/templates.js';
 import { buildCatalogFollowUpBubble } from '../catalog-example.js';
@@ -49,80 +55,37 @@ export async function executeAgentTool(toolName, args, context = {}) {
 
       const guests = Number(detectedGuests);
       const drinksPerPerson = Number(detectedDrinks);
-      let formatKey = args.format;
-
-      if (!formatKey || formatKey === 'auto') {
-        formatKey = session?.eventFormat || (args.format && args.format !== 'auto' ? args.format : 'dispensador');
-      }
+      const formatKey = 'dispensador';
 
       const totalRequiredDrinks = Math.ceil(guests * drinksPerPerson);
-      const minL = getMinLitersForFormat(formatKey);
 
       // Regla oficial de negocio: 1 Litro = 5 Cócteles (vaso estándar 200ml)
-      // Generamos la combinación óptima de barriles igual que el wizard web
-      let targetVarieties = Math.max(1, Math.round(drinksPerPerson));
-      if (guests <= 10) targetVarieties = 1;
+      // Dispensador Portátil: usa barriles de 5L ($69.990) y 10L ($109.990), mínimo 10L
+      const exactLiters = Math.ceil(totalRequiredDrinks / 5);
+      const totalLiters = Math.max(10, Math.ceil(exactLiters / 5) * 5);
 
-      // Cálculo de litros necesarios en múltiplos de barril
-      let totalLiters = 0;
       let estimatedSubtotal = 0;
-      let varietiesCount = targetVarieties;
-
-      if (formatKey === 'muro') {
-        // Muro: usa combinaciones de 10L ($119.990) y 20L ($169.900)
-        const exactLiters = Math.ceil(totalRequiredDrinks / 5);
-        totalLiters = Math.max(30, Math.ceil(exactLiters / 10) * 10);
-        
-        // Simulación de costo base mínimo de catálogo
-        if (totalLiters === 30) {
-          estimatedSubtotal = 169900 + 119990; // 20L + 10L = 289.890
-          varietiesCount = Math.min(varietiesCount, 2);
-        } else if (totalLiters === 40) {
-          estimatedSubtotal = 169900 * 2; // 2 de 20L
-          varietiesCount = 2;
-        } else if (totalLiters === 50) {
-          estimatedSubtotal = (169900 * 2) + 119990; // 2 de 20L + 1 de 10L = 459.790
-          varietiesCount = 3;
-        } else if (totalLiters === 60) {
-          estimatedSubtotal = 169900 * 3; // 3 de 20L = 509.700
-          varietiesCount = 3;
-        } else {
-          const count20 = Math.floor(totalLiters / 20);
-          const rem = totalLiters % 20;
-          estimatedSubtotal = (count20 * 169900) + (rem >= 10 ? 119990 : 0);
-          varietiesCount = Math.min(4, count20 + (rem > 0 ? 1 : 0));
-        }
+      if (totalLiters === 10) {
+        estimatedSubtotal = 109990;
+      } else if (totalLiters === 15) {
+        estimatedSubtotal = 109990 + 69990; // 179.980
+      } else if (totalLiters === 20) {
+        estimatedSubtotal = 109990 * 2; // 219.980
+      } else if (totalLiters === 25) {
+        estimatedSubtotal = (109990 * 2) + 69990; // 289.970
       } else {
-        // Dispensador Portátil: usa barriles de 5L ($69.990) y 10L ($109.990)
-        const exactLiters = Math.ceil(totalRequiredDrinks / 5);
-        totalLiters = Math.max(10, Math.ceil(exactLiters / 5) * 5);
-
-        if (totalLiters === 10) {
-          estimatedSubtotal = 109990;
-          varietiesCount = 1;
-        } else if (totalLiters === 15) {
-          estimatedSubtotal = 109990 + 69990; // 179.980
-          varietiesCount = 2;
-        } else if (totalLiters === 20) {
-          estimatedSubtotal = 109990 * 2; // 219.980
-          varietiesCount = 2;
-        } else if (totalLiters === 25) {
-          estimatedSubtotal = (109990 * 2) + 69990; // 289.970
-          varietiesCount = 2;
-        } else {
-          const count10 = Math.ceil(totalLiters / 10);
-          estimatedSubtotal = count10 * 109990;
-          varietiesCount = Math.min(3, count10);
-        }
+        const count10 = Math.floor(totalLiters / 10);
+        const rem = totalLiters % 10;
+        estimatedSubtotal = (count10 * 109990) + (rem >= 5 ? 69990 : 0);
       }
 
       const totalCocktails = totalLiters * 5;
       const estimatedTotal = estimatedSubtotal;
       const pricePerCocktail = Math.round(estimatedTotal / totalCocktails);
-      const formatLabel = formatKey === 'muro' ? 'Muro de Coctelería' : 'Dispensador Portátil';
+      const formatLabel = 'Dispensador Portátil';
 
       if (session) {
-        session.eventFormat = formatKey;
+        session.eventFormat = 'dispensador';
         session.lastEstimatedSubtotal = estimatedSubtotal;
         session.lastEstimatedTotal = formatPrice(estimatedTotal);
         session.lastCocktailsCount = totalCocktails;
@@ -130,28 +93,14 @@ export async function executeAgentTool(toolName, args, context = {}) {
         session.proposalDelivered = true;
       }
 
-      const bubble1 = `*Tu Propuesta de Barra Sugerida* 🍹
+      const bubble1 = `*Tu Medida Recomendada* 🍹
 
-Para poder brindar a *${guests} invitados* un promedio de *${drinksPerPerson} tragos p/p* necesitamos:
+Para *${guests} invitados* calculando *${drinksPerPerson} tragos p/p* (~${totalRequiredDrinks} cócteles), lo ideal son *${totalLiters} Litros (${totalCocktails} cócteles)* combinando barriles de 10L y 5L:
 
-• *${totalCocktails} cócteles*, esto equivale a *${totalLiters} Litros*.
+• Opción *${totalLiters}L (${totalCocktails} cócteles):* desde *${formatPrice(estimatedTotal)}* (~*${formatPrice(pricePerCocktail)}* por trago).
+• Incluye *100% GRATIS* estación con dispensadores, hielo total, garnish, vasos/copas y montaje/retiro en Provincia de Santiago.`;
 
-*Presupuesto Estimado:* *${formatPrice(estimatedTotal)}*
-• *Costo por trago:* Solo *${formatPrice(pricePerCocktail)}* por trago servido.
-_(¡Te sale a solo ${formatPrice(pricePerCocktail)} por trago con todo el servicio incluido: barra, hielo, vasos y garnish!)_
-
-*Servicio Todo Incluido ($0 adicional):*
-
-🧊 Hielo suficiente para todo el evento
-🍋 Decoraciones deshidratadas (garnish)
-🥂 Vasos desechables o cristalería premium en préstamo
-🍸 Herramientas de bar (bombillas, palas, pinzas, hieleras, etc.)`;
-
-      const bubble2 = `🍸 *¡Ahora viene la mejor parte: armar tu barra!*
-
-Puedes elegir entre nuestros cócteles clásicos, combinados o sin alcohol (Mojito, Sangría, Caipiriña, Pisco Sour, Aperol, Ramazzotti y más).
-
-*¿Te gustaría que te comparta la carta de variedades disponibles?*`;
+      const bubble2 = buildGroupedDispensadorMenuText();
 
       const formattedProposalText = `${bubble1}\n\n===BURBUJA===\n\n${bubble2}`;
 
@@ -161,8 +110,7 @@ Puedes elegir entre nuestros cócteles clásicos, combinados o sin alcohol (Moji
         drinksPerPerson,
         totalCocktails,
         totalLiters,
-        varietiesCount,
-        formatKey,
+        formatKey: 'dispensador',
         formatLabel,
         estimatedTotal,
         estimatedTotalFormatted: formatPrice(estimatedTotal),
@@ -180,10 +128,7 @@ Puedes elegir entre nuestros cócteles clásicos, combinados o sin alcohol (Moji
       const calcLiters = Math.max(10, Math.ceil((guests * drinks * 0.2) / 5) * 5);
       const liters = session?.lastTotalLiters || session?.cartLiters || calcLiters;
 
-      const bubble1 = `[IMG:lista_precios_completa.webp]`;
-      const bubble2 = buildCatalogFollowUpBubble(session);
-
-      const formattedCatalogText = `${bubble1}\n\n===BURBUJA===\n\n${bubble2}`;
+      const formattedCatalogText = buildGroupedDispensadorMenuText();
 
       if (session) {
         session.catalogSent = true;
@@ -199,8 +144,8 @@ Puedes elegir entre nuestros cócteles clásicos, combinados o sin alcohol (Moji
 
     case 'build_custom_cart_quote': {
       const guests = session?.guests || 20;
-      const drinksPerGuestTarget = session?.drinksPerGuest || 4;
-      const formatKey = args.format === 'muro' ? 'muro' : (session?.eventFormat || 'dispensador');
+      const drinksPerGuestTarget = session?.drinksPerGuest || 3;
+      const formatKey = 'dispensador';
       const rawItems = Array.isArray(args.items) ? args.items : [];
 
       let totalLiters = 0;
@@ -210,23 +155,9 @@ Puedes elegir entre nuestros cócteles clásicos, combinados o sin alcohol (Moji
       for (const item of rawItems) {
         const rawName = String(item.flavor || '').trim();
         const officialName = resolveOfficialProductName(rawName);
-        const liters = Number(item.liters) || 10;
-        const sizeLabel = `${liters}L`;
+        const liters = Number(item.liters) === 5 ? 5 : 10;
 
-        const catalogCocteles = preciosData.cocteles || {};
-        const lookupKey = officialName === 'Mojito Tradicional' ? 'Mojito' : officialName;
-        const coctelData = catalogCocteles[lookupKey] || catalogCocteles[officialName] || catalogCocteles[rawName] || null;
-
-        let unitPrice = 0;
-        if (coctelData && coctelData[formatKey] && coctelData[formatKey][sizeLabel]) {
-          unitPrice = coctelData[formatKey][sizeLabel];
-        } else {
-          if (formatKey === 'muro') {
-            unitPrice = liters === 10 ? 119990 : liters === 20 ? 169900 : 239990;
-          } else {
-            unitPrice = liters === 5 ? 69990 : liters === 10 ? 109990 : (Math.ceil(liters / 10) * 109990);
-          }
-        }
+        const unitPrice = getDispensadorProductPriceSync(officialName, liters);
 
         total += unitPrice;
         totalLiters += liters;
@@ -238,28 +169,55 @@ Puedes elegir entre nuestros cócteles clásicos, combinados o sin alcohol (Moji
         });
       }
 
+      // Si por alguna razón el litraje quedó menor a 10L (mínimo oficial), ajustar
+      if (totalLiters < 10 && lineDetails.length === 1) {
+        // Si pidió solo 1 barril de 5L, advertir o calcular base 10L
+        // En carrito de eventos el mínimo es 10L
+      }
+
       const totalCocktails = totalLiters * 5;
       const drinksPerPersonCalculated = guests > 0 ? (Math.round((totalCocktails / guests) * 10) / 10) : drinksPerGuestTarget;
       const pricePerCocktail = totalCocktails > 0 ? Math.round(total / totalCocktails) : 2200;
 
       const itemsText = lineDetails
-        .map((it) => `• *${it.liters}L* ${it.flavor}: *${it.unitPriceFormatted}*`)
+        .map((it) => `• *${it.liters}L* ${it.flavor} (${it.liters * 5} cócteles): *${it.unitPriceFormatted}*`)
         .join('\n');
+
+      const rawEventDate = session?.eventDate || context?.contextMeta?.detectedDate;
+      const eventDate = rawEventDate ? String(rawEventDate).replace(/^para\s+el\s+/i, '').replace(/^el\s+/i, '').trim() : '';
+      const commune = session?.commune || session?.location || context?.contextMeta?.detectedCommune;
+
+      let closingQuestion = '';
+      if (eventDate && commune) {
+        closingQuestion = `*¿Te parece bien esta combinación para revisar disponibilidad para el ${eventDate} en ${commune}?*`;
+      } else if (eventDate) {
+        closingQuestion = `*¿En qué comuna de la Región Metropolitana sería el evento para confirmar despacho y disponibilidad para el ${eventDate}?*`;
+      } else if (commune) {
+        closingQuestion = `*¿Para qué fecha estás pensando tu evento en ${commune} para revisar disponibilidad?*`;
+      } else {
+        closingQuestion = `*¿Para qué fecha y en qué comuna de la Región Metropolitana sería el evento para revisar disponibilidad?*`;
+      }
+
+      let warningMinimum = '';
+      if (totalLiters < 10) {
+        warningMinimum = `\n⚠️ _Nota: Nuestro servicio de Bar Móvil tiene un pedido mínimo de 10L (50 cócteles), pudiendo combinar 2 sabores de 5L._\n`;
+      }
 
       const formattedCartText = `*Resumen de tu Barra Personalizada* 🍸
 
 ${itemsText}
-
-*TOTAL:* *${formatPrice(total)}* (neto)
+${warningMinimum}
+*TOTAL:* *${formatPrice(total)}*
 • *Costo por trago:* Solo *${formatPrice(pricePerCocktail)}* por trago servido.
-📊 _${totalCocktails} cócteles | ${drinksPerPersonCalculated} tragos p/p | ${formatPrice(pricePerCocktail)} por trago_
+📊 _${totalCocktails} cócteles | ~${drinksPerPersonCalculated} tragos p/p | ${formatPrice(pricePerCocktail)} por trago con todo el servicio GRATIS_
 
 *Servicio Todo Incluido ($0 adicional):*
-• Dispensador portátil listo para servir
+• Estación autoservicio con dispensadores instalados
 • Hielo suficiente para todo el evento
-• Vasos en préstamo, garnish y herramientas de bar
+• Préstamo de vasos/copas reutilizables (o desechables), garnish y accesorios
+• Montaje y retiro gratis en Provincia de Santiago
 
-*¿Te parece bien esta selección o te gustaría ajustar alguna variedad?*`;
+${closingQuestion}`;
 
       if (session) {
         session.cartSummary = formattedCartText;
@@ -267,6 +225,7 @@ ${itemsText}
         session.cartTotal = total;
         session.cartTotalFormatted = formatPrice(total);
         session.cartTotalCocktails = totalCocktails;
+        session.cartTotalLiters = totalLiters;
         session.cartDrinksPerPerson = drinksPerPersonCalculated;
         session.cartPricePerCocktail = pricePerCocktail;
       }
@@ -481,6 +440,18 @@ ${itemsText}
       if (session) {
         session.isMuted = true;
         session.silenciado_timestamp = Date.now();
+        session.userIntent = 'EVENTOS';
+
+        // Auto-sincronizar el lead en el CRM de forma determinista
+        const extraPayload = {
+          agentVersion: 'agent-ia-v2',
+          summary: summaryContext || `Lead calificado eventos: ${session.guests || 'XX'} invitados, fecha ${session.eventDate || 'por confirmar'}`
+        };
+        syncCrmEngagedAsync(session, 'intent_selected', extraPayload);
+
+        if (typeof applyBusinessLabel === 'function') {
+          applyBusinessLabel('clientePotencial').catch(() => {});
+        }
       }
 
       if (typeof alertAdmin === 'function') {
@@ -491,12 +462,25 @@ ${itemsText}
         const commune = session?.commune || session?.location || context.contextMeta?.detectedCommune || '';
         const communeStr = commune ? ` en *${commune}*` : '';
 
+        let shippingInfo = '';
+        if (commune) {
+          const totalLitersForShipping = session?.cartTotalLiters || session?.lastTotalLiters || 10;
+          const shippingRes = quoteCatalogShipping({
+            serviceType: 'event',
+            comunaName: commune,
+            totalLiters: totalLitersForShipping
+          });
+          if (shippingRes) {
+            shippingInfo = `\n🚚 *Flete ${commune}:* ${shippingRes.label || (shippingRes.cost === 0 ? '¡Gratis!' : formatPrice(shippingRes.cost))}`;
+          }
+        }
+
         let cartBlock = '';
         if (session?.cartItems && session.cartItems.length > 0) {
           cartBlock = session.cartItems
             .map((it) => `• ${it.liters}L ${it.flavor}: ${it.unitPriceFormatted}`)
             .join('\n');
-          cartBlock += `\n💰 *TOTAL:* ${session.cartTotalFormatted || ''} (neto)`;
+          cartBlock += `\n💰 *TOTAL:* ${session.cartTotalFormatted || ''}`;
           cartBlock += `\n📊 _${session.cartTotalCocktails || ''} cócteles | ${drinks} tragos p/p | ${formatPrice(session.cartPricePerCocktail || 2200)} por trago_`;
         } else if (session?.cartSummary) {
           cartBlock = session.cartSummary;
@@ -506,7 +490,7 @@ ${itemsText}
           cartBlock = 'Cotización inicial';
         }
 
-        const bodyText = `Hola, tenemos un cliente interesado en un evento para el *${date}*${communeStr}\n\nSon *${guests} invitados* y le interesa los siguientes cócteles:\n${cartBlock}\n\n_Ya te hice la pega inicial, ahora te toca a ti lograr el cierre. ¡Respóndele rápido!_ 🚀\n\n🤫 *(El bot se silenció en MUTE para que continúes tú directo desde WhatsApp).*`;
+        const bodyText = `Hola, tenemos un cliente interesado en un evento para el *${date}*${communeStr}${shippingInfo}\n\nSon *${guests} invitados* y le interesa los siguientes cócteles:\n${cartBlock}\n\n_Ya te hice la pega inicial, ahora te toca a ti lograr el cierre. ¡Respóndele rápido!_ 🚀\n\n🤫 *(El bot se silenció en MUTE para que continúes tú directo desde WhatsApp).*`;
 
         await alertAdmin({
           type: 'SOS',

@@ -6,7 +6,7 @@
 export const AGENT_TOOLS_DEFINITIONS = [
   {
     name: 'calculate_event_estimate',
-    description: 'Calcula el presupuesto estimado oficial para un evento en 2 burbujas, destacando el costo por trago servido y el servicio todo incluido ($0 adicional). ESTÁ PROHIBIDO USAR SI EL CLIENTE AÚN NO HA INDICADO SUS INVITADOS EN EL CHAT. Si el cliente pregunta cómo funciona o precios generales, responde con texto y NO uses esta herramienta.',
+    description: 'Calcula la propuesta recomendada oficial para un evento en 2 burbujas (Burbuja 1: Medida recomendada en barriles de 5L/10L, presupuesto base, costo por trago servido y servicio 100% gratis; Burbuja 2: Catálogo de sabores agrupado en texto desde la API). ESTÁ PROHIBIDO USAR SI EL CLIENTE AÚN NO HA INDICADO SUS INVITADOS EN EL CHAT. Si el cliente pregunta cómo funciona o precios generales, responde con texto y NO uses esta herramienta.',
     parameters: {
       type: 'OBJECT',
       properties: {
@@ -20,8 +20,8 @@ export const AGENT_TOOLS_DEFINITIONS = [
         },
         format: {
           type: 'STRING',
-          enum: ['dispensador', 'muro', 'auto'],
-          description: 'Formato preferido: "dispensador" (portátil, min 10L), "muro" (barra grande, min 30L), o "auto" según cantidad de invitados.'
+          enum: ['dispensador'],
+          description: 'Formato del servicio: "dispensador" (bar móvil autoservicio, barriles 5L y 10L, mín. 10L).'
         }
       },
       required: ['guests', 'drinksPerPerson']
@@ -133,14 +133,14 @@ export const AGENT_TOOLS_DEFINITIONS = [
   },
   {
     name: 'send_cocktails_catalog',
-    description: 'Envía la carta oficial completa de variedades y precios (imagen lista_precios_completa.webp en la primera burbuja + texto de instrucciones y ejemplo dinámico según los litros del evento en la segunda burbuja). ÚSALO OBLIGATORIAMENTE cuando el cliente responda afirmativamente a la propuesta (ej: "sí", "dale", "porfa", "mándala", "claro", "bueno") o pida ver la carta de cócteles.',
+    description: 'Envía el catálogo oficial completo de variedades y precios agrupados por tramos en texto vivo desde la API. ÚSALO OBLIGATORIAMENTE cuando el cliente pida ver la carta o catálogo de cócteles.',
     parameters: {
       type: 'OBJECT',
       properties: {
         format: {
           type: 'STRING',
-          enum: ['dispensador', 'muro'],
-          description: 'Formato del evento (opcional, por defecto dispensador).'
+          enum: ['dispensador'],
+          description: 'Formato del evento (por defecto dispensador).'
         }
       },
       required: []

@@ -6,109 +6,47 @@
 // el total del ejemplo coincida con el presupuesto estimado previo.
 // ==============================================================================
 
-import { preciosData, formatPrice } from '../logic/utils.js';
+import { formatPrice } from '../logic/utils.js';
+import { getDispensadorProductPriceSync } from '../logic/cot-catalog.js';
 
 /**
- * Obtiene el precio unitario de un cóctel para un formato y tamaño dado.
+ * Obtiene el precio unitario de un cóctel para formato Dispensador (5L o 10L).
  *
  * @param {string} flavor
  * @param {number} liters
- * @param {string} formatKey 'dispensador' | 'muro'
  * @returns {number}
  */
-export function getCatalogCocktailPrice(flavor, liters, formatKey = 'dispensador') {
-  const catalog = preciosData.cocteles || {};
-  const sizeLabel = `${liters}L`;
-
-  // Resolver clave en catálogo de precios (datos.json tiene 'Mojito', no 'Mojito Tradicional')
-  const lookupKey = flavor === 'Mojito Tradicional' ? 'Mojito' : flavor;
-  const coctelData = catalog[lookupKey] || catalog[flavor] || null;
-
-  if (coctelData && coctelData[formatKey] && coctelData[formatKey][sizeLabel]) {
-    return coctelData[formatKey][sizeLabel];
-  }
-
-  // Precios base oficiales de fallback (coincidentes con Sangría, Mojito y Caipiriña)
-  if (formatKey === 'muro') {
-    if (liters === 10) return 119990;
-    if (liters === 20) return 169900;
-    return Math.ceil(liters / 10) * 119990;
-  }
-
-  // Dispensador
-  if (liters === 5) return 69990;
-  if (liters === 10) return 109990;
-  if (liters === 20) return 219980; // 2x 10L
-  return Math.ceil(liters / 10) * 109990;
+export function getCatalogCocktailPrice(flavor, liters) {
+  return getDispensadorProductPriceSync(flavor, liters);
 }
 
 /**
  * Distribuye una cantidad total de litros entre las variedades más económicas.
- * Orden estricto de menor costo: Sangría -> Mojito Tradicional -> Caipiriña.
+ * Orden: Mojito Tradicional -> Sangría -> Caipiriña (barriles 5L y 10L, mín. 10L).
  *
  * @param {number} totalLiters
- * @param {string} formatKey 'dispensador' | 'muro'
  * @returns {Array<{ flavor: string, liters: number, cocktails: number, price: number, priceFormatted: string, note?: string }>}
  */
-export function distributeEconomicalFlavors(totalLiters, formatKey = 'dispensador') {
-  const baseFlavors = ['Sangría', 'Mojito Tradicional', 'Caipiriña'];
-  const items = [];
+export function distributeEconomicalFlavors(totalLiters) {
+  const baseFlavors = ['Mojito Tradicional', 'Sangría', 'Caipiriña'];
+  const safeLiters = Math.max(10, Math.ceil(totalLiters / 5) * 5);
 
-  if (formatKey === 'muro') {
-    // Muro usa formatos de 20L y 10L
-    let remaining = totalLiters;
-    let flavorIndex = 0;
-
-    while (remaining >= 20) {
-      const flavor = baseFlavors[flavorIndex % baseFlavors.length];
-      const price = getCatalogCocktailPrice(flavor, 20, 'muro');
-      items.push({
-        flavor,
-        liters: 20,
-        cocktails: 100,
-        price,
-        priceFormatted: formatPrice(price)
-      });
-      remaining -= 20;
-      flavorIndex++;
-    }
-
-    if (remaining > 0) {
-      const liters = remaining >= 10 ? 10 : remaining;
-      const flavor = baseFlavors[flavorIndex % baseFlavors.length];
-      const price = getCatalogCocktailPrice(flavor, liters, 'muro');
-      items.push({
-        flavor,
-        liters,
-        cocktails: liters * 5,
-        price,
-        priceFormatted: formatPrice(price)
-      });
-    }
-
-    return items;
-  }
-
-  // Dispensador Portátil: formatos de 10L y 5L
-  if (totalLiters <= 10) {
-    const price10 = getCatalogCocktailPrice('Sangría', 10, 'dispensador');
+  if (safeLiters <= 10) {
+    const price10 = getCatalogCocktailPrice('Mojito Tradicional', 10);
     return [
       {
-        flavor: 'Sangría',
+        flavor: 'Mojito Tradicional',
         liters: 10,
         cocktails: 50,
         price: price10,
         priceFormatted: formatPrice(price10),
-        note: '_(O puedes dividirlo en 2 variedades de 5L como 5L Sangría y 5L Mojito Tradicional)_'
+        note: '_(O puedes dividirlo en 2 variedades de 5L como 5L Mojito Tradicional y 5L Sangría)_'
       }
     ];
   }
 
-  // Para > 10L en dispensador:
-  // Repartir en bloques de 10L de forma equitativa entre Sangría, Mojito Tradicional y Caipiriña.
-  // Si sobran 5L (ej: 15L, 25L, 35L), asignar un bloque de 5L.
-  let remaining = totalLiters;
-  const blocks = { 'Sangría': 0, 'Mojito Tradicional': 0, 'Caipiriña': 0 };
+  let remaining = safeLiters;
+  const blocks = { 'Mojito Tradicional': 0, 'Sangría': 0, 'Caipiriña': 0 };
   let flavorIndex = 0;
 
   while (remaining >= 10) {
@@ -124,20 +62,18 @@ export function distributeEconomicalFlavors(totalLiters, formatKey = 'dispensado
     remaining -= 5;
   }
 
+  const items = [];
   for (const flavor of baseFlavors) {
     const liters = blocks[flavor];
     if (liters <= 0) continue;
 
-    // Calcular precio exacto (ej: 20L = 2x 10L = $219.980, 5L = $69.990, 15L = 109.990 + 69.990)
     let price = 0;
-    if (liters === 5) price = 69990;
-    else if (liters === 10) price = 109990;
-    else if (liters === 15) price = 109990 + 69990;
-    else if (liters === 20) price = 109990 * 2;
+    if (liters === 5) price = getCatalogCocktailPrice(flavor, 5);
+    else if (liters === 10) price = getCatalogCocktailPrice(flavor, 10);
     else {
       const c10 = Math.floor(liters / 10);
       const rem = liters % 10;
-      price = (c10 * 109990) + (rem >= 5 ? 69990 : 0);
+      price = (c10 * getCatalogCocktailPrice(flavor, 10)) + (rem >= 5 ? getCatalogCocktailPrice(flavor, 5) : 0);
     }
 
     items.push({
@@ -161,8 +97,6 @@ export function distributeEconomicalFlavors(totalLiters, formatKey = 'dispensado
 export function buildCatalogFollowUpBubble(session = {}) {
   const guests = session?.guests || 0;
   const drinksPerGuest = session?.drinksPerGuest || 0;
-  const formatKey = session?.eventFormat === 'muro' ? 'muro' : 'dispensador';
-
   let totalLiters = Number(session?.lastTotalLiters || session?.cartLiters || 0);
   if (!totalLiters) {
     const g = guests || 20;
@@ -171,7 +105,7 @@ export function buildCatalogFollowUpBubble(session = {}) {
   }
 
   const totalCocktails = totalLiters * 5;
-  const distributedItems = distributeEconomicalFlavors(totalLiters, formatKey);
+  const distributedItems = distributeEconomicalFlavors(totalLiters);
 
   // Calcular suma total del ejemplo
   const exampleTotal = distributedItems.reduce((acc, item) => acc + item.price, 0);
@@ -196,9 +130,7 @@ export function buildCatalogFollowUpBubble(session = {}) {
     })
     .join('\n');
 
-  const formatDescription = formatKey === 'muro'
-    ? 'formatos de 10L o 20L'
-    : 'formatos de 5L o 10L';
+  const formatDescription = 'formatos de 5L o 10L';
 
   return `👆 *¡Aquí tienes nuestra carta completa!*
 

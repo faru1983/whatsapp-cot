@@ -85,7 +85,24 @@ export function analyzeMessageContext(session, currentText) {
   }
 
   // Extracción de comuna o ciudad: busca en mensaje actual o en turnos previos
-  let detectedCommune = findLocationByFuzzyMatch(text)?.name || null;
+  const locMatch = findLocationByFuzzyMatch(text);
+  let detectedCommune = locMatch?.name || null;
+  let detectedOutOfRM = false;
+  let outOfRMLabel = null;
+
+  if (locMatch && locMatch.isRM === false) {
+    detectedOutOfRM = true;
+    outOfRMLabel = locMatch.name;
+  } else {
+    // Regex para menciones explícitas de regiones o ciudades fuera de RM
+    const regionRegex = /\b(?:vi[nñ]a(\s+del\s+mar)?|valpara[ií]so|rancagua|machal[ií]|la\s+serena|coquimbo|concepci[oó]n|temuco|antofagasta|iquique|talca|chill[aá]n|puerto\s+montt|v\s+regi[oó]n|iv\s+regi[oó]n|viii\s+regi[oó]n|de\s+regi[oó]n|otra\s+regi[oó]n)\b/i;
+    const rMatch = text.match(regionRegex);
+    if (rMatch) {
+      detectedOutOfRM = true;
+      outOfRMLabel = rMatch[0];
+    }
+  }
+
   let rawSector = null;
   if (/las\s+vizcachas|vizcachas/i.test(text)) rawSector = 'Las Vizcachas';
   else if (/chicureo/i.test(text)) rawSector = 'Chicureo';
@@ -95,9 +112,13 @@ export function analyzeMessageContext(session, currentText) {
 
   if (!detectedCommune && !session?.commune) {
     for (const pastMsg of [...userTurns].reverse()) {
-      const loc = findLocationByFuzzyMatch(pastMsg)?.name;
-      if (loc) {
-        detectedCommune = loc;
+      const pastLoc = findLocationByFuzzyMatch(pastMsg);
+      if (pastLoc?.name) {
+        detectedCommune = pastLoc.name;
+        if (pastLoc.isRM === false) {
+          detectedOutOfRM = true;
+          outOfRMLabel = pastLoc.name;
+        }
         break;
       }
     }
@@ -154,7 +175,9 @@ export function analyzeMessageContext(session, currentText) {
     detectedDrinksPerPerson,
     detectedCocktails,
     isDirectBarrelQuery,
-    isApproxClarification
+    isApproxClarification,
+    detectedOutOfRM,
+    outOfRMLabel
   };
 }
 
@@ -227,100 +250,64 @@ export function extractRequestedCocktails(text, session = {}) {
   // 1. Detección de solicitud de sugerencia / recomendación / los más populares
   const wantsSuggested = /\b(sugerid[ao]|sugerencia|recomiend[ao]|recomi[eé]ndame|populares|m[aá]s\s+pedidos|los\s+mejores|qu[eé]\s+me\s+recomiendas)\b/i.test(raw);
 
-  const formatKey = (session?.eventoFormato === 'muro' || session?.eventFormat === 'muro') ? 'muro' : 'dispensador';
   const guests = session?.guests || 20;
   const drinks = session?.drinksPerGuest || 3;
   const calcLiters = Math.max(10, Math.ceil((guests * drinks * 0.2) / 5) * 5);
-  const targetLiters = session?.lastTotalLiters || session?.cartLiters || calcLiters;
+  const targetLiters = Math.max(10, session?.lastTotalLiters || session?.cartLiters || calcLiters);
 
   if (wantsSuggested) {
-    if (formatKey === 'muro') {
-      if (targetLiters <= 30) {
-        return {
-          isSuggested: true,
-          items: [
-            { flavor: 'Mojito Tradicional', liters: 20 },
-            { flavor: 'Aperol Spritz', liters: 10 }
-          ],
-          totalLiters: 30,
-          unrecognizedFlavors: []
-        };
-      } else if (targetLiters <= 40) {
-        return {
-          isSuggested: true,
-          items: [
-            { flavor: 'Mojito Tradicional', liters: 20 },
-            { flavor: 'Aperol Spritz', liters: 20 }
-          ],
-          totalLiters: 40,
-          unrecognizedFlavors: []
-        };
-      } else {
-        return {
-          isSuggested: true,
-          items: [
-            { flavor: 'Mojito Tradicional', liters: 30 },
-            { flavor: 'Aperol Spritz', liters: 20 },
-            { flavor: 'Sangría', liters: 10 }
-          ],
-          totalLiters: 60,
-          unrecognizedFlavors: []
-        };
-      }
+    if (targetLiters <= 10) {
+      return {
+        isSuggested: true,
+        items: [
+          { flavor: 'Mojito Tradicional', liters: 10 }
+        ],
+        totalLiters: 10,
+        unrecognizedFlavors: []
+      };
+    } else if (targetLiters <= 15) {
+      return {
+        isSuggested: true,
+        items: [
+          { flavor: 'Mojito Tradicional', liters: 10 },
+          { flavor: 'Sangría', liters: 5 }
+        ],
+        totalLiters: 15,
+        unrecognizedFlavors: []
+      };
+    } else if (targetLiters <= 20) {
+      return {
+        isSuggested: true,
+        items: [
+          { flavor: 'Mojito Tradicional', liters: 10 },
+          { flavor: 'Aperol Spritz', liters: 10 }
+        ],
+        totalLiters: 20,
+        unrecognizedFlavors: []
+      };
+    } else if (targetLiters <= 25) {
+      return {
+        isSuggested: true,
+        items: [
+          { flavor: 'Mojito Tradicional', liters: 10 },
+          { flavor: 'Aperol Spritz', liters: 10 },
+          { flavor: 'Sangría', liters: 5 }
+        ],
+        totalLiters: 25,
+        unrecognizedFlavors: []
+      };
     } else {
-      if (targetLiters <= 10) {
-        return {
-          isSuggested: true,
-          items: [
-            { flavor: 'Mojito Tradicional', liters: 10 }
-          ],
-          totalLiters: 10,
-          unrecognizedFlavors: []
-        };
-      } else if (targetLiters <= 15) {
-        return {
-          isSuggested: true,
-          items: [
-            { flavor: 'Mojito Tradicional', liters: 10 },
-            { flavor: 'Sangría', liters: 5 }
-          ],
-          totalLiters: 15,
-          unrecognizedFlavors: []
-        };
-      } else if (targetLiters <= 20) {
-        return {
-          isSuggested: true,
-          items: [
-            { flavor: 'Mojito Tradicional', liters: 10 },
-            { flavor: 'Aperol Spritz', liters: 10 }
-          ],
-          totalLiters: 20,
-          unrecognizedFlavors: []
-        };
-      } else if (targetLiters <= 25) {
-        return {
-          isSuggested: true,
-          items: [
-            { flavor: 'Mojito Tradicional', liters: 10 },
-            { flavor: 'Aperol Spritz', liters: 10 },
-            { flavor: 'Sangría', liters: 5 }
-          ],
-          totalLiters: 25,
-          unrecognizedFlavors: []
-        };
-      } else {
-        const mitad = Math.round(targetLiters / 20) * 10;
-        const resto = targetLiters - mitad;
-        return {
-          isSuggested: true,
-          items: [
-            { flavor: 'Mojito Tradicional', liters: mitad },
-            { flavor: 'Aperol Spritz', liters: resto }
-          ],
-          totalLiters: targetLiters,
-          unrecognizedFlavors: []
-        };
-      }
+      const mitad = Math.round(targetLiters / 20) * 10;
+      const resto = targetLiters - mitad;
+      return {
+        isSuggested: true,
+        items: [
+          { flavor: 'Mojito Tradicional', liters: mitad },
+          { flavor: 'Aperol Spritz', liters: resto }
+        ],
+        totalLiters: targetLiters,
+        unrecognizedFlavors: []
+      };
     }
   }
 
@@ -394,8 +381,8 @@ export function extractRequestedCocktails(text, session = {}) {
   // Si los ítems no traían litrajes explícitos (ej: "Mojito y Aperol"), repartir targetLiters
   const unassigned = items.filter((it) => !it.liters);
   if (unassigned.length > 0) {
-    const remainingLiters = Math.max(unassigned.length * (formatKey === 'muro' ? 10 : 5), targetLiters - allocatedTotal);
-    const step = formatKey === 'muro' ? 10 : (remainingLiters >= 20 ? 10 : 5);
+    const remainingLiters = Math.max(unassigned.length * 5, targetLiters - allocatedTotal);
+    const step = remainingLiters >= 20 ? 10 : 5;
     let perFlavor = Math.floor(remainingLiters / (unassigned.length * step)) * step;
     if (perFlavor < step) perFlavor = step;
 

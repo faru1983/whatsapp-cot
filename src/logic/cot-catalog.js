@@ -4,6 +4,7 @@
 // ==============================================================================
 
 import { fetchCatalogViaApi, isCotApiConfigured } from './cot-api.js';
+import { preciosData, formatPrice } from './utils.js';
 
 // ==============================================================================
 // 1. ALIASES (nombres cortos del bot → nombre oficial en Supabase)
@@ -172,6 +173,7 @@ function buildIndexFromProducts(products) {
     byName.set(normalizeCatalogName(p.name), {
       id: p.id,
       name: p.name,
+      category: p.category || 'Cocktails',
       sizes: Array.isArray(p.sizes) ? p.sizes : []
     });
   }
@@ -518,7 +520,10 @@ export function findCatalogComuna(comunaName) {
 export function quoteCatalogShipping(opts) {
   const serviceType = opts?.serviceType === 'direct' ? 'direct' : 'event';
   const comunaName = String(opts?.comunaName || '').trim();
-  const totalLiters = Number(opts?.totalLiters) || 0;
+  const passedLiters = Number(opts?.totalLiters);
+  const totalLiters = serviceType !== 'direct'
+    ? (Number.isFinite(passedLiters) && passedLiters > 0 ? passedLiters : 10)
+    : (Number(opts?.totalLiters) || 0);
   const hit = findCatalogComuna(comunaName);
   if (!hit) return null;
 
@@ -865,4 +870,129 @@ export async function mapDisposableCartToApiItems(products) {
   }
 
   return { items, errors, catalogSource: source };
+}
+
+// ==============================================================================
+// 5. PRECIOS Y MENÚ AGRUPADO PARA DISPENSADOR (BOT IA)
+// ==============================================================================
+
+/**
+ * getDispensadorProductPriceSync: Devuelve el precio unitario vigente de un cóctel
+ * para el formato Dispensador (5L o 10L, no desechable).
+ * Usa el índice API en caché (offerPrice ?? price); si no está cargado o no existe,
+ * recurre a preciosData (datos.json) y finalmente a precios de respaldo.
+ *
+ * @param {string} name - Nombre del cóctel (ej: 'Mojito Tradicional', 'Aperol Spritz')
+ * @param {number} litrage - 5 o 10
+ * @returns {number} Precio en CLP
+ */
+export function getDispensadorProductPriceSync(name, litrage) {
+  const targetLitrage = Number(litrage) === 5 ? 5 : 10;
+  const officialName = resolveOfficialProductName(name);
+  const index = getCachedProductIndex();
+
+  if (index) {
+    const product = findProductInIndex(index, officialName);
+    if (product && Array.isArray(product.sizes)) {
+      const match = product.sizes.find(
+        (s) => !s.isDisposable && Number(s.sizeValue) === targetLitrage
+      );
+      if (match) {
+        const effPrice = Number(match.offerPrice) > 0 ? Number(match.offerPrice) : Number(match.price);
+        if (Number.isFinite(effPrice) && effPrice > 0) {
+          return effPrice;
+        }
+      }
+    }
+  }
+
+  // Fallback a datos.json
+  const cocteles = preciosData.cocteles || {};
+  const lookupKey = officialName === 'Mojito Tradicional' ? 'Mojito' : officialName;
+  const coctelData = cocteles[lookupKey] || cocteles[officialName] || cocteles[name];
+  const sizeLabel = `${targetLitrage}L`;
+  if (coctelData?.dispensador?.[sizeLabel]) {
+    return Number(coctelData.dispensador[sizeLabel]);
+  }
+
+  // Fallbacks razonables según familia
+  const lower = normalizeCatalogName(officialName);
+  if (lower.includes('margarita')) {
+    return targetLitrage === 5 ? 109990 : 179990;
+  }
+  if (lower.includes('spritz') || lower.includes('mule') || lower.includes('tropical gin')) {
+    return targetLitrage === 5 ? 89990 : 159990;
+  }
+  if (lower.includes('sour') || lower.includes('gin and tonic') || lower.includes('gin & tonic')) {
+    return targetLitrage === 5 ? 79990 : (lower.includes('gin') ? 124990 : 119990);
+  }
+  if (lower.includes('maracuya') || lower.includes('frambuesa') || lower.includes('mango')) {
+    return targetLitrage === 5 ? 74990 : 119990;
+  }
+  if (lower.includes('piscola')) {
+    return targetLitrage === 5 ? 59990 : 89990;
+  }
+  if (lower.includes('mocktail') || lower.includes('sin alcohol')) {
+    return targetLitrage === 5 ? 59990 : 89990;
+  }
+  // Clásicos base (Mojito, Sangría, Caipiriña)
+  return targetLitrage === 5 ? 69990 : 109990;
+}
+
+/**
+ * getDispensadorProductPrice: Versión asíncrona que asegura la carga del catálogo vivo.
+ *
+ * @param {string} name
+ * @param {number} litrage
+ * @returns {Promise<number>}
+ */
+export async function getDispensadorProductPrice(name, litrage) {
+  await ensureCatalogIndex();
+  return getDispensadorProductPriceSync(name, litrage);
+}
+
+/**
+ * buildGroupedDispensadorMenuText: Genera el catálogo dinámico agrupado por tramos de precios
+ * para WhatsApp, leyendo los valores vivos desde la API web (o fallback a datos.json).
+ *
+ * @returns {string} Texto formateado para WhatsApp
+ */
+export function buildGroupedDispensadorMenuText() {
+  const pClasicos5 = formatPrice(getDispensadorProductPriceSync('Mojito Tradicional', 5));
+  const pClasicos10 = formatPrice(getDispensadorProductPriceSync('Mojito Tradicional', 10));
+
+  const pMojitoSabores5 = formatPrice(getDispensadorProductPriceSync('Mojito Maracuyá', 5));
+  const pMojitoSabores10 = formatPrice(getDispensadorProductPriceSync('Mojito Maracuyá', 10));
+
+  const pSour5 = formatPrice(getDispensadorProductPriceSync('Pisco Sour Clásico', 5));
+  const pSour10 = formatPrice(getDispensadorProductPriceSync('Pisco Sour Clásico', 10));
+
+  const pGin5 = formatPrice(getDispensadorProductPriceSync('Gin and Tonic', 5));
+  const pGin10 = formatPrice(getDispensadorProductPriceSync('Gin and Tonic', 10));
+
+  const pSpritz5 = formatPrice(getDispensadorProductPriceSync('Aperol Spritz', 5));
+  const pSpritz10 = formatPrice(getDispensadorProductPriceSync('Aperol Spritz', 10));
+
+  const pTequila5 = formatPrice(getDispensadorProductPriceSync('Tequila Margarita', 5));
+  const pTequila10 = formatPrice(getDispensadorProductPriceSync('Tequila Margarita', 10));
+
+  return `📋 *Catálogo de Sabores (Valores 5L = 25 tragos / 10L = 50 tragos)*
+
+🍹 *Clásicos Refrescantes (${pClasicos5} / ${pClasicos10})*
+• Mojito Tradicional · Caipiriña · Sangría
+
+🍋 *Favoritos & Cítricos*
+• Mojito Sabores (Maracuyá, Frambuesa, Mango): ${pMojitoSabores5} / ${pMojitoSabores10}
+• Pisco Sour Clásico: ${pSour5} / ${pSour10}
+• Gin & Tonic: ${pGin5} / ${pGin10}
+
+✨ *Línea Spritz & Autor (${pSpritz5} / ${pSpritz10})*
+• Aperol Spritz · Ramazzotti Spritz · Moscow Mule · Tropical Gin
+
+🌵 *Especial (${pTequila5} / ${pTequila10})*
+• Tequila Margarita
+
+_(También tenemos *Piscolas, Whiskcola* y *Mocktails sin alcohol* desde $59.990 / $89.990 si quieres sumarlos)._
+
+*¿Qué sabores te gustaría combinar para armar tu cotización, o prefieres que te sugiera nuestros favoritos?*`;
 }

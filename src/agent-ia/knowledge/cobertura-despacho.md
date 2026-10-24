@@ -1,13 +1,15 @@
-# Cobertura y Traslados — Cocktails on Tap
+# Cobertura y Despachos — Cocktails on Tap
 
-## 1. Servicio para Eventos
-- **Región Metropolitana (RM):** Llegamos a todas las comunas de la RM.
-  - Comunas centrales de Santiago (Las Condes, Providencia, Vitacura, Santiago Centro, Ñuñoa, etc.): Flete **$0 (¡Gratis!)**.
-  - Comunas periféricas (Colina, Buin, Talagante, Pirque, Chicureo, etc.): Tarifa plana accesible ($15.000 a $40.000) o gratis según el volumen de litros contratado.
-- **Fuera de la Región Metropolitana:**
-  - Evaluamos eventos fuera de la RM caso a caso según el tamaño del evento (litros) y la fecha disponible (experiencia previa en V Región - Viña del Mar/Valparaíso y IV Región - Coquimbo/La Serena).
-  - Recomendamos al cliente cotizar por WhatsApp para que el equipo humano revise la factibilidad técnica del viaje.
+## 1. Servicio de Bar Móvil Autoservicio para Eventos
+El servicio de Bar Móvil con montaje está disponible **exclusivamente en la Región Metropolitana (RM)**:
+- **Provincia de Santiago (32 comunas):** Despacho, montaje y posterior retiro **$0 (100% GRATIS)** con el pedido mínimo de 10L.
+- **Comunas periféricas dentro de la RM (Colina / Chicureo, Lampa, Tiltil, Puente Alto, Pirque, San José de Maipo, San Bernardo, Buin, Paine, Calera de Tango, Talagante, Peñaflor, Padre Hurtado, Isla de Maipo, Melipilla, Curacaví):**
+  - **SÍ pertenecen a la Región Metropolitana**, por lo que el servicio está 100% disponible.
+  - Se aplica el costo de traslado oficial según la comuna calculado directamente por la API web.
 
-## 2. Barriles Desechables (5L)
-- **Santiago (RM):** Despacho propio ($5.000 a $15.000 según comuna).
-- **Regiones:** Envíos a todo Chile vía **Blue Express** a domicilio (calculado automáticamente según zona geográfica: Misma Zona, Centro, Extremo).
+## 2. Fuera de la Región Metropolitana (Otras Regiones de Chile)
+- El servicio de Bar Móvil Autoservicio con montaje e instalación **no está disponible fuera de la Región Metropolitana**.
+- Para clientes de regiones (Viña del Mar, Valparaíso, Rancagua, La Serena, Concepción, etc.), contamos con **cócteles listos para servir en barriles desechables de 5L (~25 tragos)** con envío a domicilio vía Blue Express.
+- Se comparte directamente el enlace de compra web:
+  👉 https://cocktailsontap.cl/barriles
+- Al compartir este enlace para regiones, el bot queda en **MUTE** de inmediato.
