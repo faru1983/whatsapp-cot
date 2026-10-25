@@ -6,7 +6,7 @@
 export const AGENT_TOOLS_DEFINITIONS = [
   {
     name: 'calculate_event_estimate',
-    description: 'Calcula la propuesta recomendada oficial para un evento en 2 burbujas (Burbuja 1: Medida recomendada en barriles de 5L/10L, presupuesto base, costo por trago servido y servicio 100% gratis; Burbuja 2: Catálogo de sabores agrupado en texto desde la API). ESTÁ PROHIBIDO USAR SI EL CLIENTE AÚN NO HA INDICADO SUS INVITADOS EN EL CHAT. Si el cliente pregunta cómo funciona o precios generales, responde con texto y NO uses esta herramienta.',
+    description: 'Calcula la propuesta recomendada oficial para un evento en 2 burbujas (Burbuja 1: Medida recomendada en barriles de 5L/10L, presupuesto base, costo por trago servido y servicio 100% gratis; Burbuja 2: Catálogo de sabores agrupado en texto desde la API). ESTÁ ESTRICTAMENTE PROHIBIDO USAR SI EL CLIENTE AÚN NO HA INDICADO LOS TRAGOS POR PERSONA. Si el cliente solo dio los invitados pero aún no ha respondido cuántos tragos por persona desea calcular, NO uses esta herramienta: responde con texto anotando los invitados y pregúntale cómo quiere enfocar la barra (2 p/p complemento o 3+ p/p principal).',
     parameters: {
       type: 'OBJECT',
       properties: {
@@ -176,13 +176,13 @@ export const AGENT_TOOLS_DEFINITIONS = [
   },
   {
     name: 'silent_admin_escalation',
-    description: 'Silencia el bot (MUTE) de forma invisible para el cliente y envía una alerta interna inmediata al administrador de Cocktails on Tap. ÚSALO OBLIGATORIAMENTE cuando: 1) El cliente responda con la fecha de su evento tras confirmar el carrito de compras (o en cualquier momento que indique la fecha final para coordinar reserva). 2) El cliente haga preguntas específicas complejas fuera de catálogo o pida hablar con un humano. REGLA ESTRICTA: Tras invocar esta herramienta, NO envíes ningún mensaje al cliente; guarda absoluto silencio.',
+    description: 'Silencia el bot (MUTE) de forma invisible para el cliente y envía una alerta interna inmediata al administrador de Cocktails on Tap. REGLA ESTRICTA: SOLO DEBES USARLA cuando: 1) El cliente ya tiene un carrito o cotización confirmada y entrega la FECHA de su evento para coordinar disponibilidad y cierre con el admin. 2) El cliente pide hablar con un humano o hace una pregunta compleja imposible de responder con la base de conocimiento. NUNCA la uses en saludos, preguntas iniciales, ni antes de cotizar. Tras invocar esta herramienta, NO envíes ningún mensaje al cliente; guarda absoluto silencio.',
     parameters: {
       type: 'OBJECT',
       properties: {
         clientQuestion: {
           type: 'STRING',
-          description: 'La fecha indicada por el cliente, su solicitud o mensaje.'
+          description: 'La fecha indicada por el cliente para el evento o su consulta específica.'
         },
         context: {
           type: 'STRING',

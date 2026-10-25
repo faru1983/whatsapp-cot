@@ -3,7 +3,7 @@
 // Conecta el agente IA con el cotizador oficial, el catálogo vivo y el CRM.
 // ==============================================================================
 
-import { preciosData, formatPrice, findLocationByFuzzyMatch, normalizeString } from '../../logic/utils.js';
+import { preciosData, formatPrice, findLocationByFuzzyMatch, normalizeString, parseDate } from '../../logic/utils.js';
 import { getMinLitersForFormat, getAllowedLitrages } from '../../logic/eventos-helpers.js';
 import {
   quoteCatalogShipping,
@@ -29,8 +29,8 @@ export async function executeAgentTool(toolName, args, context = {}) {
 
   switch (toolName) {
     case 'calculate_event_estimate': {
-      const detectedGuests = session?.guests || context.contextMeta?.detectedGuests || args.guests;
-      const detectedDrinks = session?.drinksPerGuest || context.contextMeta?.detectedDrinksPerPerson || args.drinksPerPerson;
+      const detectedGuests = args.guests || session?.guests || context.contextMeta?.detectedGuests;
+      const verifiedDrinks = session?.drinksPerGuest || context.contextMeta?.detectedDrinksPerPerson;
 
       if (!detectedGuests || detectedGuests <= 0) {
         return {
@@ -39,22 +39,20 @@ export async function executeAgentTool(toolName, args, context = {}) {
         };
       }
 
-      if (!detectedDrinks || detectedDrinks <= 0) {
+      if (!verifiedDrinks || verifiedDrinks <= 0) {
+        const dateStr = session?.eventDate
+          ? ` para el *${String(session.eventDate).replace(/^para\s+el\s+/i, '').replace(/^el\s+/i, '').trim()}*`
+          : '';
         return {
           success: false,
           needsDrinksPerPerson: true,
-          instruction: `El cliente indicó ${detectedGuests} invitados, pero AÚN NO HA INDICADO los tragos por persona. Tu respuesta obligatoria ahora debe ser:
-"¡Súper! 🍹 Ahora definamos el consumo por persona para calcular los litros ideales:
-
-• *2 tragos p/p:* ideal como complemento si habrá cerveza, vino u otras bebidas.
-• *3 o más tragos p/p:* recomendado si será la barra principal de la fiesta.
-
-*¿Cuántos tragos por persona te gustaría calcular?*"`
+          allowSingleReply: true,
+          reply: `¡Súper! Anotado${dateStr} con *${detectedGuests} invitados* 🗓️🍹\n\nPara recomendarte la cantidad exacta de litros, cuéntame cómo quieres enfocar la barra:\n• *2 tragos p/p:* ideal como complemento (si habrá cerveza, vino u otras bebidas).\n• *3 o más tragos p/p:* recomendado si seremos la barra principal de la fiesta.\n\n*¿Cuántos tragos por persona te gustaría calcular?*`
         };
       }
 
       const guests = Number(detectedGuests);
-      const drinksPerPerson = Number(detectedDrinks);
+      const drinksPerPerson = Number(verifiedDrinks);
       const formatKey = 'dispensador';
 
       const totalRequiredDrinks = Math.ceil(guests * drinksPerPerson);
@@ -85,6 +83,9 @@ export async function executeAgentTool(toolName, args, context = {}) {
       const formatLabel = 'Dispensador Portátil';
 
       if (session) {
+        session.guests = guests;
+        session.drinksPerGuest = drinksPerPerson;
+        session.drinksPerPerson = drinksPerPerson;
         session.eventFormat = 'dispensador';
         session.lastEstimatedSubtotal = estimatedSubtotal;
         session.lastEstimatedTotal = formatPrice(estimatedTotal);
@@ -445,7 +446,7 @@ ${closingQuestion}`;
         // Auto-sincronizar el lead en el CRM de forma determinista
         const extraPayload = {
           agentVersion: 'agent-ia-v2',
-          summary: summaryContext || `Lead calificado eventos: ${session.guests || 'XX'} invitados, fecha ${session.eventDate || 'por confirmar'}`
+          summary: summaryContext || `Lead eventos: ${session.guests || 'XX'} invitados, fecha ${session.eventDate || 'por confirmar'}`
         };
         syncCrmEngagedAsync(session, 'intent_selected', extraPayload);
 
@@ -457,9 +458,10 @@ ${closingQuestion}`;
       if (typeof alertAdmin === 'function') {
         const guests = session?.guests || 'XX';
         const drinks = session?.cartDrinksPerPerson || session?.drinksPerGuest || 'XX';
-        const rawDate = session?.eventDate || question || 'por confirmar';
+        const parsedDateFromQuestion = parseDate(question);
+        const rawDate = session?.eventDate || context?.contextMeta?.detectedDate || parsedDateFromQuestion || 'por confirmar';
         const date = String(rawDate).replace(/^para\s+el\s+/i, '').replace(/^el\s+/i, '').trim();
-        const commune = session?.commune || session?.location || context.contextMeta?.detectedCommune || '';
+        const commune = session?.commune || session?.location || context?.contextMeta?.detectedCommune || '';
         const communeStr = commune ? ` en *${commune}*` : '';
 
         let shippingInfo = '';
@@ -475,26 +477,36 @@ ${closingQuestion}`;
           }
         }
 
-        let cartBlock = '';
-        if (session?.cartItems && session.cartItems.length > 0) {
-          cartBlock = session.cartItems
-            .map((it) => `• ${it.liters}L ${it.flavor}: ${it.unitPriceFormatted}`)
-            .join('\n');
-          cartBlock += `\n💰 *TOTAL:* ${session.cartTotalFormatted || ''}`;
-          cartBlock += `\n📊 _${session.cartTotalCocktails || ''} cócteles | ${drinks} tragos p/p | ${formatPrice(session.cartPricePerCocktail || 2200)} por trago_`;
-        } else if (session?.cartSummary) {
-          cartBlock = session.cartSummary;
-        } else if (session?.lastEstimatedTotal) {
-          cartBlock = `• Presupuesto estimado: ${session.lastEstimatedTotal} (${session.lastTotalLiters || 20}L ~ ${session.lastCocktailsCount || 100} cócteles)`;
-        } else {
-          cartBlock = 'Cotización inicial';
-        }
+        const isQualifiedBooking = Boolean(session?.cartSummary || session?.cartItems?.length || session?.proposalDelivered);
 
-        const bodyText = `Hola, tenemos un cliente interesado en un evento para el *${date}*${communeStr}${shippingInfo}\n\nSon *${guests} invitados* y le interesa los siguientes cócteles:\n${cartBlock}\n\n_Ya te hice la pega inicial, ahora te toca a ti lograr el cierre. ¡Respóndele rápido!_ 🚀\n\n🤫 *(El bot se silenció en MUTE para que continúes tú directo desde WhatsApp).*`;
+        let alertTitle = 'NUEVO EVENTO LISTO PARA CIERRE (MUTE ACTIVO)';
+        let bodyText = '';
+
+        if (isQualifiedBooking) {
+          let cartBlock = '';
+          if (session?.cartItems && session.cartItems.length > 0) {
+            cartBlock = session.cartItems
+              .map((it) => `• ${it.liters}L ${it.flavor}: ${it.unitPriceFormatted}`)
+              .join('\n');
+            cartBlock += `\n💰 *TOTAL:* ${session.cartTotalFormatted || ''}`;
+            cartBlock += `\n📊 _${session.cartTotalCocktails || ''} cócteles | ${drinks} tragos p/p | ${formatPrice(session.cartPricePerCocktail || 2200)} por trago_`;
+          } else if (session?.cartSummary) {
+            cartBlock = session.cartSummary;
+          } else if (session?.lastEstimatedTotal) {
+            cartBlock = `• Presupuesto estimado: ${session.lastEstimatedTotal} (${session.lastTotalLiters || 20}L ~ ${session.lastCocktailsCount || 100} cócteles)`;
+          } else {
+            cartBlock = 'Cotización inicial';
+          }
+
+          bodyText = `Hola, tenemos un cliente interesado en un evento para el *${date}*${communeStr}${shippingInfo}\n\nSon *${guests} invitados* y le interesa los siguientes cócteles:\n${cartBlock}\n\n_Ya te hice la pega inicial, ahora te toca a ti lograr el cierre. ¡Respóndele rápido!_ 🚀\n\n🤫 *(El bot se silenció en MUTE para que continúes tú directo desde WhatsApp).*`;
+        } else {
+          alertTitle = 'CONSULTA DE CLIENTE ESCALADA A ADMIN (MUTE ACTIVO)';
+          bodyText = `El cliente escribió: "${question || summaryContext}"\n\nEstado: Sin carrito armado aún.\nInvitados: ${guests !== 'XX' ? guests : 'Por definir'}, Fecha: ${date}${communeStr}.\n\n🤫 *(El bot se silenció en MUTE para que continúes tú directo desde WhatsApp).*`;
+        }
 
         await alertAdmin({
           type: 'SOS',
-          title: 'NUEVO EVENTO LISTO PARA CIERRE (MUTE ACTIVO)',
+          title: alertTitle,
           body: bodyText
         });
       }

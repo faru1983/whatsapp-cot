@@ -75,27 +75,37 @@ export function formatWhatsAppReply(text) {
   // 4. Convertir listas markdown "* " o "- " a viñetas limpias "• "
   out = out.replace(/^([ \t]*)[*-][ \t]+/gm, '$1• ');
 
-  // 5. Arreglar si las viñetas se pegaron a los dos puntos en una sola línea
-  out = out.replace(/:[ \t]*•[ \t]*/g, ':\n\n• ');
+  // Caracteres que representan viñetas o ítems de lista en WhatsApp
+  const BULLET_CHARS = '[•✅✔☑👉📌🧊🔹🔸✦★☆]|(?:\\d+\\.)';
 
-  // 6. Arreglar viñetas consecutivas que quedaron en la misma línea
-  out = out.replace(/([^\n])[ \t]+•[ \t]+/g, '$1\n• ');
+  // 5. Arreglar si las viñetas o checkmarks se pegaron a los dos puntos en una sola línea
+  // Ej: "...*100% GRATIS*: ✅ Estación..." -> "...*100% GRATIS*:\n\n✅ Estación..."
+  out = out.replace(new RegExp(`:[ \\t]*(${BULLET_CHARS})[ \\t]*`, 'gu'), ':\n\n$1 ');
 
-  // 7. Separar preguntas que quedaron en la misma línea después de viñeta o texto
-  out = out.replace(/([^\n])[ \t]+([*_]*¿[^?\n]+\?[*_]*)/g, '$1\n\n$2');
-  // Asegurar doble salto si quedó con salto simple después de una viñeta
-  out = out.replace(/(•[^\n]+)\n(?!\n)[ \t]*([*_]*¿[^?\n]+\?[*_]*)/g, '$1\n\n$2');
+  // 6. Arreglar viñetas o checkmarks consecutivos que quedaron en la misma línea
+  // Ej: "...dispensadores de barril. ✅ Hielo..." -> "...dispensadores de barril.\n✅ Hielo..."
+  out = out.replace(new RegExp(`([^\\n])[ \\t]+(${BULLET_CHARS})[ \\t]+`, 'gu'), '$1\n$2 ');
 
-  // 8. Normalizar formato específico para la pregunta de tragos por persona (consumiendo asteriscos existentes)
+  // 7. Asegurar doble salto entre el último ítem de lista y el siguiente texto o párrafo
+  // Ej: "...(Provincia de Santiago).\nPuedes armar..." -> "...(Provincia de Santiago).\n\nPuedes armar..."
+  out = out.replace(new RegExp(`(${BULLET_CHARS}[^\\n]+)\\n(?!\\n)[ \\t]*([A-Z¡¿*])`, 'gu'), '$1\n\n$2');
+  out = out.replace(new RegExp(`(${BULLET_CHARS}[^\\n.]+?\\.)[ \\t]+(Puedes armar|Para recomendarte|Para poder|Con eso|Cu[eé]ntame)`, 'gu'), '$1\n\n$2');
+  out = out.replace(/(\*?[0-9]+[L|l][^\n.]+?\.)[ \t]+(Para recomendarte|Para poder|Con eso)/gu, '$1\n\n$2');
+
+  // 8. Separar preguntas que quedaron en la misma línea o con salto simple después de viñeta o texto
+  out = out.replace(/([^\n])[ \t]+([*_]*¿[^?\n]+\?[*_]*)/gu, '$1\n\n$2');
+  out = out.replace(new RegExp(`(${BULLET_CHARS}[^\\n]+)\\n(?!\\n)[ \\t]*([*_]*¿[^?\\n]+\\?[*_]*)`, 'gu'), '$1\n\n$2');
+
+  // 9. Normalizar formato específico para la pregunta de tragos por persona (consumiendo asteriscos existentes)
   out = out.replace(
     /[*_]*¿Cuántos tragos por persona te gustaría calcular\?[*_]*([ \t]*[*_]*Con eso te entrego un presupuesto estimado\.?[*_]*)?/gi,
     '*¿Cuántos tragos por persona te gustaría calcular?*'
   );
 
-  // 9. Asegurar que preguntas con ¿ ... ? queden siempre en negrita WhatsApp (*¿...?*)
+  // 10. Asegurar que preguntas con ¿ ... ? queden siempre en negrita WhatsApp (*¿...?*)
   out = out.replace(/(^|\n)([ \t]*)[*_]*(¿[^?\n]+\?)[*_]*/gm, '$1$2*$3*');
 
-  // 10. Colapsar cualquier asterisco múltiple remanente (ej: ** o *** -> *) para formato WhatsApp
+  // 11. Colapsar cualquier asterisco múltiple remanente (ej: ** o *** -> *) para formato WhatsApp
   out = out.replace(/\*{2,}/g, '*');
 
   // 11. Separar bloques clave de cotización si quedaron en la misma línea o con salto simple
@@ -142,18 +152,66 @@ export function formatWhatsAppReply(text) {
 }
 
 /**
+ * splitLongReplyQuestionBubble: Si una burbuja de texto es larga (cuerpo >= 90 caracteres)
+ * y termina con una pregunta de cierre (*¿...?* o ¿...?), separa la pregunta en una segunda burbuja.
+ * Esto mejora drásticamente la legibilidad en WhatsApp, asegurando que la pregunta destaque.
+ * 
+ * @param {string} text - Texto ya formateado para WhatsApp
+ * @returns {Array<string>} Array con 1 o 2 strings
+ */
+export function splitLongReplyQuestionBubble(text) {
+  if (!text || typeof text !== 'string') return [text];
+  const trimmed = text.trim();
+  if (trimmed.length < 130) return [trimmed];
+
+  // Regex para encontrar el último bloque de pregunta al final del texto:
+  // Detecta si al final del texto hay:
+  // - Un salto de línea (\n+ o \n\n)
+  // - Opcional intro corta: ej "Para recomendarte la medida exacta...:" o "Cuéntame:"
+  // - Pregunta: *¿...?* o ¿...?
+  const questionBlockRegex = /\n+((?:(?:Para|Cu[eé]ntame|Si quieres|Por favor|Con eso)[^\n:]{0,100}:\s*)?[*_]*¿[^?\n]+\?[*_]*[ \t\p{Extended_Pictographic}]*)$/u;
+
+  const match = trimmed.match(questionBlockRegex);
+  if (!match) return [trimmed];
+
+  const questionPart = match[1].trim();
+  const bodyPart = trimmed.slice(0, match.index).trim();
+
+  // Regla global: solo separar si el cuerpo previo es suficientemente largo (>= 90 caracteres)
+  // y la pregunta tiene sustancia (>= 12 caracteres)
+  if (bodyPart.length >= 90 && questionPart.length >= 12) {
+    return [bodyPart, questionPart];
+  }
+
+  return [trimmed];
+}
+
+/**
  * parseReplyToBubbles: Parsea la respuesta del bot hacia WhatsApp.
  * - Si contiene '===BURBUJA===', separa en múltiples burbujas (array).
  * - Si contiene '[IMG:archivo.webp]' o '[VID:archivo.mp4]', crea el objeto de media { type: 'image'|'video', file: '...' }.
  * - Soporta tags multimedia en cualquier posición (inicio, medio o final del texto).
+ * - Aplica regla global para separar preguntas finales en segunda burbuja cuando el mensaje es largo.
  * - Garantiza que si se envía la carta de precios, la imagen sea la primera burbuja y siempre vaya acompañada de la guía de litros.
  * 
- * @param {string} text - Texto completo a procesar
+ * @param {string|Array} text - Texto o lista de burbujas a procesar
  * @param {object} [session={}] - Sesión actual para extraer litros cotizados
  * @returns {string|object|Array<string|object>|null}
  */
 export function parseReplyToBubbles(text, session = {}) {
   if (!text) return null;
+
+  // Si ya es un array de burbujas, procesar recursivamente cada elemento
+  if (Array.isArray(text)) {
+    const flat = [];
+    for (const item of text) {
+      const res = parseReplyToBubbles(item, session);
+      if (Array.isArray(res)) flat.push(...res);
+      else if (res) flat.push(res);
+    }
+    return flat.length === 0 ? null : (flat.length === 1 ? flat[0] : flat);
+  }
+
   const rawStr = String(text).trim();
   if (!rawStr) return null;
 
@@ -188,7 +246,9 @@ export function parseReplyToBubbles(text, session = {}) {
       const cleaned = sanitizeCustomerFacingReply(trimmedSeg);
       const formatted = formatWhatsAppReply(cleaned);
       if (formatted) {
-        outBubbles.push(formatted);
+        // Regla global: separar preguntas de cierre en segunda burbuja si el texto es largo
+        const splitBubbles = splitLongReplyQuestionBubble(formatted);
+        outBubbles.push(...splitBubbles);
       }
     }
   }
@@ -269,10 +329,42 @@ export function sanitizeRoboticReplies(rawReply, session = {}, userMessage = '')
 }
 
 /**
+ * getAvailableToolsForState: Filtra las herramientas disponibles según la etapa del flujo.
+ * Evita que el LLM llame a herramientas de cotización o catálogo cuando el cliente aún no indica invitados.
+ */
+export function getAvailableToolsForState(session = {}, contextMeta = {}) {
+  const hasGuests = Boolean(session?.guests || contextMeta?.detectedGuests);
+  const proposalDelivered = Boolean(session?.proposalDelivered);
+  const cartReady = Boolean(session?.cartSummary || session?.cartItems?.length);
+
+  if (!hasGuests) {
+    // Si aún no hay invitados, CERO herramientas. El LLM responde 100% por texto conversacional con el prompt y la base de conocimiento.
+    return [];
+  }
+
+  if (!proposalDelivered) {
+    // Si hay invitados pero aún no se entrega la propuesta: solo cálculo de propuesta recomendada
+    return AGENT_TOOLS_DEFINITIONS.filter((t) =>
+      ['calculate_event_estimate'].includes(t.name)
+    );
+  }
+
+  if (!cartReady) {
+    // Ya se entregó la propuesta: puede ver catálogo oficial o armar carrito personalizado
+    return AGENT_TOOLS_DEFINITIONS.filter((t) =>
+      ['send_cocktails_catalog', 'build_custom_cart_quote', 'calculate_event_estimate'].includes(t.name)
+    );
+  }
+
+  // Ya tiene carrito listo: todas las herramientas disponibles, incluyendo silent_admin_escalation para cierre
+  return AGENT_TOOLS_DEFINITIONS.filter((t) => t.name !== 'handle_payment_confirmation');
+}
+
+/**
  * mapToolsForGemini: Convierte las definiciones de tools al formato de Google Generative AI.
  */
-function mapToolsForGemini() {
-  const declarations = AGENT_TOOLS_DEFINITIONS.map((tool) => {
+function mapToolsForGemini(toolsList = AGENT_TOOLS_DEFINITIONS) {
+  const declarations = toolsList.map((tool) => {
     // Transformación de tipos schema a los que espera Gemini
     const transformProperties = (props) => {
       const out = {};
@@ -302,14 +394,14 @@ function mapToolsForGemini() {
     };
   });
 
-  return [{ functionDeclarations: declarations }];
+  return declarations.length > 0 ? [{ functionDeclarations: declarations }] : undefined;
 }
 
 /**
  * mapToolsForOpenAI: Convierte las definiciones de tools al formato OpenAI / Nvidia.
  */
-function mapToolsForOpenAI() {
-  return AGENT_TOOLS_DEFINITIONS.map((tool) => ({
+function mapToolsForOpenAI(toolsList = AGENT_TOOLS_DEFINITIONS) {
+  return toolsList.map((tool) => ({
     type: 'function',
     function: {
       name: tool.name,
@@ -447,26 +539,49 @@ export async function runAiAgentTurn(conversationTurns, userMessage, context = {
   } else if (guestsKnown && drinksKnown) {
     stateContextBlock += `- Invitados: ${guestsKnown} personas.\n- Tragos por persona: ${drinksKnown}.\n- INSTRUCCIÓN: Llama a calculate_event_estimate con guests=${guestsKnown} y drinksPerPerson=${drinksKnown} para entregar la "Propuesta de Barra Sugerida" destacando siempre el costo por trago.\n`;
   } else {
-    stateContextBlock += `- Invitados: AÚN NO INDICADOS POR EL CLIENTE. PROHIBIDO ASUMIR O INVENTAR NÚMERO DE INVITADOS. NO USES TOOLS DE CÁLCULO NI CATÁLOGO.
-- Si el cliente pregunta por valores, precios o cuánto cuesta en general: explica las dos modalidades (Eventos desde $109.990 vs Barriles Desechables de 5L desde $31.990) y pregunta cuál de las dos le interesa.
-- Si pregunta por servicio de eventos: explica que el bar portátil parte desde $109.990 (incluye 10L ~ 50 cócteles con dispensador portátil, hielo, vasos, garnish e instalación gratuita, lo que da un costo por trago de solo ~$2.200 con todo incluido) y pregunta: *¿Cuántos invitados tendrás aproximadamente en tu evento?*
-- Si el cliente envía un comprobante de pago o confirmación de compra de barril: llama a handle_payment_confirmation.
-- Si el cliente hace una consulta fuera de catálogo, sobre comida/mago/DJ o pide un humano: llama a silent_admin_escalation y guarda silencio.\n`;
+    stateContextBlock += `- Invitados: AÚN NO INDICADOS POR EL CLIENTE. PROHIBIDO ASUMIR O INVENTAR NÚMERO DE INVITADOS. NO USES TOOLS DE CÁLCULO NI CATÁLOGO.\n`;
+
+    const isFromMeta = Boolean(context.contextMeta?.isFromMetaAd || session.metaFromCtwa || session.metaAdSourceId);
+    const isPrice = Boolean(context.contextMeta?.isPriceInquiry);
+    const isHowItWorks = Boolean(context.contextMeta?.isHowItWorksInquiry);
+
+    if (isFromMeta || isPrice) {
+      stateContextBlock += `- ORIGEN: El cliente proviene de un anuncio de Meta Ads o pregunta directamente por precios/cotización ("${userMessage}").\n`
+        + `- OBJETIVO COMERCIAL: Presenta con entusiasmo el gancho comercial de la barra móvil autoservicio: parte desde $109.990 para 50 cócteles (~$2.200 por trago) con estación, dispensadores, hielo total, vasos/copas y montaje/retiro gratis en Santiago (mínimo 10L).\n`
+        + `- GUÍA LA CONVERSACIÓN: Cierra preguntando para dimensionar su evento: *¿Para cuántos invitados aprox. tienes pensado tu evento y en qué fecha sería?*\n`;
+    } else if (isHowItWorks) {
+      stateContextBlock += `- CONSULTA: El cliente pregunta cómo funciona el servicio ("${userMessage}").\n`
+        + `- OBJETIVO: Explica con simpatía y calidez que llevamos e instalamos la estación de bar con dispensadores antes del evento, los invitados se autosirven de forma rápida y entretenida, e incluimos hielo, vasos y garnish 100% gratis.\n`
+        + `- GUÍA LA CONVERSACIÓN: Cierra siempre invitándolo a cotizar: *¿Para cuántos invitados aprox. tienes pensado tu evento y en qué fecha sería?*\n`;
+    } else {
+      // Saludo casual o inicio de conversación ("hola", "q tal?", "buenas", etc.)
+      stateContextBlock += `- CONVERSACIÓN INICIAL / SALUDO: El cliente saluda de forma casual: "${userMessage}".\n`
+        + `- TONO Y PERSONALIDAD: Responde de forma muy natural, cálida y breve como un anfitrión de bar o vendedor entretenido (ej: "¡Hola! Qué tal, todo súper bien por acá 🍸✨", "¡Hola! Muy buenas por acá 🙌").\n`
+        + `- PROHIBICIÓN: NO pegues una muralla de texto ni el folleto completo en este saludo si el cliente solo dijo "${userMessage}". Mantén la conversación fluida y humana.\n`
+        + `- GUÍA HACIA EL OBJETIVO: Pregúntale de inmediato si está organizando alguna fiesta o evento para el que busque barra de cócteles, y para cuántas personas y fecha lo tiene pensado (*¿Para cuántas personas tienes pensado tu evento y en qué fecha sería?*).\n`;
+    }
+
+    stateContextBlock += `- Si el cliente hace una consulta fuera de catálogo, sobre comida/mago/DJ o pide un humano: llama a silent_admin_escalation y guarda silencio.\n`;
   }
 
   const systemInstruction = `${baseSystemInstruction}${stateContextBlock}`;
   const toolCallsMade = [];
+  const activeTools = getAvailableToolsForState(session, context.contextMeta);
 
   // ===========================================================================
   // CASO 1: GOOGLE GEMINI
   // ===========================================================================
   if (provider === 'gemini') {
     const client = new GoogleGenerativeAI(apiKey);
-    const genModel = client.getGenerativeModel({
+    const geminiTools = mapToolsForGemini(activeTools);
+    const modelConfig = {
       model: model || 'gemini-1.5-flash',
-      systemInstruction,
-      tools: mapToolsForGemini()
-    });
+      systemInstruction
+    };
+    if (geminiTools) {
+      modelConfig.tools = geminiTools;
+    }
+    const genModel = client.getGenerativeModel(modelConfig);
 
     // Formatear historial turnos a contents de Gemini
     const contents = [];
@@ -517,7 +632,7 @@ export async function runAiAgentTurn(conversationTurns, userMessage, context = {
           return {
             replyText: toolResult.reply,
             toolCallsMade,
-            muted: true
+            muted: Boolean(toolResult.muted)
           };
         }
 
@@ -624,14 +739,18 @@ export async function runAiAgentTurn(conversationTurns, userMessage, context = {
       content: userMessage
     });
 
-    let completion = await openai.chat.completions.create({
+    const openAiTools = mapToolsForOpenAI(activeTools);
+    const completionPayload = {
       model: model || 'meta/llama-3.1-70b-instruct',
       messages,
-      tools: mapToolsForOpenAI(),
-      tool_choice: 'auto',
       temperature: 0.15,
       max_tokens: 500
-    });
+    };
+    if (openAiTools.length > 0) {
+      completionPayload.tools = openAiTools;
+      completionPayload.tool_choice = 'auto';
+    }
+    let completion = await openai.chat.completions.create(completionPayload);
 
     let loopCount = 0;
     let lastToolFormattedText = null;
@@ -722,7 +841,7 @@ export async function runAiAgentTurn(conversationTurns, userMessage, context = {
           return {
             replyText: toolResult.reply,
             toolCallsMade,
-            muted: true
+            muted: Boolean(toolResult.muted)
           };
         }
 

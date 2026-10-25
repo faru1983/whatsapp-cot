@@ -24,11 +24,14 @@ export function analyzeMessageContext(session, currentText) {
   const userTurns = turns.filter((t) => t.role === 'user').map((t) => t.text);
   const allUserTexts = [...userTurns, text].filter(Boolean);
 
-  // 1. Detectar si viene de anuncio Meta
+  // 1. Detectar si viene de anuncio Meta (CTWA)
+  const isMetaAdPrefilledText = /\b(?:vi\s+(?:este|el|su)\s+anuncio|vi\s+esto\s+en\s+(?:facebook|instagram|meta)|informaci[oó]n\s+sobre\s+el\s+(?:servicio|bar\s*m[oó]vil)|quiero\s+cotizar\s+el\s+bar\s*m[oó]vil)\b/i.test(text);
+
   const isFromMetaAd = Boolean(
     session?.metaFromCtwa ||
     session?.metaCtwaClid ||
-    session?.metaAdSourceId
+    session?.metaAdSourceId ||
+    isMetaAdPrefilledText
   );
 
   // 2. Extraer qué estaba esperando el asistente en su último mensaje
@@ -39,12 +42,13 @@ export function analyzeMessageContext(session, currentText) {
   const lastBotTurn = [...turns].reverse().find((t) => t.role === 'model');
   if (lastBotTurn) {
     const botText = lastBotTurn.text.toLowerCase();
-    if (botText.includes('invitados') || botText.includes('personas') || botText.includes('cuántos') || botText.includes('cuantos') || botText.includes('gente') || botText.includes('calcularlo')) {
-      waitingForGuests = true;
-    } else if (botText.includes('tragos') || botText.includes('cócteles') || botText.includes('cocteles') || botText.includes('copas') || botText.includes('p/p') || botText.includes('por persona')) {
+    // Prioridad a lo que el bot preguntó al final (tragos p/p vs invitados vs sabores):
+    if (botText.includes('tragos por persona') || botText.includes('tragos p/p') || botText.includes('consumo por persona') || botText.includes('cuántos tragos') || botText.includes('cuantos tragos')) {
       waitingForDrinksPerPerson = true;
-    } else if (botText.includes('variedades') || botText.includes('fecha') || botText.includes('sabores') || botText.includes('favoritos') || botText.includes('carta') || botText.includes('propuesta') || botText.includes('acomoda')) {
+    } else if (botText.includes('variedades') || botText.includes('sabores') || botText.includes('favoritos') || botText.includes('carta') || botText.includes('propuesta') || botText.includes('acomoda') || botText.includes('combinar')) {
       waitingForFlavors = true;
+    } else if (botText.includes('invitados') || botText.includes('personas') || botText.includes('cuántos') || botText.includes('cuantos') || botText.includes('gente') || botText.includes('calcularlo')) {
+      waitingForGuests = true;
     }
   }
 
@@ -54,9 +58,8 @@ export function analyzeMessageContext(session, currentText) {
   // Extracción de invitados: busca en mensaje actual o en turnos previos del cliente
   const explicitGuestMention = /\b(?:personas?|invitados?|adultos?|amigos?|pax|pers\.?)\b/i.test(text);
   const guestCandidate = parseGuestsFromText(text);
-  const isLargeNumber = Boolean(guestCandidate && guestCandidate >= 10);
 
-  let detectedGuests = (isTragosOnly || (waitingForDrinksPerPerson && !explicitGuestMention && !isLargeNumber))
+  let detectedGuests = (isTragosOnly || (waitingForDrinksPerPerson && !explicitGuestMention))
     ? null
     : guestCandidate;
 
@@ -126,26 +129,36 @@ export function analyzeMessageContext(session, currentText) {
 
   const detectedCelebration = parseCelebrationType(text) || (session?.celebrationType ? null : parseCelebrationType(allUserTexts.join(' ')));
 
-  // Detección de tragos por persona (ej: "2", "3", "2 o 3", "2 a 3", "entre 2 y 3", "3 tragos", "dos", "tres")
+  // Detección de tragos por persona (ej: "2", "3", "2 o 3", "2 a 3", "entre 2 y 3", "3 tragos", "15", "15 tragos por persona")
   let detectedDrinksPerPerson = null;
-  const wordMap = { uno: 1, dos: 2, tres: 3, cuatro: 4, cinco: 5, seis: 6 };
+  const wordMap = { uno: 1, dos: 2, tres: 3, cuatro: 4, cinco: 5, seis: 6, siete: 7, ocho: 8, nueve: 9, diez: 10 };
 
   // 1. Rango explícito: "2 o 3", "2 a 3", "2-3", "entre 2 y 3" -> tomar el valor superior recomendado (3)
-  const rangeMatch = text.match(/\b(?:entre\s+)?([1-6]|uno|dos|tres|cuatro|cinco|seis)\s*(?:o|a|-|\/)\s*([1-6]|uno|dos|tres|cuatro|cinco|seis)\b/i);
+  const rangeMatch = text.match(/\b(?:entre\s+)?(\d{1,2}|uno|dos|tres|cuatro|cinco|seis|siete|ocho|nueve|diez)\s*(?:o|a|-|\/)\s*(\d{1,2}|uno|dos|tres|cuatro|cinco|seis|siete|ocho|nueve|diez)\b/i);
   if (rangeMatch && (!detectedGuests || session?.guests || isTragosOnly || waitingForDrinksPerPerson)) {
     const rawNum2 = rangeMatch[2].toLowerCase();
     const num2 = wordMap[rawNum2] || parseInt(rawNum2, 10);
-    if (num2 >= 1 && num2 <= 6) {
+    if (num2 >= 1 && num2 <= 30) {
       detectedDrinksPerPerson = num2;
     }
   } else {
-    // 2. Valor individual: "2", "3", "3 tragos", "dos", etc.
-    const pMatch = text.match(/\b([1-6]|uno|dos|tres|cuatro|cinco|seis)\s*(?:c[oó]cteles?|tragos?|copas?|por persona|p\/p|pp)?\b/i);
-    if (pMatch && (!detectedGuests || session?.guests || isTragosOnly || waitingForDrinksPerPerson)) {
-      const rawNum = pMatch[1].toLowerCase();
+    // 2. Con mención explícita de tragos: "15 tragos por persona", "3 copas", "2 p/p", etc.
+    const explicitDrinkMatch = text.match(/\b(\d{1,2}|uno|dos|tres|cuatro|cinco|seis|siete|ocho|nueve|diez)\s*(?:c[oó]cteles?|tragos?|copas?|por persona|p\/p|pp)\b/i);
+    if (explicitDrinkMatch) {
+      const rawNum = explicitDrinkMatch[1].toLowerCase();
       const num = wordMap[rawNum] || parseInt(rawNum, 10);
-      if (num >= 1 && num <= 6) {
+      if (num >= 1 && num <= 30) {
         detectedDrinksPerPerson = num;
+      }
+    } else if (waitingForDrinksPerPerson) {
+      // 3. Si el bot estaba esperando tragos por persona y el usuario responde solo un número (ej: "2", "3", "15")
+      const loneNumMatch = text.match(/^\s*(\d{1,2}|uno|dos|tres|cuatro|cinco|seis|siete|ocho|nueve|diez)\s*$/i);
+      if (loneNumMatch) {
+        const rawNum = loneNumMatch[1].toLowerCase();
+        const num = wordMap[rawNum] || parseInt(rawNum, 10);
+        if (num >= 1 && num <= 30) {
+          detectedDrinksPerPerson = num;
+        }
       }
     }
   }
@@ -153,9 +166,9 @@ export function analyzeMessageContext(session, currentText) {
   // Detección de selección de cócteles o pedido de sugerencia
   const detectedCocktails = extractRequestedCocktails(text, session);
 
-  // Detección de preguntas típicas de anuncios Meta Ads (icebreakers)
-  const isPriceInquiry = /cu[aá]nto\s+cuesta(\s+el\s+servicio)?|cu[aá]les\s+son\s+los\s+(valores|precios)|precios?\b|valor(es)?\b/i.test(text);
-  const isHowItWorksInquiry = /c[oó]mo\s+funciona(\s+el\s+servicio)?/i.test(text);
+  // Detección de preguntas típicas de anuncios Meta Ads (icebreakers) o consultas de precio
+  const isPriceInquiry = /\b(?:cu[aá]nto\s+cuesta|cu[aá]les\s+son\s+los\s+(?:valores|precios)|qu[eé]\s+valor\s+tiene|qu[eé]\s+precio\s+tiene|precios?\b|valor(es)?\b|cotizar\b)\b/i.test(text);
+  const isHowItWorksInquiry = /\b(?:c[oó]mo\s+funciona|en\s+qu[eé]\s+consiste)\b/i.test(text);
 
   // Detección de intención directa vs eventos
   const isDirectBarrelQuery = /\b(desechable|barril(?:es)? de 5\s*l|5\s*l|para la casa|para mi casa|asado)\b/i.test(text);

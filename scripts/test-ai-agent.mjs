@@ -68,7 +68,15 @@ function askQuestion() {
       });
 
       if (reply) {
-        console.log(`\n🍸 Agente IA >\n${reply}`);
+        if (Array.isArray(reply)) {
+          console.log(`\n🍸 Agente IA (${reply.length} burbujas) >`);
+          reply.forEach((b, idx) => {
+            const content = typeof b === 'object' ? `[Media: ${b.file}]` : b;
+            console.log(`\n💬 [Burbuja ${idx + 1}]:\n${content}`);
+          });
+        } else {
+          console.log(`\n🍸 Agente IA >\n${reply}`);
+        }
       } else {
         console.log('\n🤫 [El agente está en MUTE y no respondió al cliente]');
       }
