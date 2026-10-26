@@ -19,7 +19,9 @@ import {
   extractGuestsFromMessage,
   parseCelebrationType,
   normalizeCelebrationType,
-  formatEventLitersSummaryLine
+  formatEventLitersSummaryLine,
+  parseEventProductsProgrammatic,
+  parseBarrilesProductsProgrammatic
 } from './eventos-helpers.js';
 import { OrderBuilder } from './order-builder.js';
 import { quoteCatalogShipping, quoteBarrilesDirectShipping } from './cot-catalog.js';
@@ -507,38 +509,54 @@ export function parseGuestsFromText(text) {
  */
 function parseProductsFromTextLocal(text, kind, formato = 'Dispensador Portátil') {
   const catalogNames = Object.keys(preciosData.cocteles || {});
-
-  const formatKey = getEventFormatKey(formato);
-  const defaultLiters = formatKey === 'muro' ? '10L' : '10L';
-  const allowed = getAllowedLitrages(formatKey);
-
-  const items = [];
   const doubts = [];
 
-  let matched = false;
+  if (isEventOperatorKind(kind)) {
+    const formatKey = getEventFormatKey(formato);
+    const defaultLiters = formatKey === 'muro' ? '10L' : '5L';
+    const allowed = getAllowedLitrages(formatKey);
+    const items = parseEventProductsProgrammatic(text, catalogNames, allowed, defaultLiters);
 
-  const namesInText = matchCocktailNamesInText(text, catalogNames);
-  if (namesInText.length > 0) {
-    matched = true;
-    for (const name of namesInText) {
-      const baseName = name.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
-      const qtyMatch = text.match(new RegExp(`(\\d+)\\s*(?:x\\s*)?${baseName}`, 'i'))
-        || text.match(new RegExp(`${baseName}[^\\d]*(\\d+)`, 'i'));
-      const qty = qtyMatch ? Number(qtyMatch[1]) : 1;
-      const litMatch = text.match(new RegExp(`${baseName}[^\\d]*(\\d+)\\s*l`, 'i'))
-        || text.match(new RegExp(`${baseName}\\s+(?:de\\s+)?(5|10|20|30)\\b`, 'i'))
-        || text.match(/(\d+)\s*l/i);
-      let litrage = litMatch ? `${litMatch[1]}L` : defaultLiters;
-      if (!allowed.includes(litrage)) litrage = defaultLiters;
-      items.push({ name, quantity: qty || 1, litrage });
+    if (items.length === 0 && /spritz/i.test(text) && !/aperol|ramazzotti/i.test(text)) {
+      doubts.push('spritz');
+    }
+    return { items, doubts };
+  } else {
+    // barriles
+    const items = parseBarrilesProductsProgrammatic(text, catalogNames);
+    if (items.length === 0 && /spritz/i.test(text) && !/aperol|ramazzotti/i.test(text)) {
+      doubts.push('spritz');
+    }
+    return { items, doubts };
+  }
+}
+
+/**
+ * parseUniformProductQuantityAdjustment: Detecta correcciones globales de cantidad de cócteles
+ * (ej. "no son 5 productos de cada uno, es 1 solo por cóctel", "1 de cada uno", "1 por cóctel").
+ *
+ * @param {string} messageText
+ * @param {Array<{ name: string, quantity: number, litrage?: string }>} existingProducts
+ * @returns {Array<{ name: string, quantity: number, litrage?: string }>|null}
+ */
+export function parseUniformProductQuantityAdjustment(messageText, existingProducts) {
+  if (!Array.isArray(existingProducts) || existingProducts.length === 0) return null;
+  const raw = String(messageText || '').trim();
+
+  const m = raw.match(/(?:es|son|deja|dejar|cambia(?:r)?|pon|poner)?\s*(\d+)\s*(?:solo)?\s*(?:de|por)?\s*(?:cada\s+(?:uno|c[oó]ctel|producto|sabor)|por\s+c[oó]ctel|por\s+producto|por\s+sabor)\b/i)
+    || raw.match(/\b(?:no\s+son\s+\d+[^,.]*,\s*)?(?:es\s+)?(\d+)\s+(?:solo\s+)?por\s+c[oó]ctel\b/i)
+    || raw.match(/\b(\d+)\s+(?:solo\s+)?de\s+cada\s+uno\b/i);
+
+  if (m) {
+    const qty = parseInt(m[1], 10);
+    if (qty >= 1 && qty <= 50) {
+      return existingProducts.map((p) => ({
+        ...p,
+        quantity: qty
+      }));
     }
   }
-
-  if (!matched && /spritz/i.test(text) && !/aperol|ramazzotti/i.test(text)) {
-    doubts.push('spritz');
-  }
-
-  return { items, doubts };
+  return null;
 }
 
 /**
@@ -581,6 +599,11 @@ function mergeDraftFields(session, patch) {
   const d = session.operatorDraft;
   for (const [key, value] of Object.entries(patch)) {
     if (value === undefined || value === null || value === '') continue;
+    if (key === 'guests') {
+      const g = Number(value);
+      if (Number.isFinite(g) && g > 0) d.guests = g;
+      continue;
+    }
     if (key === 'products' && Array.isArray(value) && value.length) {
       d.products = value;
     } else if (key === 'firstName' || key === 'lastName') {
@@ -708,14 +731,35 @@ export function parseOperatorDraftLocal(text, kind, session) {
   const addrMatch = cleanText.match(/(?:direcci[oó]n|despacho|entrega)\s*[:\-]?\s*(.+)/i);
   if (addrMatch?.[1]?.trim().length >= 5) {
     patch.address = addrMatch[1].trim();
+    textForDetails = textForDetails.replace(addrMatch[0], ' ');
+  }
+  if (session?.operatorDraft?.address) {
+    textForDetails = textForDetails.replace(session.operatorDraft.address, ' ');
   }
 
   const formato = parseFormatFromText(cleanText);
   if (formato) patch.eventoFormato = formato;
 
-  // Extraer invitados usando el texto limpio de fecha y comuna para evitar colisiones
-  const guests = parseGuestsFromText(textForDetails) || parseGuestsFromText(cleanText);
-  if (guests) patch.guests = guests;
+  // Ajuste global de cantidad de productos existentes (ej. "es 1 solo por cóctel")
+  const uniformProducts = parseUniformProductQuantityAdjustment(cleanText, session?.operatorDraft?.products);
+  if (uniformProducts) {
+    patch.products = uniformProducts;
+  }
+
+  // Extraer invitados: solo si NO es un ajuste uniforme de productos
+  if (!uniformProducts) {
+    const hasExistingGuests = Boolean(session?.operatorDraft?.guests);
+    const hasExplicitGuestSignal = /invitados?|personas?|pax|asistentes|gente|pers\b/i.test(cleanText)
+      || /(?:somos|para|seremos|alrededor\s+de|unos|cerca\s+de|aprox)\s*\d+/i.test(cleanText)
+      || /^\s*(?:son\s+)?(\d{1,4})\s*$/i.test(cleanText.trim());
+
+    if (!hasExistingGuests || hasExplicitGuestSignal) {
+      const guests = parseGuestsFromText(textForDetails) || parseGuestsFromText(cleanText);
+      if (guests && guests > 0 && guests <= 5000) {
+        patch.guests = guests;
+      }
+    }
+  }
 
   const pickup = parsePickupFromText(cleanText);
   if (pickup.pickupSameDay) patch.pickupSameDay = true;
@@ -725,13 +769,15 @@ export function parseOperatorDraftLocal(text, kind, session) {
   const startTime = parseStartTimeFromText(cleanText);
   if (startTime) patch.startTime = startTime;
 
-  const { items, doubts: prodDoubts } = parseProductsFromTextLocal(
-    cleanText,
-    kind,
-    patch.eventoFormato || session?.operatorDraft?.eventoFormato
-  );
-  if (items.length) patch.products = items;
-  doubts.push(...prodDoubts);
+  if (!uniformProducts) {
+    const { items, doubts: prodDoubts } = parseProductsFromTextLocal(
+      cleanText,
+      kind,
+      patch.eventoFormato || session?.operatorDraft?.eventoFormato
+    );
+    if (items.length) patch.products = items;
+    doubts.push(...prodDoubts);
+  }
 
   return { patch, doubts };
 }
@@ -1343,10 +1389,28 @@ export async function ingestOperatorMessage(session, messageText, opts = true) {
             for (const k of dataOnlyKeys) delete aiPatch[k];
           }
         }
+        const hasExistingGuests = Boolean(session?.operatorDraft?.guests);
+        const hasExplicitGuestSignal = /invitados?|personas?|pax|asistentes|gente|pers\b/i.test(messageText)
+          || /(?:somos|para|seremos|alrededor\s+de|unos|cerca\s+de|aprox)\s*\d+/i.test(messageText)
+          || /^\s*(?:son\s+)?(\d{1,4})\s*$/i.test(messageText.trim());
+
         for (const [k, v] of Object.entries(aiPatch)) {
-          if (v !== undefined && v !== null && v !== '') {
-            finalPatch[k] = v;
+          if (v === undefined || v === null || v === '') continue;
+          if (k === 'guests') {
+            const g = Number(v);
+            if (!Number.isFinite(g) || g <= 0) continue;
+            if (hasExistingGuests && !hasExplicitGuestSignal) continue;
           }
+          if (k === 'products') {
+            if (!Array.isArray(v) || v.length === 0) continue;
+            const valid = v.filter((p) => p && p.name && String(p.name).trim());
+            if (valid.length === 0) continue;
+            if (local.patch.products?.length) continue;
+            finalPatch.products = valid;
+            continue;
+          }
+          if (typeof v === 'boolean' && !v) continue;
+          finalPatch[k] = v;
         }
       }
       aiDoubts = Array.isArray(ai?.dudas) ? ai.dudas : [];

@@ -1146,7 +1146,7 @@ Devuelve SOLO JSON válido con:
 Reglas esenciales:
 - Si el mensaje es una CORRECCIÓN de un campo (ej: "nombre cambia a Feli oñate", "cambia el correo a x@y.com", "son 40 invitados", "la comuna es en Las Condes"), extrae el nuevo valor en patch.
 - Si el usuario dice "nombre cambia a Feli oñate", firstName es "Feli" y lastName es "Oñate".
-- guests: número de invitados o personas. Si el usuario escribe un número solo o en lista como "50, Santiago, 3 de noviembre", o "50 personas", guests es 50. IMPORTANTE: NO confundir con la edad de un cumpleaños (ej. "Cumpleaños 50" significa celebración celebrationType: "Cumpleaños", no 50 invitados a menos que especifique "50 personas").
+- guests: número de invitados o personas. Si el usuario escribe un número solo o en lista como "50, Santiago, 3 de noviembre", o "50 personas", guests es 50. IMPORTANTE: NO confundir con la edad de un cumpleaños (ej. "Cumpleaños 50" significa celebración celebrationType: "Cumpleaños", no 50 invitados a menos que especifique "50 personas"). Si el mensaje habla de productos o cantidades de cócteles (ej. "no son 5 productos de cada uno"), NO cambies guests a ese número.
 - celebrationType: temática o tipo de evento. Las categorías oficiales predefinidas en base de datos son: "Cumpleaños", "Matrimonio", "Empresa", "Otro".
   * Si el usuario escribe "cumple", "cumpleaños" o edad de cumple -> "Cumpleaños".
   * Si escribe "matrimonio", "boda", "casamiento" -> "Matrimonio".
@@ -1155,7 +1155,10 @@ Reglas esenciales:
   * Si es cualquier otra celebración no predefinida (ej: "despedida", "bautizo", "aniversario", "baby shower", "graduación"), debes devolver "Otra / <Nombre>" (ej: "Otra / Despedida", "Otra / Bautizo").
 - date: si es posible devuélvelo en formato estándar DD-MM-YYYY (ej. "03-11-2026") o texto legible día y mes.
 - phone es del CLIENTE final (+569...), no del operador.
-- products: nombres del catálogo. Si dicen "Mojito" a secas, el nombre es "Mojito Tradicional". Si dicen "Pisco Sour", asume "Pisco Sour Clásico". NUNCA pongas "Mojito", "Pisco Sour" ni "Piscola" en dudas.
+- products: cada elemento debe ser un objeto con name, quantity (por defecto 1), litrage (en eventos).
+  * Nombres exactos del catálogo oficial. Si dicen "piscola alto transparente", usa "Piscola Alto Transparente 40°". Si dicen "Mojito", usa "Mojito Tradicional". Si dicen "Pisco Sour", asume "Pisco Sour Clásico". NUNCA pongas "Mojito", "Pisco Sour" ni "Piscola" en dudas.
+  * CRÍTICO PARA LITRAJE Y CANTIDAD: "5L Caipiriña" o "10L Mojito" indica el TAMAÑO en litros (litrage: "5L", quantity: 1), NO la cantidad. NUNCA pongas quantity: 5 solo porque el texto dice "5L". Solo pon quantity mayor a 1 si explícitamente se indican unidades (ej. "2x", "2 unidades", "3 de 5L").
+  * Si el usuario pide un ajuste global de cantidades como "no son 5 productos de cada uno, es 1 solo por cóctel" o "1 de cada uno" o "1 por cóctel", debes actualizar la cantidad (quantity) de TODOS los productos que ya estaban en el borrador registrado a 1 (o al número indicado), manteniendo sus nombres y litrajes.
 - Solo añade a dudas si hay una ambigüedad crítica no resuelta: por ejemplo "spritz" sin especificar Aperol o Ramazzotti ("spritz"), o si un email tiene typo evidente ("email").
 
 Catálogo (muestra): ${catalogSample}`;
@@ -1187,15 +1190,63 @@ Catálogo (muestra): ${catalogSample}`;
       rawText = completion.choices?.[0]?.message?.content?.trim() || '{}';
     }
 
-    const jsonMatch = rawText.match(/\{[\s\S]*\}/);
-    const parsed = JSON.parse(jsonMatch ? jsonMatch[0] : rawText);
-    let patch = {};
+    // Extracción robusta de JSON (maneja markdown code blocks y texto adicional de LLMs como Llama 3.2)
+    let parsed = null;
+    const codeBlockMatch = rawText.match(/```(?:json)?\s*(\{[\s\S]*?\})\s*```/);
+    if (codeBlockMatch) {
+      try { parsed = JSON.parse(codeBlockMatch[1]); } catch (_) {}
+    }
+    if (!parsed) {
+      const firstBrace = rawText.indexOf('{');
+      if (firstBrace >= 0) {
+        let depth = 0;
+        for (let i = firstBrace; i < rawText.length; i++) {
+          if (rawText[i] === '{') depth++;
+          else if (rawText[i] === '}') {
+            depth--;
+            if (depth === 0) {
+              try { parsed = JSON.parse(rawText.slice(firstBrace, i + 1)); } catch (_) {}
+              break;
+            }
+          }
+        }
+      }
+    }
+    if (!parsed) {
+      const jsonMatch = rawText.match(/\{[\s\S]*\}/);
+      parsed = JSON.parse(jsonMatch ? jsonMatch[0] : rawText);
+    }
+
+    let rawPatch = {};
     if (parsed?.patch && typeof parsed.patch === 'object') {
-      patch = parsed.patch;
+      rawPatch = parsed.patch;
     } else if (parsed && typeof parsed === 'object') {
-      patch = { ...parsed };
-      delete patch.dudas;
-      delete patch.patch;
+      rawPatch = { ...parsed };
+      delete rawPatch.dudas;
+      delete rawPatch.patch;
+    }
+
+    // Limpiar campos vacíos o por defecto devueltos por el LLM
+    const patch = {};
+    for (const [k, v] of Object.entries(rawPatch)) {
+      if (v === undefined || v === null || v === '') continue;
+      if (k === 'guests') {
+        const g = Number(v);
+        if (Number.isFinite(g) && g > 0) patch.guests = g;
+        continue;
+      }
+      if (k === 'products') {
+        if (Array.isArray(v) && v.length > 0) {
+          const valid = v.filter((p) => p && p.name && String(p.name).trim());
+          if (valid.length > 0) patch.products = valid;
+        }
+        continue;
+      }
+      if (typeof v === 'boolean') {
+        if (v) patch[k] = true;
+        continue;
+      }
+      patch[k] = v;
     }
 
     if (patch.firstName) patch.firstName = formatTitleCase(String(patch.firstName));

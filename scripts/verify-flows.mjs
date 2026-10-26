@@ -24,6 +24,8 @@ delete process.env.COT_API_BASE_URL;
 // verify no debe esperar delays de burbujas (el smoke llama processMessage directo)
 process.env.REPLY_DELAY_AFTER_USER_SEC = '0';
 process.env.REPLY_DELAY_BETWEEN_BUBBLES_SEC = '0';
+process.env.LLM_PROVIDER = 'gemini';
+
 
 const EXPECTED_STATES = [
   'ESPERANDO_INTENCION',
@@ -4722,6 +4724,68 @@ console.log('\n-- Modo operador: flags, checklist y borrador --');
   assert(userSummary.includes('Instalación Dispensador: $0'), 'operador carrito: instalación dispensador $0');
   assert(userSummary.includes('Traslados (Lo Prado): $0'), 'operador carrito: traslados Lo Prado $0');
   assert(userSummary.includes('*TOTAL: $179.980*'), 'operador carrito: TOTAL calculado');
+
+  // Test caso reporte admin: 'Dispensador\n5L Caipiriña, 5L Mojito Maracuya, 5L piscola alto transparente'
+  const adminCaseSid = 'operator-admin-case@test.local';
+  resetSession(adminCaseSid);
+  const adminSess = getSession(adminCaseSid);
+  setOperatorKind(adminSess, 'event_reserva');
+  applyOperatorDraftPatch(adminSess, {
+    firstName: 'Marcos',
+    lastName: 'Muñoz',
+    email: 'mandres1mt@gmail.com',
+    phone: '+5695303084',
+    comuna: 'Quilicura',
+    date: '30-11-2026',
+    eventoFormato: 'Dispensador Portátil',
+    guests: 30,
+    address: 'Icalma 394, Quilicura',
+    startTime: '22:00',
+    pickupNextDay: true,
+    pickupTime: '12:00 a 14:00'
+  });
+  adminSess.currentState = 'OPERADOR_CAPTURA_PRODUCTOS';
+  saveSession(adminCaseSid, adminSess);
+
+  const adminProductsReply = await processMessage(
+    adminCaseSid,
+    'Dispensador\n5L Caipiriña, 5L Mojito Maracuya, 5L piscola alto transparente',
+    { operatorMode: true }
+  );
+  const sessAfterAdminProd = getSession(adminCaseSid);
+  assert(sessAfterAdminProd.currentState === 'OPERADOR_CONFIRMAR', 'operador caso admin: avanza a CONFIRMAR');
+  assert(sessAfterAdminProd.operatorDraft.guests === 30, 'operador caso admin: invitados no se corrompen');
+  assert(sessAfterAdminProd.operatorDraft.products.length === 3, 'operador caso admin: 3 productos');
+  const prods = sessAfterAdminProd.operatorDraft.products;
+  const caipi = prods.find((p) => p.name.includes('Caipiriña'));
+  const mojito = prods.find((p) => p.name.includes('Mojito Maracuyá'));
+  const piscola = prods.find((p) => p.name.includes('Piscola Alto Transparente'));
+  assert(caipi && caipi.quantity === 1 && caipi.litrage === '5L', 'operador caso admin: 1x Caipiriña 5L');
+  assert(mojito && mojito.quantity === 1 && mojito.litrage === '5L', 'operador caso admin: 1x Mojito Maracuyá 5L');
+  assert(piscola && piscola.quantity === 1 && piscola.litrage === '5L', 'operador caso admin: 1x Piscola Alto Transparente 5L');
+
+  // Test corrección global: 'No son 5 productos de cada uno, es 1 solo por cóctel'
+  const adminCorrectionReply = await processMessage(
+    adminCaseSid,
+    'No son 5 productos de cada uno, es 1 solo por cóctel',
+    { operatorMode: true }
+  );
+  const sessAfterCorrection = getSession(adminCaseSid);
+  assert(sessAfterCorrection.operatorDraft.guests === 30, 'operador caso admin: corrección de cantidad no cambia invitados a 5');
+  assert(sessAfterCorrection.operatorDraft.products.every((p) => p.quantity === 1), 'operador caso admin: cantidad es 1 para todos los cócteles');
+
+  // Test extractGuestsFromMessage con precios y frases de productos
+  const { extractGuestsFromMessage } = await import('../src/logic/eventos-helpers.js');
+  const { findClosestCatalogMatch, preciosData: preciosCatalogData } = await import('../src/logic/utils.js');
+  assert(extractGuestsFromMessage('• 5x Caipiriña 5L: $349.950') === null, 'extractGuests: no extrae precio como invitados');
+  assert(extractGuestsFromMessage('No son 5 productos de cada uno, es 1 solo por cóctel') === null, 'extractGuests: no extrae productos como invitados');
+  assert(extractGuestsFromMessage('Total: $724.900') === null, 'extractGuests: no extrae total');
+
+  // Test findClosestCatalogMatch para piscola y variantes
+  const catalogTest = Object.keys(preciosCatalogData.cocteles || {});
+  assert(findClosestCatalogMatch('piscola', catalogTest) === 'Piscola Alto 35°', 'catalog: piscola -> Piscola Alto 35°');
+  assert(findClosestCatalogMatch('piscola alto transparente', catalogTest) === 'Piscola Alto Transparente 40°', 'catalog: piscola alto transparente -> Piscola Alto Transparente 40°');
+  assert(findClosestCatalogMatch('pisco', catalogTest) === 'Pisco Sour', 'catalog: pisco -> Pisco Sour');
 
   clearOperatorDraft(opSession);
   assert(!opSession.operatorKind, 'operador: clear borrador');

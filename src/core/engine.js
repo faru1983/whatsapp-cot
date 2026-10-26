@@ -651,7 +651,9 @@ async function processMessageUnlocked(sessionId, messageText, options = {}) {
 
   const canPrecheckFaq = !currentStateId.startsWith('OPERADOR_')
     && currentStateId !== 'CERRADO'
-    && currentStateId !== 'ESPERANDO_INTENCION';
+    && currentStateId !== 'ESPERANDO_INTENCION'
+    && !session.barrilesAwaitingDoubt
+    && !session.eventosAwaitingDoubt;
 
   const isQuestion = /\?/.test(messageText)
     || /^(como|cómo|donde|dónde|cuando|cuándo|quien|quién|porque|por\s*qu[eé]|que\s+es|qué\s+es|tienen|tienen\s+disponibilidad|cuanto|cuánto|cuesta|cuestan|vale|valen|hacen|realizan|despachan|envian|envían|van|llegan)\b/i.test(messageText.trim())

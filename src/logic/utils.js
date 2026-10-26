@@ -2258,22 +2258,49 @@ export function findClosestCatalogMatch(name, catalogNames) {
 	});
 	if (bestMatch) return bestMatch;
 
-	// 2) Palabra clave: "aperol" → Aperol Spritz, "margarita" → Tequila Margarita.
-	// NO substring dentro de otra palabra ("pero" ≠ Aperol).
+	// 1b) Match exacto ignorando graduación alcohólica (ej. "Piscola Alto Transparente 40°" → "piscola alto transparente")
 	bestMatch = catalogNames.find((c) => {
-		if (!cleanedNormName) return false;
-		const cleanedC = cleanName(c);
-		const cWords = cleanedC.split(/\s+/).filter(Boolean);
+		const normC = normalizeString(c).replace(/\s+\d+°?(\s+grados?)?$/i, '').trim();
+		return normC === normName || normC === cleanedNormName;
+	});
+	if (bestMatch) return bestMatch;
+
+	// 2) Palabra clave: "aperol" → Aperol Spritz, "margarita" → Tequila Margarita.
+	// 2a: Si es una sola palabra, buscar primero coincidencia de palabra EXACTA en el catálogo
+	// (evita que "piscola" caiga en "pisco sour" solo porque pisco sour está primero en el array).
+	if (cleanedNormName) {
 		const nWords = cleanedNormName.split(/\s+/).filter(Boolean);
 		if (nWords.length === 1) {
 			const t = nWords[0];
-			return cWords.some((w) => w === t
-				|| (t.length >= 4 && w.startsWith(t))
-				|| (w.length >= 4 && t.startsWith(w)));
+			bestMatch = catalogNames.find((c) => {
+				const cWords = cleanName(c).split(/\s+/).filter(Boolean);
+				return cWords.includes(t);
+			});
+			if (bestMatch) return bestMatch;
+
+			// Prefijos/sufijos solo si no hubo coincidencia exacta de palabra
+			bestMatch = catalogNames.find((c) => {
+				const cWords = cleanName(c).split(/\s+/).filter(Boolean);
+				return cWords.some((w) => {
+					if (t === 'piscola' && !w.startsWith('piscol')) return false;
+					if (w === 'pisco' && t.startsWith('piscol')) return false;
+					return (t.length >= 4 && w.startsWith(t)) || (w.length >= 4 && t.startsWith(w));
+				});
+			});
+			if (bestMatch) return bestMatch;
+		} else {
+			// Multi-palabra: "piscola alto transparente" contiene o es contenida por el nombre limpio
+			bestMatch = catalogNames.find((c) => {
+				const cleanedC = cleanName(c);
+				const cleanedCNoProof = cleanedC.replace(/\s+\d+°?(\s+grados?)?$/i, '').trim();
+				return cleanedC.includes(cleanedNormName)
+					|| cleanedNormName.includes(cleanedC)
+					|| cleanedCNoProof.includes(cleanedNormName)
+					|| cleanedNormName.includes(cleanedCNoProof);
+			});
+			if (bestMatch) return bestMatch;
 		}
-		return cleanedC.includes(cleanedNormName) || cleanedNormName.includes(cleanedC);
-	});
-	if (bestMatch) return bestMatch;
+	}
 
 	// 3) Levenshtein: nombre completo Y tokens distintivos (≥4 letras).
 	// Sin tokens, "ramazzoti" no alcanza a "ramazzotti spritz" (demasiado largo).

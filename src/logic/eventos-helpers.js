@@ -487,6 +487,16 @@ export function extractGuestsFromMessage(messageText) {
   // 4. Quitar litrajes (ej. 10L, 20 litros)
   clean = clean.replace(/\b\d+\s*(l|lt|lts|litros?)\b/gi, '');
 
+  // 5. Quitar precios y montos en pesos (ej. $349.950, $724.900, 349.950, $50000)
+  clean = clean.replace(/\$\s*[\d.]+/g, ' ');
+  clean = clean.replace(/\b\d{1,3}(?:\.\d{3})+(?:,\d+)?\b/g, ' ');
+
+  // 6. Quitar cantidades asociadas a productos / cócteles / barriles / formato
+  clean = clean.replace(/\b\d+\s*(?:x|×)\s*(?=[A-Za-záéíóúÁÉÍÓÚñÑ])/gi, ' ');
+  clean = clean.replace(/\b\d+\s*(?:productos?|c[oó]cteles?|sabores?|barriles?|dispensadores?|unidades?|botellas?|tragos?)\b/gi, ' ');
+  clean = clean.replace(/\b\d+\s*(?:solo\s*)?(?:por|de|cada)\s*(?:c[oó]ctel|producto|sabor|uno)\b/gi, ' ');
+  clean = clean.replace(/\b(?:no\s+son|no\s+es)\s+\d+\b/gi, ' ');
+
   // Primero buscar mención explícita de invitados (prioritario)
   const explicitMatch = clean.match(/\b(\d+)\s*(?:personas?|invitados?|pax|inv|pers\.?)\b/i);
   if (explicitMatch) {
@@ -817,15 +827,19 @@ export function matchCocktailNamesInText(messageText, catalogNames) {
   const sorted = [...catalogNames].sort((a, b) => b.length - a.length);
   for (const name of sorted) {
     const nameNorm = normalizeString(name);
-    if (!nameNorm || !norm.includes(nameNorm)) continue;
-    if (matched.some((m) => normalizeString(m).includes(nameNorm) || nameNorm.includes(normalizeString(m)))) {
+    if (!nameNorm) continue;
+    const nameNormNoProof = nameNorm.replace(/\s+\d+°?(\s+grados?)?$/i, '').trim();
+    const doesMatch = norm.includes(nameNorm) || (nameNormNoProof.length >= 4 && norm.includes(nameNormNoProof));
+    if (!doesMatch) continue;
+    const effectiveNorm = norm.includes(nameNorm) ? nameNorm : nameNormNoProof;
+    if (matched.some((m) => normalizeString(m).includes(effectiveNorm) || effectiveNorm.includes(normalizeString(m)))) {
       // Si ya hay uno más específico que contiene este, o viceversa, preferimos el más largo
       const worse = matched.findIndex((m) => {
         const mn = normalizeString(m);
-        return mn !== nameNorm && (mn.includes(nameNorm) || nameNorm.includes(mn));
+        return mn !== effectiveNorm && (mn.includes(effectiveNorm) || effectiveNorm.includes(mn));
       });
       if (worse >= 0) {
-        if (nameNorm.length > normalizeString(matched[worse]).length) matched[worse] = name;
+        if (effectiveNorm.length > normalizeString(matched[worse]).length) matched[worse] = name;
         continue;
       }
     }
@@ -837,6 +851,10 @@ export function matchCocktailNamesInText(messageText, catalogNames) {
   const covered = new Set();
   for (const m of matched) {
     for (const w of normalizeString(m).split(/\s+/)) {
+      if (w.length >= 3) covered.add(w);
+    }
+    const noProof = normalizeString(m).replace(/\s+\d+°?(\s+grados?)?$/i, '').trim();
+    for (const w of noProof.split(/\s+/)) {
       if (w.length >= 3) covered.add(w);
     }
   }
@@ -892,24 +910,31 @@ function findCatalogNameHits(messageText, catalogNames) {
   const used = new Array(norm.length).fill(false);
   const sorted = [...catalogNames].sort((a, b) => b.length - a.length);
 
-  // 1) Nombres completos del catálogo
+  // 1) Nombres completos del catálogo (con o sin graduación alcohólica como 35°, 40°)
   for (const name of sorted) {
     const nameNorm = normalizeString(name);
     if (!nameNorm || nameNorm.length < 3) continue;
-    let from = 0;
-    while (from < norm.length) {
-      const idx = norm.indexOf(nameNorm, from);
-      if (idx < 0) break;
-      const end = idx + nameNorm.length;
-      const free = used.slice(idx, end).every((u) => !u);
-      // Borde de palabra aproximado (evita match dentro de otra palabra)
-      const leftOk = idx === 0 || /[\s,;./+]/.test(norm[idx - 1]);
-      const rightOk = end >= norm.length || /[\s,;./+]/.test(norm[end]);
-      if (free && leftOk && rightOk) {
-        for (let i = idx; i < end; i++) used[i] = true;
-        hits.push({ name, index: idx, end });
+    const nameNormNoProof = nameNorm.replace(/\s+\d+°?(\s+grados?)?$/i, '').trim();
+    const candidates = [nameNorm];
+    if (nameNormNoProof && nameNormNoProof !== nameNorm && nameNormNoProof.length >= 4) {
+      candidates.push(nameNormNoProof);
+    }
+    for (const cand of candidates) {
+      let from = 0;
+      while (from < norm.length) {
+        const idx = norm.indexOf(cand, from);
+        if (idx < 0) break;
+        const end = idx + cand.length;
+        const free = used.slice(idx, end).every((u) => !u);
+        // Borde de palabra aproximado (evita match dentro de otra palabra)
+        const leftOk = idx === 0 || /[\s,;./+]/.test(norm[idx - 1]);
+        const rightOk = end >= norm.length || /[\s,;./+]/.test(norm[end]);
+        if (free && leftOk && rightOk) {
+          for (let i = idx; i < end; i++) used[i] = true;
+          hits.push({ name, index: idx, end });
+        }
+        from = idx + 1;
       }
-      from = idx + 1;
     }
   }
 
